@@ -214,12 +214,13 @@ export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candl
 }
 
 export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): Promise<Candle[]> {
-  const ordered = uniqueBy([...poolAddresses, ...SOL_USDC_POOLS], (p) => p).filter(Boolean);
+  const ordered = uniqueBy([...poolAddresses.filter(Boolean), ...SOL_USDC_POOLS], (p) => p);
   for (const pool of ordered) {
     const hit = ohlcvCache.get(pool);
     if (hit?.rows.length && Date.now() - hit.at < OHLCV_TTL_MS) return hit.rows;
   }
-  for (const pool of ordered.slice(0, 3)) {
+  const retry = uniqueBy([ordered[0], ...SOL_USDC_POOLS], (p) => p).filter(Boolean);
+  for (const pool of retry) {
     try {
       const rows = await fetchOhlcv(pool, limit);
       if (rows.length) return rows;
@@ -362,6 +363,7 @@ export async function loadMarket(force = false): Promise<{
     gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
       () => [] as TokenCandidate[],
     ),
+    fetchOhlcv(SOL_USDC_POOLS[0], 80).catch(() => [] as Candle[]),
   ]);
   const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
 

@@ -252,7 +252,7 @@ export async function runResearch(
     .map((x) => x.c);
   const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 22);
 
-  const scored = await mapPool(rankedSeed, 4, async (c) => {
+  const scored = await mapPool(rankedSeed, 2, async (c) => {
     try {
       const candles = await fetchOhlcv(c.poolAddress, 70);
       return scoreCandidate(c, snapshotTechnical(candles));
