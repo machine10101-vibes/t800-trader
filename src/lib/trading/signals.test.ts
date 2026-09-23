@@ -107,8 +107,8 @@ describe("indicators", () => {
     assert.equal(found.length, 0);
   });
 
-  it("buys a watchlist name from pool flow when the hour is only slightly red", () => {
-    const flow = (priceChangePct: number, buys = 52, sells = 48) => ({
+  it("buys a watchlist name only when the 15m is green", () => {
+    const flow = (priceChangePct: number, buys = 58, sells = 42) => ({
       buys,
       sells,
       buyers: 20,
@@ -116,7 +116,7 @@ describe("indicators", () => {
       volumeUsd: 10_000,
       priceChangePct,
     });
-    const token = {
+    const red = {
       symbol: "SOL",
       mint: "sol",
       poolAddress: "pool",
@@ -130,6 +130,20 @@ describe("indicators", () => {
         h1: flow(-0.6),
         h6: flow(-1),
         h24: flow(-1.5),
+      },
+    } as TokenCandidate;
+    assert.equal(buildFlowSignals(red, 67, true, { stance: "defensive", fearGreed: 71, solChange: -1.8 }).length, 0);
+    const token = {
+      ...red,
+      symbol: "JUP",
+      mint: "jup",
+      flows: {
+        m5: flow(0.25),
+        m15: flow(0.45),
+        m30: flow(0.3),
+        h1: flow(0.8),
+        h6: flow(0.4),
+        h24: flow(1.1),
       },
     } as TokenCandidate;
     const found = buildFlowSignals(token, 67, true, { stance: "defensive", fearGreed: 71, solChange: -1.8 });

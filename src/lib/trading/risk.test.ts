@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, sizePosition } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Signal } from "../types";
 
@@ -313,6 +313,82 @@ describe("risk", () => {
     });
     assert.ok(defensive.notional >= 1);
     assert.ok(defensive.notional <= 5 * 0.6);
+  });
+
+  it("keeps a micro book on one ticket", () => {
+    const signal = {
+      id: "s6",
+      mint: "jup",
+      symbol: "JUP",
+      poolAddress: "pool",
+      sector: "DEX",
+      side: "long",
+      reason: "reclaim",
+      confidence: 74,
+      price: 1,
+      stopPct: 1.4,
+      targetPct: 2.8,
+      thesis: "t",
+      researchScore: 70,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    const held = {
+      id: "p",
+      mint: "sol",
+      symbol: "SOL",
+      poolAddress: "p",
+      sector: "L1",
+      side: "long" as const,
+      qty: 1,
+      entryPrice: 1,
+      markPrice: 1,
+      stopPrice: 0.98,
+      targetPrice: 1.03,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "reclaim" as const,
+      researchScore: 70,
+      highWater: 1,
+      lowWater: 1,
+      notional: 2,
+      initialStop: 0.98,
+      scaled: false,
+    };
+    const reason = canOpen({
+      positions: [held],
+      signal,
+      config: DEFAULT_CONFIG,
+      portfolio: portfolio({ cashUsd: 4, equityUsd: 6, peakEquity: 6, dayStartEquity: 6 }),
+      stance: "defensive",
+    });
+    assert.equal(reason, "Micro book rides one ticket");
+  });
+
+  it("scratches a long when 5m and 15m both flip and the trade is not working", () => {
+    const pos = {
+      id: "p",
+      mint: "m",
+      symbol: "JUP",
+      poolAddress: "x",
+      sector: "DEX" as const,
+      side: "long" as const,
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 99.8,
+      stopPrice: 98,
+      targetPrice: 103,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "reclaim" as const,
+      researchScore: 70,
+      highWater: 100,
+      lowWater: 99.8,
+      notional: 99.8,
+      initialStop: 98,
+      scaled: false,
+    };
+    assert.equal(shouldScratch(pos, -0.8, -1.4), true);
+    assert.equal(shouldScratch({ ...pos, markPrice: 101.2, highWater: 101.2 }, -0.8, -1.4), false);
   });
 
   it("rolls yesterday's loss cap so a new session can trade", () => {

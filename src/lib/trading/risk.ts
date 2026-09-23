@@ -93,6 +93,7 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (positions.length >= config.maxPositions) return "Max positions reached";
+  if (isMicroBook(portfolio.equityUsd) && positions.length >= 1) return "Micro book rides one ticket";
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
@@ -107,7 +108,9 @@ export function canOpen(args: {
   if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
     return "Meme cluster capped off risk-on";
   }
-  const lastStop = trades.find((t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time"));
+  const lastStop = trades.find(
+    (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
+  );
   if (lastStop && Date.now() - Date.parse(lastStop.at) < COOLDOWN_MS) {
     return "Cooldown after a stop/time-out on this mint";
   }
@@ -168,6 +171,12 @@ export function rollSession(portfolio: Portfolio, now = new Date()): Portfolio {
     dayStartEquity: portfolio.equityUsd,
     dayPnlUsd: 0,
   };
+}
+
+export function shouldScratch(position: Position, m5: number, m15: number): boolean {
+  if (position.side !== "long") return false;
+  if (rMultiple(position) >= 0.25) return false;
+  return m15 <= -1.2 && m5 <= -0.6;
 }
 
 export function shouldFlattenMeme(position: Position, stance: MarketRegime["stance"]): boolean {

@@ -13,6 +13,7 @@ import {
   MIN_TICKET_USD,
   rollSession,
   shouldFlattenMeme,
+  shouldScratch,
   sizePosition,
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
@@ -60,6 +61,12 @@ export async function tickBot(): Promise<AppState> {
         if (plan.scale) {
           next = scaleOut(next, pos.id, 0.5);
         }
+      }
+      for (const pos of [...next.positions]) {
+        const live = byMint.get(pos.mint);
+        if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
+        next = closePosition(next, pos.id, pos.markPrice, "time");
+        closed += 1;
       }
       next = markBook(next, priceMap(next, marks));
 

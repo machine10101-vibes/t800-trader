@@ -314,36 +314,39 @@ export function buildFlowSignals(
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
   if (h1 <= -6 || m15 <= -4 || m5 <= -3.5 || solDump) return [];
-  if (token.sector === "Meme" && (defensive || (fearGreed !== null && fearGreed >= 75))) return [];
+  if (token.sector === "Meme" && (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))) return [];
   if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
 
-  const held =
+  const aligned =
     token.watchlist &&
-    h1 > (defensive ? -3.5 : -2) &&
-    h1 < 9 &&
-    m15 > (defensive ? -2.2 : -1.2) &&
-    m15 < 7 &&
-    tape >= (defensive ? 0.45 : 0.48);
+    m15 >= (defensive ? 0.1 : 0.15) &&
+    m15 < (defensive ? 5 : 6) &&
+    m5 > (defensive ? -0.2 : -0.15) &&
+    h1 > (defensive ? -1 : -0.4) &&
+    h1 < (defensive ? 6 : 8) &&
+    tape >= (defensive ? 0.51 : 0.5);
   const impulse =
     !defensive &&
     token.sector !== "Meme" &&
-    m15 > 0.55 &&
-    m5 > -0.3 &&
-    h1 > -0.8 &&
-    h1 < 12 &&
-    tape >= 0.52;
-  if (!held && !impulse) return [];
+    m15 > 0.7 &&
+    m5 > 0.05 &&
+    h1 > 0 &&
+    h1 < 10 &&
+    tape >= 0.53;
+  if (!aligned && !impulse) return [];
 
-  const stopPct = clamp(1.35 + Math.abs(Math.min(m15, 0)) * 0.35 + (defensive ? 0.2 : 0), 1.2, 3.1);
-  const rr = withMinRR(stopPct, stopPct * 1.7);
+  const stopPct = clamp(1.25 + (defensive ? 0.15 : 0), 1.2, 2.6);
+  const rr = withMinRR(stopPct, stopPct * 1.8);
   const confidence = clamp(
-    61 +
-      (token.watchlist ? 5 : 0) +
-      (tape - 0.5) * 22 +
-      Math.max(h1, 0) * 0.5 +
-      (researchScore !== null ? (researchScore - 55) * 0.12 : 0),
+    58 +
+      (token.watchlist ? 4 : 0) +
+      (m15 > 0.15 ? 6 : 0) +
+      (m5 > 0 ? 4 : 0) +
+      (h1 > 0 ? 4 : 0) +
+      (tape - 0.5) * 18 +
+      (researchScore !== null ? (researchScore - 55) * 0.1 : 0),
     60,
-    86,
+    90,
   );
   const reason: Signal["reason"] = impulse && m15 >= 1.2 ? "breakout" : "reclaim";
   const side: Signal["side"] = "long";
@@ -361,7 +364,7 @@ export function buildFlowSignals(
       reason,
       confidence,
       ...rr,
-      thesis: `${token.symbol} pool flow is tradable on a ${stance} tape — 15m ${m15.toFixed(2)}%, 1h ${h1.toFixed(2)}%, buy share ${(tape * 100).toFixed(0)}%. Sized from the wallet, not from a candle feed.`,
+      thesis: `${token.symbol} 5m/15m/1h agree on a ${stance} tape — 15m ${m15.toFixed(2)}%, 1h ${h1.toFixed(2)}%, buy share ${(tape * 100).toFixed(0)}%. One ticket, sized from the wallet.`,
     },
   ].filter((s) => rewardToRisk(s.stopPct, s.targetPct) >= 1.6);
 }
