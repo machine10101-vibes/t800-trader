@@ -1,5 +1,5 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
-import { fetchJson, hoursSince, num, nullableNum, settled, uniqueBy } from "@/lib/utils";
+import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
 import { classifySector, isQuote, isStable, SOL_MINT, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
@@ -140,8 +140,8 @@ async function gtPools(path: string, source: string): Promise<TokenCandidate[]> 
 }
 
 async function watchlistPools(): Promise<TokenCandidate[]> {
-  const results = await Promise.allSettled(
-    WATCHLIST.slice(0, 12).map(async (t) => {
+  const results = await mapPool(WATCHLIST.slice(0, 12), 3, async (t) => {
+    try {
       const pools = await gtPools(
         `networks/solana/tokens/${t.mint}/pools?page=1`,
         `geckoterminal:token:${t.symbol}`,
@@ -149,9 +149,11 @@ async function watchlistPools(): Promise<TokenCandidate[]> {
       return pools
         .filter((p) => p.mint === t.mint)
         .map((p) => ({ ...p, watchlist: true, symbol: t.symbol, name: t.name, sector: t.sector }));
-    }),
-  );
-  const pools = settled(results).flat();
+    } catch {
+      return [] as TokenCandidate[];
+    }
+  });
+  const pools = results.flat();
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
     const prev = best.get(p.mint);
@@ -309,15 +311,15 @@ export async function loadMarket(force = false): Promise<{
     return { candidates: cache.candidates, regime: cache.regime, scanned: cache.candidates.length };
   }
 
-  const [regime, trending, newPools, topVol, watch] = await Promise.all([
+  const [regime, trending, newPools, topVol] = await Promise.all([
     fetchRegime(),
     gtPools("networks/solana/trending_pools?page=1", "geckoterminal:trending").catch(() => [] as TokenCandidate[]),
     gtPools("networks/solana/new_pools?page=1", "geckoterminal:new").catch(() => [] as TokenCandidate[]),
     gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
       () => [] as TokenCandidate[],
     ),
-    watchlistPools().catch(() => [] as TokenCandidate[]),
   ]);
+  const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
 
   const candidates = mergeCandidates([watch, trending, topVol, newPools]);
   cache = { at: Date.now(), candidates, regime };

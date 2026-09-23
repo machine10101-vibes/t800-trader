@@ -1,7 +1,7 @@
 import { fetchOhlcv, loadMarket } from "@/lib/market/providers";
 import type { BotConfig, Catalyst, MarketRegime, ResearchThesis, ScoredCandidate, TokenCandidate } from "@/lib/types";
 import { snapshotTechnical } from "@/lib/trading/signals";
-import { usd } from "@/lib/utils";
+import { mapPool, usd } from "@/lib/utils";
 import { scoreCandidate, screenCandidate } from "./scoring";
 
 function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number, maxUnknown: number): boolean {
@@ -252,27 +252,23 @@ export async function runResearch(
     .map((x) => x.c);
   const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 22);
 
-  const scored: ScoredCandidate[] = [];
-  await Promise.all(
-    rankedSeed.map(async (c) => {
-      try {
-        const candles = await fetchOhlcv(c.poolAddress, 70);
-        const technical = snapshotTechnical(candles);
-        scored.push(scoreCandidate(c, technical));
-      } catch {
-        scored.push(scoreCandidate(c, {
-          rsi14: null,
-          ema9: null,
-          ema21: null,
-          vwap: null,
-          atrPct: null,
-          volumeZ: null,
-          lastClose: c.priceUsd,
-          extensionPct: null,
-        }));
-      }
-    }),
-  );
+  const scored = await mapPool(rankedSeed, 4, async (c) => {
+    try {
+      const candles = await fetchOhlcv(c.poolAddress, 70);
+      return scoreCandidate(c, snapshotTechnical(candles));
+    } catch {
+      return scoreCandidate(c, {
+        rsi14: null,
+        ema9: null,
+        ema21: null,
+        vwap: null,
+        atrPct: null,
+        volumeZ: null,
+        lastClose: c.priceUsd,
+        extensionPct: null,
+      });
+    }
+  });
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);

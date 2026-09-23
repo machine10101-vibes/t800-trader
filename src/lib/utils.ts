@@ -94,31 +94,57 @@ export function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
 
 export async function fetchJson<T>(
   url: string,
-  opts?: { timeoutMs?: number; headers?: Record<string, string> },
+  opts?: { timeoutMs?: number; headers?: Record<string, string>; retries?: number },
 ): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? 12_000);
-  try {
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      ...opts?.headers,
-    };
-    // Browsers forbid User-Agent and a custom UA trips CORS preflight on public feeds.
-    if (typeof window === "undefined") {
-      headers["User-Agent"] = "t800-trader/0.1";
+  const retries = opts?.retries ?? 3;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? 12_000);
+    try {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...opts?.headers,
+      };
+      // Browsers forbid User-Agent and a custom UA trips CORS preflight on public feeds.
+      if (typeof window === "undefined") {
+        headers["User-Agent"] = "t800-trader/0.1";
+      }
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        cache: "no-store",
+        headers,
+      });
+      if (res.status === 429 || res.status >= 500) {
+        throw new Error(`${res.status} ${res.statusText} for ${url}`);
+      }
+      if (!res.ok) {
+        throw new Error(`${res.status} ${res.statusText} for ${url}`);
+      }
+      return (await res.json()) as T;
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries - 1) {
+        await sleep(400 * 2 ** attempt + Math.floor(Math.random() * 200));
+      }
+    } finally {
+      clearTimeout(timer);
     }
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      cache: "no-store",
-      headers,
-    });
-    if (!res.ok) {
-      throw new Error(`${res.status} ${res.statusText} for ${url}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastError instanceof Error ? lastError : new Error(`Failed ${url}`);
+}
+
+export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 export function settled<T>(results: PromiseSettledResult<T>[]): T[] {
