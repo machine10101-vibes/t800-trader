@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, consecutiveLosses, dayLossBreached, managePosition, sizePosition } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Signal } from "../types";
 
@@ -253,6 +253,66 @@ describe("risk", () => {
       { action: "close", pnlUsd: 9 } as never,
     ]);
     assert.equal(n, 2);
+  });
+
+  it("lets a $5 wallet open and sizes a $6 book above the ticket floor", () => {
+    const signal = {
+      id: "s5",
+      mint: "sol",
+      symbol: "SOL",
+      poolAddress: "pool",
+      sector: "L1",
+      side: "long",
+      reason: "breakout",
+      confidence: 80,
+      price: 140,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 70,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    const five = canOpen({
+      positions: [],
+      signal,
+      config: DEFAULT_CONFIG,
+      portfolio: portfolio({ cashUsd: 5, equityUsd: 5, peakEquity: 5, dayStartEquity: 5 }),
+      stance: "risk-on",
+    });
+    assert.equal(five, null);
+
+    const four = canOpen({
+      positions: [],
+      signal,
+      config: DEFAULT_CONFIG,
+      portfolio: portfolio({ cashUsd: 4, equityUsd: 4, peakEquity: 4, dayStartEquity: 4 }),
+      stance: "risk-on",
+    });
+    assert.equal(four, "Insufficient cash");
+
+    const sized = sizePosition({
+      equity: 6,
+      price: 140,
+      stopPct: 2,
+      config: DEFAULT_CONFIG,
+      regime: regime("risk-on"),
+      researchScore: 70,
+      confidence: 80,
+    });
+    assert.ok(sized.notional >= MIN_TICKET_USD);
+    assert.ok(sized.notional <= 6 * cashConcentration(6));
+    assert.ok(sized.qty > 0);
+
+    const defensive = sizePosition({
+      equity: 5,
+      price: 140,
+      stopPct: 6,
+      config: DEFAULT_CONFIG,
+      regime: regime("defensive"),
+      researchScore: 50,
+    });
+    assert.ok(defensive.notional >= 1);
+    assert.ok(defensive.notional <= 5 * 0.6);
   });
 
   it("moves a winner to breakeven and asks to scale at 1R", () => {

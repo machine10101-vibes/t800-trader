@@ -1,4 +1,5 @@
 import type { AppState, BotConfig } from "@/lib/types";
+import { MIN_TRADE_USD } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
   startingEquity: 0,
@@ -81,12 +82,35 @@ function writeBrowserState(wallet: string, next: AppState): void {
   }
 }
 
+export function isIdleEmptyBook(state: AppState): boolean {
+  return (
+    state.positions.length === 0 &&
+    state.trades.length === 0 &&
+    state.portfolio.cashUsd < MIN_TRADE_USD &&
+    state.portfolio.equityUsd < MIN_TRADE_USD
+  );
+}
+
+export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppState {
+  if (!isIdleEmptyBook(state)) return state;
+  if (liveEquityUsd < MIN_TRADE_USD) return state;
+  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+}
+
 export async function attachWallet(address: string, liveEquityUsd: number): Promise<AppState> {
-  if (activeWallet === address && memory) return memory;
+  if (activeWallet === address && memory) {
+    const next = seedFromLiveEquity(memory, liveEquityUsd);
+    if (next !== memory) {
+      memory = next;
+      writeBrowserState(address, memory);
+    }
+    return memory;
+  }
   activeWallet = address;
   const loaded = readBrowserState(address);
   if (loaded) {
-    memory = loaded;
+    memory = seedFromLiveEquity(loaded, liveEquityUsd);
+    writeBrowserState(address, memory);
     return memory;
   }
   memory = emptyState({ ...DEFAULT_CONFIG, startingEquity: Math.max(0, liveEquityUsd) });

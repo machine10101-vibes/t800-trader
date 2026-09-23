@@ -3,7 +3,17 @@ import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, MarketRegime, Signal } from "@/lib/types";
 import { emptyState, mutateState } from "@/lib/store";
-import { canOpen, consecutiveLosses, dayLossBreached, dayLossUsedPct, managePosition, shouldFlattenMeme, sizePosition } from "./risk";
+import {
+  canOpen,
+  cashConcentration,
+  consecutiveLosses,
+  dayLossBreached,
+  dayLossUsedPct,
+  managePosition,
+  MIN_TICKET_USD,
+  shouldFlattenMeme,
+  sizePosition,
+} from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { buildSignals, snapshotTechnical } from "./signals";
 
@@ -107,12 +117,13 @@ export async function tickBot(): Promise<AppState> {
                   dayUsed: dayLossUsedPct(next.portfolio, next.config),
                 })
               : { qty: 0, notional: 0 };
+            const cashCap = cashConcentration(next.portfolio.equityUsd);
             if (!token) {
               blocked.push(`${signal.symbol}: missing live mark`);
-            } else if (sized.notional < 20 || sized.qty <= 0) {
-              blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(0)} too small`);
-            } else if (sized.notional > next.portfolio.cashUsd * 0.35) {
-              blocked.push(`${signal.symbol}: would concentrate more than 35% cash`);
+            } else if (sized.notional < MIN_TICKET_USD || sized.qty <= 0) {
+              blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(2)} too small`);
+            } else if (sized.notional > next.portfolio.cashUsd * cashCap) {
+              blocked.push(`${signal.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
             } else {
               next = openPosition(next, signal, sized.qty);
               opened += 1;

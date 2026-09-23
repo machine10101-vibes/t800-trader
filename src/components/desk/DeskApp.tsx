@@ -14,7 +14,7 @@ import {
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { rMultiple } from "@/lib/trading/risk";
+import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
 type Tab = "overview" | "radar" | "bot" | "book" | "risk";
@@ -137,7 +137,10 @@ export function DeskApp() {
     if (!wallet) return;
     const id = setInterval(() => {
       void refreshWallet(wallet)
-        .then(setWallet)
+        .then(async (session) => {
+          setWallet(session);
+          await attachWallet(session.address, session.equityUsd);
+        })
         .catch(() => undefined);
     }, 30_000);
     return () => clearInterval(id);
@@ -246,12 +249,23 @@ export function DeskApp() {
       setError("Connect a Solana wallet to trade.");
       return;
     }
-    if (action === "start" && wallet.equityUsd <= 0) {
-      setError("Wallet has no priced SOL/USDC. Fund it, then arm.");
-      return;
-    }
     setBusy(true);
     try {
+      if (action === "start" || action === "reset") {
+        const session = await refreshWallet(wallet);
+        setWallet(session);
+        if (action === "start" && session.equityUsd < MIN_TRADE_USD) {
+          setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
+          return;
+        }
+        if (action === "start") await attachWallet(session.address, session.equityUsd);
+        applyDesk(await controlBot(action));
+        if (action === "reset") {
+          await attachWallet(session.address, session.equityUsd);
+          applyDesk(await loadDesk());
+        }
+        return;
+      }
       applyDesk(await controlBot(action));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
@@ -303,7 +317,7 @@ export function DeskApp() {
           <h1 className="mt-3 text-4xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
             No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real
-            SOL and USDC and sizes the book from that.
+            SOL and USDC and sizes the book from that. A $5 wallet is enough to open.
           </p>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
@@ -749,7 +763,7 @@ function Overview({
         <div className="neon p-5">
           <Label>Execution log</Label>
           {desk.trades.length === 0 && desk.signals.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No live tickets yet. Arm only after the wallet book is funded.</p>
+            <p className="text-sm text-[var(--muted)]">No live tickets yet. Fund at least $5 of priced SOL/USDC, then arm.</p>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
               {desk.trades.slice(0, 12).map((t) => (
@@ -1089,8 +1103,9 @@ function RiskView({
       <div className="neon p-6">
         <h2 className="text-2xl font-medium">Risk is the product</h2>
         <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-          The book starts from the connected wallet&apos;s live SOL/USDC mark, not a demo $10,000. The bot refuses a fifth
-          position, refuses a second ticket in the same mint, and goes flat-risk when the daily loss cap is hit.
+          The book starts from the connected wallet&apos;s live SOL/USDC mark, not a demo $10,000. A $5 wallet is enough to
+          open. The bot refuses a fifth position, refuses a second ticket in the same mint, and goes flat-risk when the
+          daily loss cap is hit.
         </p>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
           <Slider label="Risk per trade" suffix="%" min={0.3} max={2.5} step={0.1} value={local.maxRiskPerTradePct} onChange={(v) => setLocal({ ...local, maxRiskPerTradePct: v })} />

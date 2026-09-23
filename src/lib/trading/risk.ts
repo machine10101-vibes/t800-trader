@@ -1,5 +1,27 @@
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 
+/** Smallest wallet the desk will arm and open against. */
+export const MIN_TRADE_USD = 5;
+/** Smallest ticket the execution loop will send. */
+export const MIN_TICKET_USD = 1;
+/** Books below this use micro sizing so a $5–$6 wallet can actually fill. */
+export const MICRO_BOOK_USD = 50;
+
+export function isMicroBook(equity: number): boolean {
+  return equity > 0 && equity < MICRO_BOOK_USD;
+}
+
+export function cashConcentration(equity: number): number {
+  return isMicroBook(equity) ? 0.92 : 0.35;
+}
+
+export function sizeCapPct(equity: number, stance: MarketRegime["stance"]): number {
+  if (isMicroBook(equity)) {
+    return stance === "defensive" ? 0.6 : stance === "mixed" ? 0.78 : 0.92;
+  }
+  return stance === "defensive" ? 0.08 : stance === "mixed" ? 0.14 : 0.2;
+}
+
 export function dayLossBreached(portfolio: Portfolio, config: BotConfig): boolean {
   const dd = ((portfolio.dayStartEquity - portfolio.equityUsd) / Math.max(portfolio.dayStartEquity, 1)) * 100;
   return dd >= config.dailyLossLimitPct;
@@ -51,8 +73,10 @@ export function sizePosition(args: {
 
   const riskUsd = equity * (riskPct / 100);
   const stopFrac = stopPct / 100;
-  const capPct = regime.stance === "defensive" ? 0.08 : regime.stance === "mixed" ? 0.14 : 0.2;
-  const notional = Math.min(riskUsd / stopFrac, equity * capPct);
+  const capPct = sizeCapPct(equity, regime.stance);
+  const raw = riskUsd / stopFrac;
+  const floor = isMicroBook(equity) ? Math.min(equity * 0.45, equity * capPct) : 0;
+  const notional = Math.min(Math.max(raw, floor), equity * capPct);
   const qty = notional / price;
   return { qty, notional };
 }
@@ -72,7 +96,7 @@ export function canOpen(args: {
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
-  if (portfolio.cashUsd < 25) return "Insufficient cash";
+  if (portfolio.cashUsd < MIN_TRADE_USD) return "Insufficient cash";
   if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < 70) {
     return "Breakouts need a 70+ score when defensive";
