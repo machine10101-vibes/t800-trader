@@ -42,7 +42,7 @@ export function Stat({
   const color =
     tone === "mint" ? "text-[var(--mint)]" : tone === "crimson" ? "text-[var(--crimson)]" : tone === "amber" ? "text-[var(--amber)]" : "";
   return (
-    <div className="neon hairline rounded-none p-4">
+    <div className="neon hairline p-4">
       <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">{label}</div>
       <div className={`mt-2 text-2xl num ${color}`}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-[var(--muted)]">{sub}</div> : null}
@@ -89,10 +89,10 @@ export function Spark({ values, up }: { values: number[]; up?: boolean }) {
       return `${x},${y}`;
     })
     .join(" ");
-  const color = up === false || (up === undefined && values[values.length - 1] < values[0]) ? "#ff3b4a" : "#3ee8a8";
+  const color = up === false || (up === undefined && values[values.length - 1] < values[0]) ? "#ff3b8f" : "#3ee8a8";
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-9 w-28">
-      <polyline fill="none" stroke={color} strokeWidth="2" points={pts} />
+      <polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" points={pts} />
     </svg>
   );
 }

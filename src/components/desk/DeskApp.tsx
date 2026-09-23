@@ -2,8 +2,16 @@
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { attachWallet, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
-import { fetchOhlcv } from "@/lib/market/providers";
-import { connectWallet, disconnectWallet, walletInstalled, type WalletSession } from "@/lib/solana/wallet";
+import { fetchOhlcvFromPools } from "@/lib/market/providers";
+import {
+  connectWallet,
+  detectedWalletName,
+  disconnectWallet,
+  listenWallet,
+  refreshWallet,
+  walletInstalled,
+  type WalletSession,
+} from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,11 +39,18 @@ export function DeskApp() {
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [focusMint, setFocusMint] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
   const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
     setError(null);
+    setUpdatedAt(next.generatedAt);
     setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
+    setFocusMint((cur) => {
+      if (cur && next.research.some((r) => r.candidate.mint === cur)) return cur;
+      return next.research[0]?.candidate.mint ?? null;
+    });
   }, []);
 
   const refresh = useCallback(async () => {
@@ -72,11 +87,37 @@ export function DeskApp() {
     setThesis(null);
     setCandles([]);
     setError(null);
+    setBooting(false);
   }, [wallet]);
 
   useEffect(() => {
     void connect(true);
   }, [connect]);
+
+  useEffect(() => {
+    if (!wallet) return;
+    return listenWallet(wallet.provider, {
+      onDisconnect: () => {
+        detachWallet();
+        setWallet(null);
+        setDesk(null);
+      },
+      onAccountChanged: (address) => {
+        if (!address) {
+          void disconnect();
+          return;
+        }
+        void (async () => {
+          detachWallet();
+          const session = await refreshWallet({ ...wallet, address });
+          await attachWallet(session.address, session.equityUsd);
+          setWallet(session);
+          setBooting(true);
+          setDesk(null);
+        })();
+      },
+    });
+  }, [disconnect, wallet]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -86,6 +127,16 @@ export function DeskApp() {
   }, [refresh, wallet]);
 
   useEffect(() => {
+    if (!wallet) return;
+    const id = setInterval(() => {
+      void refreshWallet(wallet)
+        .then(setWallet)
+        .catch(() => undefined);
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [wallet]);
+
+  useEffect(() => {
     const tick = () => setClock(new Date().toLocaleTimeString());
     tick();
     const id = setInterval(tick, 1000);
@@ -93,23 +144,31 @@ export function DeskApp() {
   }, []);
 
   useEffect(() => {
-    const pool = desk?.research[0]?.candidate.poolAddress;
-    if (!pool) {
+    const pools = [
+      desk?.research.find((r) => r.candidate.mint === focusMint)?.candidate.poolAddress,
+      ...(desk?.research.map((r) => r.candidate.poolAddress) ?? []),
+    ].filter((p): p is string => Boolean(p));
+    if (!pools.length) {
       setCandles([]);
       return;
     }
     let live = true;
-    fetchOhlcv(pool, 80)
-      .then((rows) => {
-        if (live) setCandles(rows);
-      })
-      .catch(() => {
-        if (live) setCandles([]);
-      });
+    const pull = () => {
+      fetchOhlcvFromPools(pools, 80)
+        .then((rows) => {
+          if (live) setCandles(rows);
+        })
+        .catch(() => {
+          if (live) setCandles([]);
+        });
+    };
+    pull();
+    const id = setInterval(pull, 45_000);
     return () => {
       live = false;
+      clearInterval(id);
     };
-  }, [desk?.research]);
+  }, [desk?.research, focusMint]);
 
   useEffect(() => {
     if (!wallet || !desk?.bot.running) return;
@@ -126,6 +185,10 @@ export function DeskApp() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Escape") {
+        setThesis(null);
+        return;
+      }
       if (e.code !== "Space" || e.repeat || !wallet || !desk) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -175,54 +238,46 @@ export function DeskApp() {
   }, [desk]);
 
   const solRow = desk?.research.find((r) => r.ticker === "SOL");
-  const solPx = desk?.regime.sol.price || solRow?.price || 0;
+  const solPx = desk?.regime.sol.price || solRow?.price || wallet?.solPriceUsd || 0;
   const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
 
   if (!wallet) {
+    const detected = detectedWalletName();
     return (
-      <div className="grid min-h-screen place-items-center px-6">
-        <div className="neon boot-fade w-full max-w-lg p-8">
+      <div className="grid min-h-screen place-items-center px-6 py-10">
+        <div className="neon boot-fade w-full max-w-xl p-8 sm:p-10">
+          <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // Solana</div>
-          <h1 className="mt-3 text-4xl font-medium">Connect a wallet to arm the desk</h1>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-            No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real SOL
-            and USDC and sizes the book from that.
+          <h1 className="mt-3 text-4xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
+          <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+            No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real
+            SOL and USDC and sizes the book from that.
           </p>
+          <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
+            <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
+            <GateChip label="Wallet book" hint="SOL + USDC only" />
+            <GateChip label="Paper fills" hint="Simulated at the tape" />
+          </div>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
-          <button
-            disabled={walletBusy}
-            onClick={() => void connect(false)}
-            className="mt-6 w-full rounded-none bg-[var(--magenta)] px-5 py-3 text-sm font-medium text-black"
-          >
-            {walletBusy ? "Waiting on wallet…" : walletInstalled() ? "Connect Solana wallet" : "Install Phantom or Solflare"}
+          <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
+            {walletBusy ? "Waiting on wallet…" : detected ? `Connect ${detected}` : walletInstalled() ? "Connect Solana wallet" : "Install Phantom or Solflare"}
           </button>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
-            Fills stay simulated at live marks. The wallet is required so the account is yours, not a $10k dummy.
+            {detected ? `${detected} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
+            Fills stay simulated at live marks so the account is yours, not a $10k dummy.
           </p>
         </div>
       </div>
     );
   }
 
-  if (booting && !desk) {
+  if (!desk && !booting) {
     return (
       <div className="grid min-h-screen place-items-center px-6">
-        <div className="boot-fade text-center">
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // Live</div>
-          <h1 className="mt-3 text-4xl font-medium">Pulling live tape</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">Wallet {shortAddress(wallet.address)} · no demo payload.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!desk) {
-    return (
-      <div className="grid min-h-screen place-items-center px-6">
-        <div className="neon max-w-md p-6">
+        <div className="neon boot-fade max-w-md p-6">
           <div className="text-[var(--crimson)]">Desk offline</div>
           <p className="mt-2 text-sm text-[var(--muted)]">{error || "Live market payload failed."}</p>
-          <button className="mt-4 rounded-none bg-white px-4 py-2 text-sm text-black" onClick={() => void refresh()}>
+          <button className="btn btn-ink mt-4" onClick={() => void refresh()}>
             Retry
           </button>
         </div>
@@ -232,95 +287,191 @@ export function DeskApp() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.86)] backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1500px] items-center gap-4 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-none bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
-              T8
-            </div>
-            <div>
-              <div className="text-sm font-medium">T-800 Trader</div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">Live stream</div>
-            </div>
-          </div>
-          <div className="hidden items-center gap-5 md:flex">
-            <Ticker label="SOL" value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
-            <Ticker label="BTC" value={desk.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"} chg={desk.regime.btc.price ? desk.regime.btc.change24h : undefined} />
-            <Ticker label="ETH" value={desk.regime.eth.price ? priceFmt(desk.regime.eth.price) : "—"} chg={desk.regime.eth.price ? desk.regime.eth.change24h : undefined} />
-            {desk.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
-          </div>
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
-            <Pill tone={desk.bot.running ? "mint" : "default"}>
-              <span className={`pulse-dot ${desk.bot.running ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
-              {desk.bot.running ? "Armed" : "Standby"}
-            </Pill>
-            <div className="hidden text-right sm:block">
-              <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Wallet</div>
-              <div className="num">{usd(wallet.equityUsd)}</div>
-            </div>
-            <button onClick={() => void disconnect()} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
-              Disconnect
-            </button>
-            <div className="num hidden text-[var(--muted)] lg:block">{clock}</div>
-          </div>
-        </div>
-      </header>
+      <Header
+        desk={desk}
+        wallet={wallet}
+        clock={clock}
+        solPx={solPx}
+        solChg={solChg}
+        updatedAt={updatedAt}
+        onDisconnect={() => void disconnect()}
+        onRefresh={() => void refresh()}
+      />
 
-      <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[228px_1fr]">
         <aside className="neon h-fit p-3 lg:sticky lg:top-20">
           {NAV.map((item) => (
             <button
               key={item.id}
               aria-label={item.label}
+              data-active={tab === item.id}
               onClick={() => {
                 setTab(item.id);
                 setThesis(null);
-                window.scrollTo({ top: 0, behavior: "auto" });
+                window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              className={`mb-1 flex w-full items-center justify-between px-3 py-3 text-left ${
-                tab === item.id ? "bg-[rgba(255,74,216,0.08)]" : "hover:bg-[rgba(255,255,255,0.03)]"
-              }`}
+              className="nav-item mb-1 flex w-full items-center justify-between px-3 py-3 text-left hover:bg-[rgba(255,255,255,0.03)]"
             >
               <span>
                 <span className="mr-2 text-[11px] text-[var(--faint)]">{item.kicker}</span>
                 {item.label}
               </span>
-              {item.id === "bot" && desk.bot.running ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
+              {item.id === "bot" && desk?.bot.running ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
             </button>
           ))}
           <button
-            disabled={busy}
-            onClick={() => void control(desk.bot.running ? "stop" : "start")}
-            className={`mt-3 w-full px-3 py-3 text-sm font-medium ${
-              desk.bot.running ? "bg-[rgba(255,59,143,0.14)] text-[var(--crimson)]" : "bg-[var(--magenta)] text-black"
+            disabled={busy || !desk}
+            onClick={() => void control(desk?.bot.running ? "stop" : "start")}
+            className={`btn mt-3 w-full ${
+              desk?.bot.running ? "bg-[rgba(255,59,143,0.14)] text-[var(--crimson)]" : "btn-magenta"
             }`}
           >
-            {desk.bot.running ? "Disarm bot" : "Arm bot"}
+            {desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
           <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--faint)]">
-            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks.
+            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks. Space to arm.
           </p>
+          <button onClick={() => void disconnect()} className="mt-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
+            Disconnect
+          </button>
         </aside>
 
         <main className="min-w-0 space-y-5 pt-1">
           {error ? (
-            <div className="border border-[rgba(255,59,143,0.3)] bg-[rgba(255,59,143,0.08)] px-4 py-3 text-sm text-[var(--crimson)]">
+            <div className="rounded-[18px] border border-[rgba(255,59,143,0.3)] bg-[rgba(255,59,143,0.08)] px-4 py-3 text-sm text-[var(--crimson)]">
               {error}
             </div>
           ) : null}
 
-          {tab === "overview" ? (
-            <Overview desk={desk} wallet={wallet} candles={candles} winRate={winRate} onOpen={setThesis} onArm={() => void control("start")} />
-          ) : null}
-          {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
-          {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
-          {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} /> : null}
-          {tab === "risk" ? <RiskView desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
+          {!desk ? (
+            <BootSkeleton address={wallet.address} />
+          ) : (
+            <div key={tab} className="tab-in">
+              {tab === "overview" ? (
+                <Overview
+                  desk={desk}
+                  wallet={wallet}
+                  candles={candles}
+                  winRate={winRate}
+                  focusMint={focusMint}
+                  onFocus={setFocusMint}
+                  onOpen={setThesis}
+                  onArm={() => void control("start")}
+                />
+              ) : null}
+              {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
+              {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
+              {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} /> : null}
+              {tab === "risk" ? <RiskView desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
+            </div>
+          )}
         </main>
       </div>
 
       {thesis ? <ThesisDrawer thesis={thesis} onClose={() => setThesis(null)} /> : null}
+    </div>
+  );
+}
+
+function GateChip({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] px-3 py-3">
+      <div className="text-xs font-medium text-[var(--text)]">{label}</div>
+      <div className="mt-1 text-[11px] text-[var(--faint)]">{hint}</div>
+    </div>
+  );
+}
+
+function Header({
+  desk,
+  wallet,
+  clock,
+  solPx,
+  solChg,
+  updatedAt,
+  onDisconnect,
+  onRefresh,
+}: {
+  desk: DeskPayload | null;
+  wallet: WalletSession;
+  clock: string;
+  solPx: number;
+  solChg?: number;
+  updatedAt: string | null;
+  onDisconnect: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] backdrop-blur-xl">
+      <div className="mx-auto flex max-w-[1500px] items-center gap-4 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
+            T8
+          </div>
+          <div>
+            <div className="text-sm font-medium">T-800 Trader</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">Live stream</div>
+          </div>
+        </div>
+        <div className="hidden items-center gap-5 md:flex">
+          <Ticker label="SOL" value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
+          <Ticker
+            label="BTC"
+            value={desk?.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"}
+            chg={desk?.regime.btc.price ? desk.regime.btc.change24h : undefined}
+          />
+          <Ticker
+            label="ETH"
+            value={desk?.regime.eth.price ? priceFmt(desk.regime.eth.price) : "—"}
+            chg={desk?.regime.eth.price ? desk.regime.eth.change24h : undefined}
+          />
+          {desk?.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
+        </div>
+        <div className="ml-auto flex items-center gap-3 text-sm">
+          <button onClick={onRefresh} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
+            Refresh
+          </button>
+          <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+          <Pill tone={desk?.bot.running ? "mint" : "default"}>
+            <span className={`pulse-dot ${desk?.bot.running ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
+            {desk?.bot.running ? "Armed" : "Standby"}
+          </Pill>
+          <div className="hidden text-right sm:block">
+            <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Wallet</div>
+            <div className="num">{usd(wallet.equityUsd)}</div>
+          </div>
+          <button onClick={onDisconnect} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
+            Disconnect
+          </button>
+          <div className="num hidden text-[var(--muted)] lg:block">{updatedAt ? new Date(updatedAt).toLocaleTimeString() : clock}</div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function BootSkeleton({ address }: { address: string }) {
+  return (
+    <div className="space-y-4 boot-fade">
+      <div className="text-sm text-[var(--muted)]">
+        Pulling live tape for <span className="num text-[var(--text)]">{shortAddress(address)}</span> — no demo payload.
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
+        <div className="neon h-44 p-5">
+          <div className="skel h-3 w-16" />
+          <div className="skel mt-6 h-10 w-32" />
+        </div>
+        <div className="neon h-44 p-3">
+          <div className="skel h-full w-full" />
+        </div>
+        <div className="neon h-44 p-5">
+          <div className="skel h-3 w-24" />
+          <div className="skel mt-6 h-10 w-20" />
+        </div>
+      </div>
+      <div className="neon h-56 p-3">
+        <div className="skel h-full w-full" />
+      </div>
     </div>
   );
 }
@@ -342,6 +493,8 @@ function Overview({
   wallet,
   candles,
   winRate,
+  focusMint,
+  onFocus,
   onOpen,
   onArm,
 }: {
@@ -349,13 +502,17 @@ function Overview({
   wallet: WalletSession;
   candles: Candle[];
   winRate: number;
+  focusMint: string | null;
+  onFocus: (mint: string) => void;
   onOpen: (t: ResearchThesis) => void;
   onArm: () => void;
 }) {
-  const focus = desk.research[0] ?? null;
+  const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
+  const curve = desk.equityCurve.map((p) => p.equity);
+  const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
   return (
-    <div className="space-y-4 boot-fade">
+    <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
         <section className="neon p-5">
           <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
@@ -366,12 +523,27 @@ function Overview({
           <div className="mt-2 text-sm">
             {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
           </div>
-          <button onClick={onArm} className="mt-5 w-full bg-[var(--magenta)] px-4 py-2 text-sm font-medium text-black">
+          {desk.research.length > 1 ? (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {desk.research.slice(0, 6).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => onFocus(r.candidate.mint)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] ${
+                    focus?.id === r.id ? "bg-[rgba(255,74,216,0.16)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  {r.ticker}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <button onClick={onArm} className="btn btn-magenta mt-5 w-full">
             Arm the bot
           </button>
         </section>
         <section className="neon p-3">
-          <Label>5m candles</Label>
+          <Label>{focus ? `${focus.ticker} tape` : "Live candles"}</Label>
           <div className="h-[168px]">
             <CandleChart candles={candles} />
           </div>
@@ -380,7 +552,7 @@ function Overview({
           <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]"># trades · live stream</div>
           <div className="mt-3 flex items-end justify-between">
             <div className="num text-4xl">{desk.portfolio.tradeCount}</div>
-            <Spark values={desk.equityCurve.map((p) => p.equity)} />
+            <Spark values={equitySeries} />
           </div>
           <div className="mt-3 text-xs text-[var(--muted)]">
             {desk.portfolio.winCount}W / {desk.portfolio.lossCount}L · hit {winRate.toFixed(0)}%
@@ -404,7 +576,7 @@ function Overview({
         <div className="neon p-3">
           <Label>Wallet equity curve</Label>
           <div className="h-[110px]">
-            <EquityPath values={desk.equityCurve.map((p) => p.equity)} />
+            <EquityPath values={equitySeries} />
           </div>
         </div>
         <div className="neon p-3">
@@ -464,7 +636,7 @@ function Overview({
               <button
                 key={r.id}
                 onClick={() => onOpen(r)}
-                className="flex w-full items-center justify-between border border-[var(--line)] px-3 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
+                className="flex w-full items-center justify-between rounded-xl border border-[var(--line)] px-3 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
               >
                 <span>
                   {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
@@ -481,7 +653,7 @@ function Overview({
 
 function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis) => void }) {
   return (
-    <div className="space-y-4 boot-fade">
+    <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
@@ -552,7 +724,7 @@ function BotView({
   onOpen: (t: ResearchThesis) => void;
 }) {
   return (
-    <div className="space-y-4 boot-fade">
+    <div className="space-y-4">
       <section className="neon p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -564,14 +736,10 @@ function BotView({
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              disabled={busy}
-              onClick={() => onControl(desk.bot.running ? "stop" : "start")}
-              className="bg-white px-5 py-2.5 text-sm font-medium text-black"
-            >
+            <button disabled={busy} onClick={() => onControl(desk.bot.running ? "stop" : "start")} className="btn btn-ink">
               {desk.bot.running ? "Disarm" : "Arm"}
             </button>
-            <button disabled={busy} onClick={() => onControl("tick")} className="border border-[var(--line-2)] px-5 py-2.5 text-sm">
+            <button disabled={busy} onClick={() => onControl("tick")} className="btn btn-ghost">
               Force tick
             </button>
           </div>
@@ -591,7 +759,7 @@ function BotView({
           ) : (
             <div className="space-y-3">
               {desk.signals.map((s) => (
-                <div key={s.id} className="border border-[var(--line)] p-3">
+                <div key={s.id} className="rounded-2xl border border-[var(--line)] p-3">
                   <div className="flex items-center justify-between">
                     <div className="font-medium">
                       {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side}</Pill>
@@ -611,7 +779,11 @@ function BotView({
           ) : (
             <div className="space-y-2">
               {desk.research.map((r) => (
-                <button key={r.id} onClick={() => onOpen(r)} className="flex w-full items-center justify-between px-2 py-2 hover:bg-[rgba(255,74,216,0.05)]">
+                <button
+                  key={r.id}
+                  onClick={() => onOpen(r)}
+                  className="flex w-full items-center justify-between rounded-xl px-2 py-2 hover:bg-[rgba(255,74,216,0.05)]"
+                >
                   <span>
                     {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
                   </span>
@@ -628,10 +800,11 @@ function BotView({
 
 function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSession; winRate: number }) {
   const curve = desk.equityCurve.map((p) => p.equity);
+  const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
   return (
-    <div className="space-y-4 boot-fade">
+    <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={curve} />} />
+        <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat label="Wallet mark" value={usd(wallet.equityUsd)} sub={`${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`} />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} />
       </div>
@@ -739,7 +912,7 @@ function RiskView({
   useEffect(() => setLocal(desk.config), [desk.config]);
 
   return (
-    <div className="space-y-4 boot-fade">
+    <div className="space-y-4">
       <div className="neon p-6">
         <h2 className="text-2xl font-medium">Risk is the product</h2>
         <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
@@ -763,10 +936,10 @@ function RiskView({
           </label>
         </div>
         <div className="mt-6 flex gap-2">
-          <button disabled={busy} onClick={() => onSave(local)} className="bg-white px-5 py-2.5 text-sm font-medium text-black">
+          <button disabled={busy} onClick={() => onSave(local)} className="btn btn-ink">
             Save policy
           </button>
-          <button disabled={busy} onClick={onReset} className="border border-[var(--line-2)] px-5 py-2.5 text-sm">
+          <button disabled={busy} onClick={onReset} className="btn btn-ghost">
             Reset wallet book
           </button>
         </div>
@@ -809,15 +982,18 @@ function Slider({
           {suffix ?? ""}
         </span>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-[var(--magenta)]" />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
     </label>
   );
 }
 
 function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/50" onClick={onClose}>
-      <aside className="desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onClose}>
+      <aside
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <Pill tone="magenta">{thesis.sector}</Pill>
@@ -854,7 +1030,7 @@ function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: ()
           <Label>Catalysts</Label>
           <div className="space-y-2">
             {thesis.catalysts.map((c) => (
-              <div key={c.title} className="border border-[var(--line)] p-3">
+              <div key={c.title} className="rounded-2xl border border-[var(--line)] p-3">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-medium">{c.title}</span>
                   <Pill tone={c.status === "confirmed" ? "mint" : "amber"}>{c.status}</Pill>

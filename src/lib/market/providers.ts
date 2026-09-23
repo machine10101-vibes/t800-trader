@@ -1,6 +1,7 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
-import { classifySector, isQuote, isStable, SOL_MINT, watchMeta, WATCHLIST } from "./universe";
+import { liveMajors } from "./marks";
+import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -185,15 +186,46 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
   return [...map.values()];
 }
 
-export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candle[]> {
-  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=${limit}`;
+async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour", aggregate: number, limit: number): Promise<Candle[]> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
   const json = await fetchJson<{
     data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 10_000 });
+  }>(url, { timeoutMs: 10_000, retries: 2 });
   const list = json.data?.attributes?.ohlcv_list ?? [];
   return list
     .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
     .sort((a, b) => a.time - b.time);
+}
+
+export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candle[]> {
+  for (const [timeframe, aggregate] of [
+    ["minute", 5],
+    ["minute", 15],
+    ["hour", 1],
+  ] as const) {
+    try {
+      const rows = await fetchOhlcvOnce(poolAddress, timeframe, aggregate, limit);
+      if (rows.length) return rows;
+    } catch {
+      // Try a coarser tape before giving up on this pool.
+    }
+  }
+  return [];
+}
+
+export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): Promise<Candle[]> {
+  const seen = new Set<string>();
+  for (const pool of [...poolAddresses, ...SOL_USDC_POOLS]) {
+    if (!pool || seen.has(pool)) continue;
+    seen.add(pool);
+    try {
+      const rows = await fetchOhlcv(pool, limit);
+      if (rows.length) return rows;
+    } catch {
+      // Next pool.
+    }
+  }
+  return [];
 }
 
 async function fetchRegime(): Promise<MarketRegime> {
@@ -210,30 +242,32 @@ async function fetchRegime(): Promise<MarketRegime> {
   ]);
 
   const px = prices.status === "fulfilled" ? prices.value : null;
+  const needFallback = !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(px?.solana?.usd);
+  const fallback = needFallback ? await liveMajors().catch(() => null) : null;
   const g = global.status === "fulfilled" ? global.value.data : null;
   const fear = fng.status === "fulfilled" ? fng.value.data?.[0] : null;
   const chainList = chains.status === "fulfilled" ? chains.value : [];
   const solChain = chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
-  const btcPx = nullableNum(px?.bitcoin?.usd);
-  const ethPx = nullableNum(px?.ethereum?.usd);
-  const solPx = nullableNum(px?.solana?.usd);
+  const btcPx = nullableNum(px?.bitcoin?.usd) ?? fallback?.btc.price ?? null;
+  const ethPx = nullableNum(px?.ethereum?.usd) ?? fallback?.eth.price ?? null;
+  const solPx = nullableNum(px?.solana?.usd) ?? fallback?.sol.price ?? null;
   const btc = {
     price: btcPx ?? 0,
-    change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change),
+    change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change ?? fallback?.btc.change24h),
     marketCap: num(px?.bitcoin?.usd_market_cap),
     volume24h: num(px?.bitcoin?.usd_24h_vol),
   };
   const eth = {
     price: ethPx ?? 0,
-    change24h: ethPx === null ? 0 : num(px?.ethereum?.usd_24h_change),
+    change24h: ethPx === null ? 0 : num(px?.ethereum?.usd_24h_change ?? fallback?.eth.change24h),
     marketCap: num(px?.ethereum?.usd_market_cap),
     volume24h: num(px?.ethereum?.usd_24h_vol),
   };
   const sol = {
     price: solPx ?? 0,
-    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change),
+    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change ?? fallback?.sol.change24h),
     marketCap: num(px?.solana?.usd_market_cap),
     volume24h: num(px?.solana?.usd_24h_vol),
   };

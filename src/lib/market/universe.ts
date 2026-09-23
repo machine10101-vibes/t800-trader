@@ -11,6 +11,12 @@ export const SOL_MINT = "So11111111111111111111111111111111111111112";
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
+/** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
+export const SOL_USDC_POOLS = [
+  "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
+  "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+];
+
 export const WATCHLIST: WatchToken[] = [
   { symbol: "SOL", name: "Solana", mint: SOL_MINT, sector: "L1" },
   { symbol: "JUP", name: "Jupiter", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", sector: "DEX" },

@@ -1,8 +1,12 @@
 import { PublicKey } from "@solana/web3.js";
+import { liveSolPrice } from "@/lib/market/marks";
 import { USDC_MINT } from "@/lib/market/universe";
-import { fetchJson, nullableNum } from "@/lib/utils";
 
-const RPCS = ["https://solana.publicnode.com", "https://solana-rpc.publicnode.com"];
+const RPCS = [
+  "https://solana.publicnode.com",
+  "https://solana-rpc.publicnode.com",
+  "https://api.mainnet-beta.solana.com",
+];
 
 export interface WalletSession {
   address: string;
@@ -38,16 +42,12 @@ export function walletInstalled(): boolean {
   return Boolean(injected());
 }
 
-async function liveSolPrice(): Promise<number | null> {
-  try {
-    const json = await fetchJson<{ solana?: { usd?: number } }>(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
-      { timeoutMs: 8_000, retries: 2 },
-    );
-    return nullableNum(json.solana?.usd);
-  } catch {
-    return null;
-  }
+export function detectedWalletName(): string | null {
+  const provider = injected();
+  if (!provider) return null;
+  if (provider.isPhantom) return "Phantom";
+  if (provider.isSolflare) return "Solflare";
+  return "Solana wallet";
 }
 
 interface RpcResult<T> {
@@ -122,6 +122,36 @@ export async function connectWallet(onlyIfTrusted = false): Promise<WalletSessio
   if (!address) throw new Error("Wallet connected but did not return a public key.");
   const balances = await readBalances(address);
   return { ...balances, provider };
+}
+
+export async function refreshWallet(session: WalletSession): Promise<WalletSession> {
+  const balances = await readBalances(session.address);
+  return { ...session, ...balances };
+}
+
+export function listenWallet(
+  provider: InjectedProvider,
+  handlers: {
+    onDisconnect?: () => void;
+    onAccountChanged?: (address: string | null) => void;
+  },
+): () => void {
+  const disconnect = () => handlers.onDisconnect?.();
+  const accountChanged = (key: unknown) => {
+    const address =
+      key && typeof key === "object" && "toBase58" in key && typeof key.toBase58 === "function"
+        ? key.toBase58()
+        : null;
+    handlers.onAccountChanged?.(address);
+  };
+  provider.on?.("disconnect", disconnect);
+  provider.on?.("accountChanged", accountChanged);
+  return () => {
+    provider.off?.("disconnect", disconnect);
+    provider.off?.("accountChanged", accountChanged);
+    provider.removeListener?.("disconnect", disconnect);
+    provider.removeListener?.("accountChanged", accountChanged);
+  };
 }
 
 export async function disconnectWallet(provider?: InjectedProvider | null): Promise<void> {
