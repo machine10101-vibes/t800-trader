@@ -199,6 +199,9 @@ export function technicalScore(t: TechnicalSnapshot): number {
   if (t.rsi14 < 28) s += 4;
   if (t.volumeZ !== null && t.volumeZ > 1.2) s += 6;
   if (t.extensionPct !== null && Math.abs(t.extensionPct) > 6) s -= 8;
+  if (t.closeStrength != null && t.closeStrength >= 0.65 && t.ema9 !== null && t.ema21 !== null && t.ema9 > t.ema21) s += 5;
+  if (t.priorHigh != null && t.lastClose != null && t.lastClose >= t.priorHigh) s += 4;
+  if (t.atrPct !== null && (t.atrPct < 0.4 || t.atrPct > 6)) s -= 8;
   return clamp(s, 0, 100);
 }
 

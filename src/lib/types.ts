@@ -74,6 +74,10 @@ export interface TechnicalSnapshot {
   volumeZ: number | null;
   lastClose: number | null;
   extensionPct: number | null;
+  closeStrength: number | null;
+  priorHigh: number | null;
+  priorLow: number | null;
+  barsAboveEma9: number;
 }
 
 export interface ScoredCandidate extends TokenCandidate {
@@ -183,6 +187,8 @@ export interface Position {
   highWater: number;
   lowWater: number;
   notional: number;
+  initialStop: number;
+  scaled: boolean;
 }
 
 export interface Trade {

@@ -3,8 +3,8 @@ import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, MarketRegime, Signal } from "@/lib/types";
 import { emptyState, mutateState } from "@/lib/store";
-import { canOpen, dayLossBreached, exitReason, shouldFlattenMeme, sizePosition } from "./risk";
-import { closePosition, flattenBook, markBook, openPosition, pushEquity } from "./paper";
+import { canOpen, consecutiveLosses, dayLossBreached, dayLossUsedPct, managePosition, shouldFlattenMeme, sizePosition } from "./risk";
+import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { buildSignals, snapshotTechnical } from "./signals";
 
 function priceMap(state: AppState, extras: { mint: string; price: number }[]): Map<string, number> {
@@ -38,10 +38,15 @@ export async function tickBot(): Promise<AppState> {
       }
 
       for (const pos of [...next.positions]) {
-        const reason = exitReason(pos);
-        if (reason) {
-          next = closePosition(next, pos.id, pos.markPrice, reason);
+        const plan = managePosition(pos);
+        if (plan.exit) {
+          next = closePosition(next, pos.id, pos.markPrice, plan.exit);
           closed += 1;
+          continue;
+        }
+        if (plan.nextStop) next = updateStop(next, pos.id, plan.nextStop);
+        if (plan.scale) {
+          next = scaleOut(next, pos.id, 0.5);
         }
       }
       next = markBook(next, priceMap(next, marks));
@@ -65,12 +70,17 @@ export async function tickBot(): Promise<AppState> {
               continue;
             }
           }
-          const found = buildSignals(token, tech, token.researchScore, next.config.allowShorts, market.regime.stance);
+          const found = buildSignals(token, tech, token.researchScore, next.config.allowShorts, {
+            stance: market.regime.stance,
+            fearGreed: market.regime.fearGreed?.value ?? null,
+            solChange: market.regime.sol.change24h,
+          });
           signals.push(...found);
         }
 
         signals.sort((a, b) => b.confidence - a.confidence);
-        for (const signal of signals) {
+        const signal = signals[0];
+        if (signal) {
           const gate = canOpen({
             positions: next.positions,
             signal,
@@ -81,32 +91,36 @@ export async function tickBot(): Promise<AppState> {
           });
           if (gate) {
             blocked.push(`${signal.symbol} ${signal.side}: ${gate}`);
-            continue;
+          } else {
+            const token = byMint.get(signal.mint);
+            const streak = consecutiveLosses(next.trades);
+            const sized = token
+              ? sizePosition({
+                  equity: next.portfolio.equityUsd,
+                  price: signal.price,
+                  stopPct: signal.stopPct,
+                  config: next.config,
+                  regime: market.regime,
+                  researchScore: signal.researchScore,
+                  confidence: signal.confidence,
+                  lossStreak: streak,
+                  dayUsed: dayLossUsedPct(next.portfolio, next.config),
+                })
+              : { qty: 0, notional: 0 };
+            if (!token) {
+              blocked.push(`${signal.symbol}: missing live mark`);
+            } else if (sized.notional < 20 || sized.qty <= 0) {
+              blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(0)} too small`);
+            } else if (sized.notional > next.portfolio.cashUsd * 0.35) {
+              blocked.push(`${signal.symbol}: would concentrate more than 35% cash`);
+            } else {
+              next = openPosition(next, signal, sized.qty);
+              opened += 1;
+            }
           }
-          if (signal.confidence < 58) {
-            blocked.push(`${signal.symbol}: confidence ${signal.confidence.toFixed(0)} below 58`);
-            continue;
-          }
-          const token = byMint.get(signal.mint);
-          if (!token) continue;
-          const sized = sizePosition({
-            equity: next.portfolio.equityUsd,
-            price: signal.price,
-            stopPct: signal.stopPct,
-            config: next.config,
-            regime: market.regime,
-            researchScore: signal.researchScore,
-          });
-          if (sized.notional < 20 || sized.qty <= 0) {
-            blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(0)} too small`);
-            continue;
-          }
-          if (sized.notional > next.portfolio.cashUsd * 0.95) {
-            blocked.push(`${signal.symbol}: not enough cash`);
-            continue;
-          }
-          next = openPosition(next, signal, sized.qty);
-          opened += 1;
+        }
+        for (const extra of signals.slice(1)) {
+          blocked.push(`${extra.symbol}: passed over — one new ticket per tick`);
         }
       } else if (next.bot.running && dayLossBreached(next.portfolio, next.config)) {
         blocked.push("Daily loss cap — new risk is closed");

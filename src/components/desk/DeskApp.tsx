@@ -14,6 +14,7 @@ import {
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { rMultiple } from "@/lib/trading/risk";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
 type Tab = "overview" | "radar" | "bot" | "book" | "risk";
@@ -564,7 +565,8 @@ function PositionRail({ positions }: { positions: Position[] }) {
               <Tone value={pnlPct} />
             </div>
             <div className="mt-2 text-xs text-[var(--muted)]">
-              {priceFmt(p.entryPrice)} → {priceFmt(p.markPrice)} · {p.reason}
+              {priceFmt(p.entryPrice)} → {priceFmt(p.markPrice)} · {p.reason} · {rMultiple(p).toFixed(2)}R
+              {p.scaled ? " · scaled" : ""}
             </div>
             <div className="mt-3">
               <RangeBar position={p} />
@@ -863,7 +865,7 @@ function BotView({
             <h2 className="mt-3 text-3xl font-medium">Wallet-gated ticks. Time-boxed.</h2>
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
               {desk.bot.lastNote ??
-                "The bot only trades names that survive the live screen, and only after a real wallet is connected."}
+                "One new ticket per tick. Breakouts must clear the prior high. Winners scale at 1R; stops move to breakeven at 0.8R."}
             </p>
           </div>
           <div className="flex gap-2">

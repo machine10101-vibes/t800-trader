@@ -266,6 +266,10 @@ export async function runResearch(
         volumeZ: null,
         lastClose: c.priceUsd,
         extensionPct: null,
+        closeStrength: null,
+        priorHigh: null,
+        priorLow: null,
+        barsAboveEma9: 0,
       });
     }
   });

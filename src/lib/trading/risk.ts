@@ -10,6 +10,22 @@ export function maxDrawdownPct(peak: number, equity: number): number {
   return Math.max(0, ((peak - equity) / peak) * 100);
 }
 
+export function dayLossUsedPct(portfolio: Portfolio, config: BotConfig): number {
+  if (portfolio.dayStartEquity <= 0) return 0;
+  const used = ((portfolio.dayStartEquity - portfolio.equityUsd) / portfolio.dayStartEquity) * 100;
+  return Math.max(0, used / Math.max(config.dailyLossLimitPct, 0.1));
+}
+
+export function consecutiveLosses(trades: Trade[]): number {
+  let n = 0;
+  for (const t of trades) {
+    if (t.action !== "close" || t.pnlUsd === null) continue;
+    if (t.pnlUsd < 0) n += 1;
+    else break;
+  }
+  return n;
+}
+
 export function sizePosition(args: {
   equity: number;
   price: number;
@@ -17,6 +33,9 @@ export function sizePosition(args: {
   config: BotConfig;
   regime: MarketRegime;
   researchScore: number | null;
+  confidence?: number;
+  lossStreak?: number;
+  dayUsed?: number;
 }): { qty: number; notional: number } {
   const { equity, price, stopPct, config, regime, researchScore } = args;
   if (price <= 0 || stopPct <= 0) return { qty: 0, notional: 0 };
@@ -26,10 +45,13 @@ export function sizePosition(args: {
   if (regime.stance === "mixed") riskPct *= 0.75;
   if (researchScore !== null && researchScore < 55) riskPct *= 0.7;
   if (researchScore !== null && researchScore > 72) riskPct *= 1.1;
+  if ((args.confidence ?? 60) >= 78) riskPct *= 1.08;
+  if ((args.lossStreak ?? 0) >= 2) riskPct *= 0.55;
+  if ((args.dayUsed ?? 0) >= 0.7) riskPct *= 0.45;
 
   const riskUsd = equity * (riskPct / 100);
   const stopFrac = stopPct / 100;
-  const capPct = regime.stance === "defensive" ? 0.1 : regime.stance === "mixed" ? 0.16 : 0.22;
+  const capPct = regime.stance === "defensive" ? 0.08 : regime.stance === "mixed" ? 0.14 : 0.2;
   const notional = Math.min(riskUsd / stopFrac, equity * capPct);
   const qty = notional / price;
   return { qty, notional };
@@ -64,6 +86,11 @@ export function canOpen(args: {
   const lastStop = trades.find((t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time"));
   if (lastStop && Date.now() - Date.parse(lastStop.at) < COOLDOWN_MS) {
     return "Cooldown after a stop/time-out on this mint";
+  }
+  if (consecutiveLosses(trades) >= 3) return "Cooling after a three-loss streak";
+  if (dayLossUsedPct(portfolio, config) >= 0.9) return "Protect remaining day budget";
+  if (signal.confidence < (signal.sector === "Meme" || signal.sector === "Unknown" ? 62 : 58)) {
+    return "Confidence below the quality floor";
   }
   return null;
 }
@@ -111,4 +138,36 @@ export function shouldFlattenMeme(position: Position, stance: MarketRegime["stan
   if (stance !== "defensive") return false;
   if ((position.sector ?? "Unknown") !== "Meme") return false;
   return unrealizedPnl(position).usd < 0;
+}
+
+export function rMultiple(position: Position): number {
+  const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
+  if (risk <= 0) return 0;
+  const dir = position.side === "long" ? 1 : -1;
+  return ((position.markPrice - position.entryPrice) * dir) / risk;
+}
+
+export function managePosition(
+  position: Position,
+  nowMs = Date.now(),
+): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
+  const hard = exitReason(position, nowMs);
+  if (hard && hard !== "time") return { exit: hard };
+  const r = rMultiple(position);
+  const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
+  if (ageMin >= 12 && r < 0.2) return { exit: "time" };
+  if (hard) return { exit: hard };
+
+  const be = position.side === "long" ? position.entryPrice * 1.0006 : position.entryPrice * 0.9994;
+  if (r >= 0.8) {
+    const tighter =
+      position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);
+    if (position.side === "long" ? tighter > position.stopPrice : tighter < position.stopPrice) {
+      if (r >= 1 && !position.scaled) return { nextStop: tighter, scale: true };
+      return { nextStop: tighter };
+    }
+  }
+
+  if (r >= 1 && !position.scaled) return { scale: true };
+  return {};
 }

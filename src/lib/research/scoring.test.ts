@@ -45,6 +45,10 @@ const blankTech = {
   volumeZ: 1.3,
   lastClose: 1.02,
   extensionPct: 1.0,
+  closeStrength: 0.7,
+  priorHigh: 1.0,
+  priorLow: 0.96,
+  barsAboveEma9: 3,
 };
 
 describe("screenCandidate", () => {

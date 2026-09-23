@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ema, rsi, snapshotTechnical } from "./signals";
+import { atrTradeable, ema, rewardToRisk, rsi, snapshotTechnical } from "./signals";
 import type { Candle } from "../types";
 
 function candles(n: number, start = 100): Candle[] {
@@ -37,5 +37,18 @@ describe("indicators", () => {
     const snap = snapshotTechnical(candles(40));
     assert.ok(snap.lastClose);
     assert.ok(snap.rsi14 !== null);
+    assert.ok(snap.priorHigh !== null);
+    assert.ok(snap.closeStrength !== null);
+  });
+
+  it("rejects untradeable ATR", () => {
+    assert.equal(atrTradeable(0.2), false);
+    assert.equal(atrTradeable(8), false);
+    assert.equal(atrTradeable(1.4), true);
+  });
+
+  it("requires at least 1.6R", () => {
+    assert.ok(rewardToRisk(1, 1.7) >= 1.6);
+    assert.ok(rewardToRisk(2, 2) < 1.6);
   });
 });

@@ -39,6 +39,8 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     highWater: price,
     lowWater: price,
     notional,
+    initialStop: stop,
+    scaled: false,
   };
 
   const trade: Trade = {
@@ -127,6 +129,54 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
       unrealizedPnlUsd: unreal,
       dayPnlUsd: equity - state.portfolio.dayStartEquity,
     },
+  };
+}
+
+export function updateStop(state: AppState, positionId: string, stopPrice: number): AppState {
+  return {
+    ...state,
+    positions: state.positions.map((p) => (p.id === positionId ? { ...p, stopPrice, lastUpdate: new Date().toISOString() } : p)),
+  };
+}
+
+export function scaleOut(state: AppState, positionId: string, fraction = 0.5): AppState {
+  const pos = state.positions.find((p) => p.id === positionId);
+  if (!pos || pos.scaled || fraction <= 0 || fraction >= 1) return state;
+  const qty = pos.qty * fraction;
+  if (qty <= 0) return state;
+  const price = fillPrice(pos.markPrice, pos.side, "close");
+  const marked = markPosition({ ...pos, markPrice: price, qty }, price);
+  const pnl = unrealizedPnl(marked);
+  const proceeds = qty * price;
+  const remain = pos.qty - qty;
+  const trade: Trade = {
+    id: id("tr"),
+    mint: pos.mint,
+    symbol: pos.symbol,
+    side: pos.side,
+    action: "close",
+    qty,
+    price,
+    pnlUsd: pnl.usd,
+    pnlPct: pnl.pct,
+    reason: "target",
+    at: new Date().toISOString(),
+    note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run`,
+  };
+  return {
+    ...state,
+    portfolio: {
+      ...state.portfolio,
+      cashUsd: state.portfolio.cashUsd + proceeds,
+      realizedPnlUsd: state.portfolio.realizedPnlUsd + pnl.usd,
+      tradeCount: state.portfolio.tradeCount + 1,
+    },
+    positions: state.positions.map((p) =>
+      p.id === positionId
+        ? { ...p, qty: remain, notional: remain * p.markPrice, scaled: true, lastUpdate: new Date().toISOString() }
+        : p,
+    ),
+    trades: [trade, ...state.trades].slice(0, 250),
   };
 }
 
