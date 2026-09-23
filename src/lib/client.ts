@@ -1,7 +1,9 @@
 import { buildDesk } from "@/lib/desk";
-import { DEFAULT_CONFIG, mutateState } from "@/lib/store";
+import { attachWallet, DEFAULT_CONFIG, detachWallet, getActiveWallet, mutateState } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
 import type { BotConfig, DeskPayload } from "@/lib/types";
+
+export { attachWallet, detachWallet, getActiveWallet };
 
 export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);

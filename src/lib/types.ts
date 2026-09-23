@@ -247,6 +247,15 @@ export interface AppState {
   lastSignals: Signal[];
 }
 
+export interface TapeDot {
+  mint: string;
+  symbol: string;
+  score: number;
+  change24h: number;
+  liquidityUsd: number;
+  volume24hUsd: number;
+}
+
 export interface DeskPayload {
   regime: MarketRegime;
   research: ResearchThesis[];
@@ -261,5 +270,6 @@ export interface DeskPayload {
   config: BotConfig;
   equityCurve: EquityPoint[];
   whatCouldBeWrong: string[];
+  tapeDots: TapeDot[];
   generatedAt: string;
 }

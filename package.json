@@ -11,6 +11,7 @@
     "test": "tsx --test src/lib/research/scoring.test.ts src/lib/trading/signals.test.ts src/lib/trading/risk.test.ts"
   },
   "dependencies": {
+    "@solana/web3.js": "^1.98.4",
     "next": "^15.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

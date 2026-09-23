@@ -11,7 +11,7 @@ export function Pill({
   tone = "default",
 }: {
   children: React.ReactNode;
-  tone?: "default" | "mint" | "crimson" | "amber" | "ice";
+  tone?: "default" | "mint" | "crimson" | "amber" | "ice" | "magenta";
 }) {
   const map = {
     default: "border-[var(--line)] text-[var(--muted)]",
@@ -19,6 +19,7 @@ export function Pill({
     crimson: "border-[rgba(255,59,74,0.28)] text-[var(--crimson)] bg-[rgba(255,59,74,0.06)]",
     amber: "border-[rgba(243,193,91,0.28)] text-[var(--amber)] bg-[rgba(243,193,91,0.08)]",
     ice: "border-[rgba(121,212,255,0.28)] text-[var(--ice)] bg-[rgba(121,212,255,0.06)]",
+    magenta: "border-[rgba(255,74,216,0.4)] text-[var(--magenta)] bg-[rgba(255,74,216,0.08)]",
   };
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tracking-wide ${map[tone]}`}>
@@ -41,7 +42,7 @@ export function Stat({
   const color =
     tone === "mint" ? "text-[var(--mint)]" : tone === "crimson" ? "text-[var(--crimson)]" : tone === "amber" ? "text-[var(--amber)]" : "";
   return (
-    <div className="glass hairline rounded-2xl p-4">
+    <div className="neon hairline rounded-none p-4">
       <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">{label}</div>
       <div className={`mt-2 text-2xl num ${color}`}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-[var(--muted)]">{sub}</div> : null}

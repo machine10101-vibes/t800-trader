@@ -216,21 +216,24 @@ async function fetchRegime(): Promise<MarketRegime> {
   const solChain = chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
+  const btcPx = nullableNum(px?.bitcoin?.usd);
+  const ethPx = nullableNum(px?.ethereum?.usd);
+  const solPx = nullableNum(px?.solana?.usd);
   const btc = {
-    price: num(px?.bitcoin?.usd),
-    change24h: num(px?.bitcoin?.usd_24h_change),
+    price: btcPx ?? 0,
+    change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change),
     marketCap: num(px?.bitcoin?.usd_market_cap),
     volume24h: num(px?.bitcoin?.usd_24h_vol),
   };
   const eth = {
-    price: num(px?.ethereum?.usd),
-    change24h: num(px?.ethereum?.usd_24h_change),
+    price: ethPx ?? 0,
+    change24h: ethPx === null ? 0 : num(px?.ethereum?.usd_24h_change),
     marketCap: num(px?.ethereum?.usd_market_cap),
     volume24h: num(px?.ethereum?.usd_24h_vol),
   };
   const sol = {
-    price: num(px?.solana?.usd),
-    change24h: num(px?.solana?.usd_24h_change),
+    price: solPx ?? 0,
+    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change),
     marketCap: num(px?.solana?.usd_market_cap),
     volume24h: num(px?.solana?.usd_24h_vol),
   };
@@ -239,33 +242,38 @@ async function fetchRegime(): Promise<MarketRegime> {
   const btcDom = nullableNum(g?.market_cap_percentage?.btc);
   const solVsBtc = sol.change24h - btc.change24h;
   const riskOn =
+    Boolean(btcPx && solPx) &&
     btc.change24h > 0.4 &&
     sol.change24h > 0 &&
     (fearValue === null || fearValue >= 45) &&
     (dex?.change_1d === undefined || dex.change_1d > -8);
-  const defensive = btc.change24h < -2 || (fearValue !== null && fearValue < 30) || sol.change24h < -5;
-  const stance: MarketRegime["stance"] = defensive ? "defensive" : riskOn ? "risk-on" : "mixed";
+  const defensive =
+    Boolean(btcPx || solPx) &&
+    (btc.change24h < -2 || (fearValue !== null && fearValue < 30) || sol.change24h < -5);
+  const stance: MarketRegime["stance"] = !btcPx && !solPx ? "mixed" : defensive ? "defensive" : riskOn ? "risk-on" : "mixed";
 
   const crowded: string[] = [];
   const overlooked: string[] = [];
-  if ((fearValue ?? 50) >= 70) crowded.push("High-beta memes (Fear & Greed in greed)");
-  else overlooked.push("Selective high-beta Solana names while sentiment is not euphoric");
-  if (solVsBtc > 2) crowded.push("SOL beta / ecosystem rotation vs BTC");
-  else if (solVsBtc < -2) overlooked.push("Solana beta vs BTC (SOL underperforming on the day)");
-  if ((dex?.change_1d ?? 0) > 15) crowded.push("Solana DEX volume chase");
-  else overlooked.push("Spot DEX flow that is not exploding day-over-day");
+  if (fearValue !== null && fearValue >= 70) crowded.push("High-beta memes (Fear & Greed in greed)");
+  else if (fearValue !== null) overlooked.push("Selective high-beta Solana names while sentiment is not euphoric");
+  if (btcPx && solPx && solVsBtc > 2) crowded.push("SOL beta / ecosystem rotation vs BTC");
+  else if (btcPx && solPx && solVsBtc < -2) overlooked.push("Solana beta vs BTC (SOL underperforming on the day)");
+  if (dex?.change_1d !== undefined && dex.change_1d > 15) crowded.push("Solana DEX volume chase");
+  else if (dex?.change_1d !== undefined) overlooked.push("Spot DEX flow that is not exploding day-over-day");
   crowded.push("Paid Dexscreener boosts / launchpad tape");
   overlooked.push("Fee-switch / LST / perps venues with measurable usage");
 
   const stanceWhy =
-    stance === "defensive"
-      ? "BTC or SOL is selling off, or sentiment is fearful — size down and demand cleaner setups."
-      : stance === "risk-on"
-        ? "BTC and SOL are green with non-panicked sentiment — short-term longs have a tailwind."
-        : "Tape is mixed. Prefer liquid names, tight risk, and fade only extreme extensions.";
+    !btcPx && !solPx
+      ? "BTC/SOL marks are missing this cycle. Stance is withheld — no fabricated tape."
+      : stance === "defensive"
+        ? "BTC or SOL is selling off, or sentiment is fearful — size down and demand cleaner setups."
+        : stance === "risk-on"
+          ? "BTC and SOL are green with non-panicked sentiment — short-term longs have a tailwind."
+          : "Tape is mixed. Prefer liquid names, tight risk, and fade only extreme extensions.";
 
   const overview = [
-    `BTC ${btc.price ? `$${btc.price.toLocaleString()}` : "n/a"} (${btc.change24h.toFixed(2)}%), ETH ${eth.price ? `$${eth.price.toLocaleString()}` : "n/a"} (${eth.change24h.toFixed(2)}%), SOL ${sol.price ? `$${sol.price.toFixed(2)}` : "n/a"} (${sol.change24h.toFixed(2)}%).`,
+    `BTC ${btc.price ? `$${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)` : "n/a"}, ETH ${eth.price ? `$${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)` : "n/a"}, SOL ${sol.price ? `$${sol.price.toFixed(2)} (${sol.change24h.toFixed(2)}%)` : "n/a"}.`,
     btcDom !== null ? `BTC dominance ${btcDom.toFixed(1)}%.` : "BTC dominance unavailable.",
     fear ? `Fear & Greed ${fear.value} (${fear.value_classification}).` : "Fear & Greed unavailable.",
     solChain ? `Solana DeFi TVL $${(solChain.tvl / 1e9).toFixed(2)}B.` : "Solana TVL unavailable.",

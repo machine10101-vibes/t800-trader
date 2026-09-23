@@ -24,6 +24,14 @@ export async function buildDesk(force = false): Promise<DeskPayload> {
     config: state.config,
     equityCurve: state.equityCurve,
     whatCouldBeWrong: wrongAbout(research.regime, research.research),
+    tapeDots: research.candidates.slice(0, 24).map((c) => ({
+      mint: c.mint,
+      symbol: c.symbol,
+      score: c.researchScore,
+      change24h: c.flows.h24.priceChangePct,
+      liquidityUsd: c.liquidityUsd,
+      volume24hUsd: c.volume24hUsd,
+    })),
     generatedAt: new Date().toISOString(),
   };
 }

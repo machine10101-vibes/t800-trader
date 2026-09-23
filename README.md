@@ -4,6 +4,8 @@ Solana-first research desk and short-term **paper** trading bot.
 
 Play it at **https://machine10101-vibes.github.io/t800-trader/**
 
+Connect a real **Phantom** or **Solflare** wallet to arm the desk. There is no demo book and no $10,000 fallback. The book is sized from the wallet’s live SOL + USDC.
+
 The desk does not start from a celebrity coin list. It pulls a live Solana universe (watchlist venues plus trending, new, and high-volume pools), throws out thin or obviously adversarial tape, then keeps 5–8 finalists. A separate execution loop will only paper-trade names that survived that screen, and only when 5-minute structure, volume, and risk limits agree.
 
 This is a research and simulation tool. It is **not** financial advice and it does **not** place live on-chain orders.
@@ -37,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000/t800-trader/](http://localhost:3000/t800-trader/). The `/t800-trader` base path matches GitHub Pages. Press **Space** to arm or disarm the bot.
+Open [http://localhost:3000/t800-trader/](http://localhost:3000/t800-trader/). The `/t800-trader` base path matches GitHub Pages. Connect a wallet, then press **Space** to arm or disarm the bot.
 
 ```bash
 npm test
