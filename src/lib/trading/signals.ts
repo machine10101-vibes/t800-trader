@@ -197,6 +197,35 @@ export function buildSignals(
     });
   }
 
+  const heldLow = tech.priorLow !== null && price >= tech.priorLow;
+  const flatToUp = tech.ema9 >= tech.ema21 * 0.998 || tech.barsAboveEma9 >= 2;
+  if (
+    signals.length === 0 &&
+    token.watchlist &&
+    stance !== "defensive" &&
+    !solDump &&
+    flatToUp &&
+    heldLow &&
+    tech.rsi14 >= 46 &&
+    tech.rsi14 <= 66 &&
+    ext < 3.2 &&
+    (tech.closeStrength ?? 0) >= 0.45 &&
+    tape >= 0.49 &&
+    h1 > -0.5 &&
+    volZ > -0.5
+  ) {
+    const rr = withMinRR(clamp(atr * 1.05, 0.7, 2.8), clamp(atr * 1.9, 1.2, 5.2));
+    signals.push({
+      ...base,
+      id: id("sig"),
+      side: "long",
+      reason: "reclaim",
+      confidence: clamp(64 + (tech.rsi14 - 50) * 0.25, 60, 84),
+      ...rr,
+      thesis: `${token.symbol} is a liquid watchlist name holding its 5m range with RSI ${tech.rsi14.toFixed(0)} and the hour still bid. Small continuation — not a breakout chase.`,
+    });
+  }
+
   const nearVwap =
     tech.vwap !== null && price <= tech.vwap * 1.004 && price >= tech.vwap * 0.992 && tech.rsi14 >= 46 && tech.rsi14 <= 58;
   if (!solDump && trendUp && nearVwap && volZ > 0.2 && volZ < 4 && tape >= 0.51 && stance !== "defensive") {

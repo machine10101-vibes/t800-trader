@@ -1,7 +1,15 @@
 import { fetchOhlcv, loadMarket } from "@/lib/market/providers";
-import type { BotConfig, Catalyst, MarketRegime, ResearchThesis, ScoredCandidate, TokenCandidate } from "@/lib/types";
+import type {
+  BotConfig,
+  Catalyst,
+  MarketRegime,
+  ResearchThesis,
+  ScoredCandidate,
+  TechnicalSnapshot,
+  TokenCandidate,
+} from "@/lib/types";
 import { snapshotTechnical } from "@/lib/trading/signals";
-import { mapPool, usd } from "@/lib/utils";
+import { usd } from "@/lib/utils";
 import { scoreCandidate, screenCandidate } from "./scoring";
 
 function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number, maxUnknown: number): boolean {
@@ -250,29 +258,41 @@ export async function runResearch(
     .map((c) => ({ c, heat: c.volume24hUsd + c.liquidityUsd * 2 }))
     .sort((a, b) => b.heat - a.heat)
     .map((x) => x.c);
-  const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 22);
-
-  const scored = await mapPool(rankedSeed, 2, async (c) => {
-    try {
-      const candles = await fetchOhlcv(c.poolAddress, 70);
-      return scoreCandidate(c, snapshotTechnical(candles));
-    } catch {
-      return scoreCandidate(c, {
-        rsi14: null,
-        ema9: null,
-        ema21: null,
-        vwap: null,
-        atrPct: null,
-        volumeZ: null,
-        lastClose: c.priceUsd,
-        extensionPct: null,
-        closeStrength: null,
-        priorHigh: null,
-        priorLow: null,
-        barsAboveEma9: 0,
-      });
+  const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 12);
+  const scored: ScoredCandidate[] = [];
+  let taped = 0;
+  let candleAttempts = 0;
+  for (const c of rankedSeed) {
+    if (scored.length >= 12) break;
+    const blank: TechnicalSnapshot = {
+      rsi14: null,
+      ema9: null,
+      ema21: null,
+      vwap: null,
+      atrPct: null,
+      volumeZ: null,
+      lastClose: c.priceUsd,
+      extensionPct: null,
+      closeStrength: null,
+      priorHigh: null,
+      priorLow: null,
+      barsAboveEma9: 0,
+    };
+    let tech = blank;
+    if (taped < 5 && candleAttempts < 7) {
+      candleAttempts += 1;
+      try {
+        const candles = await fetchOhlcv(c.poolAddress, 70);
+        if (candles.length >= 20) {
+          tech = snapshotTechnical(candles);
+          taped += 1;
+        }
+      } catch {
+        tech = blank;
+      }
     }
-  });
+    scored.push(scoreCandidate(c, tech));
+  }
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);

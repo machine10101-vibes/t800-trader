@@ -70,13 +70,24 @@ export async function tickBot(): Promise<AppState> {
           .sort((a, b) => b.researchScore - a.researchScore)
           .slice(0, 10);
 
+        let candleTries = 0;
         for (const token of focus) {
           let tech = token.technical;
           if (tech.rsi14 === null) {
+            if (candleTries >= 2) {
+              blocked.push(`${token.symbol}: 5m tape not loaded`);
+              continue;
+            }
+            candleTries += 1;
             try {
               const candles = await fetchOhlcv(token.poolAddress, 70);
+              if (candles.length < 20) {
+                blocked.push(`${token.symbol}: 5m tape too short`);
+                continue;
+              }
               tech = snapshotTechnical(candles);
             } catch {
+              blocked.push(`${token.symbol}: 5m tape rate-limited`);
               continue;
             }
           }

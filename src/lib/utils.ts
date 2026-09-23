@@ -101,6 +101,7 @@ export async function fetchJson<T>(
   for (let attempt = 0; attempt < retries; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? 12_000);
+    let paceMs = 400 * 2 ** attempt + Math.floor(Math.random() * 200);
     try {
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -116,6 +117,7 @@ export async function fetchJson<T>(
         headers,
       });
       if (res.status === 429 || res.status >= 500) {
+        if (res.status === 429) paceMs = 1_800 * 2 ** attempt;
         throw new Error(`${res.status} ${res.statusText} for ${url}`);
       }
       if (!res.ok) {
@@ -125,7 +127,7 @@ export async function fetchJson<T>(
     } catch (error) {
       lastError = error;
       if (attempt < retries - 1) {
-        await sleep(400 * 2 ** attempt + Math.floor(Math.random() * 200));
+        await sleep(paceMs);
       }
     } finally {
       clearTimeout(timer);

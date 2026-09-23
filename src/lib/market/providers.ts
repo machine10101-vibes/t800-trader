@@ -1,5 +1,5 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
-import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
+import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { liveMajors } from "./marks";
 import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
@@ -187,7 +187,30 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
 }
 
 const ohlcvCache = new Map<string, { at: number; rows: Candle[] }>();
-const OHLCV_TTL_MS = 60_000;
+const ohlcvMiss = new Map<string, number>();
+const OHLCV_TTL_MS = 3 * 60_000;
+const OHLCV_STALE_MS = 20 * 60_000;
+const OHLCV_MISS_MS = 45_000;
+const OHLCV_GAP_MS = 1_200;
+let ohlcvTail: Promise<unknown> = Promise.resolve();
+let ohlcvNotBefore = 0;
+
+function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
+  const run = ohlcvTail.then(async () => {
+    const delay = ohlcvNotBefore - Date.now();
+    if (delay > 0) await sleep(delay);
+    try {
+      return await task();
+    } finally {
+      ohlcvNotBefore = Date.now() + OHLCV_GAP_MS;
+    }
+  });
+  ohlcvTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour", aggregate: number, limit: number): Promise<Candle[]> {
   const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
@@ -200,15 +223,35 @@ async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour",
     .sort((a, b) => a.time - b.time);
 }
 
+function staleCandles(poolAddress: string): Candle[] | null {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit?.rows.length && Date.now() - hit.at < OHLCV_STALE_MS) return hit.rows;
+  return null;
+}
+
 export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candle[]> {
   const hit = ohlcvCache.get(poolAddress);
-  if (hit && Date.now() - hit.at < OHLCV_TTL_MS) return hit.rows;
+  if (hit && Date.now() - hit.at < OHLCV_TTL_MS && hit.rows.length) return hit.rows;
+  const missedAt = ohlcvMiss.get(poolAddress);
+  if (missedAt && Date.now() - missedAt < OHLCV_MISS_MS) {
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
+    throw new Error(`429 cooling down for ${poolAddress}`);
+  }
   try {
-    const rows = await fetchOhlcvOnce(poolAddress, "minute", 5, limit);
-    if (rows.length) ohlcvCache.set(poolAddress, { at: Date.now(), rows });
+    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, "minute", 5, Math.min(limit, 70)));
+    if (rows.length) {
+      ohlcvCache.set(poolAddress, { at: Date.now(), rows });
+      ohlcvMiss.delete(poolAddress);
+      return rows;
+    }
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
     return rows;
   } catch (error) {
-    if (hit?.rows.length) return hit.rows;
+    ohlcvMiss.set(poolAddress, Date.now());
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
     throw error;
   }
 }
@@ -363,7 +406,6 @@ export async function loadMarket(force = false): Promise<{
     gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
       () => [] as TokenCandidate[],
     ),
-    fetchOhlcv(SOL_USDC_POOLS[0], 80).catch(() => [] as Candle[]),
   ]);
   const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
 
