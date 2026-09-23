@@ -1,8 +1,8 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { USDC_MINT } from "@/lib/market/universe";
 import { fetchJson, nullableNum } from "@/lib/utils";
 
-const RPCS = ["https://solana-rpc.publicnode.com", "https://api.mainnet-beta.solana.com"];
+const RPCS = ["https://solana.publicnode.com", "https://solana-rpc.publicnode.com"];
 
 export interface WalletSession {
   address: string;
@@ -50,16 +50,27 @@ async function liveSolPrice(): Promise<number | null> {
   }
 }
 
-function connection(url = RPCS[0]): Connection {
-  return new Connection(url, "confirmed");
+interface RpcResult<T> {
+  result?: T;
+  error?: { message?: string };
 }
 
-export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
-  const pk = new PublicKey(address);
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   let last: unknown;
   for (const url of RPCS) {
     try {
-      return await readBalancesFrom(connection(url), pk);
+      const res = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const json = (await res.json()) as RpcResult<T>;
+      if (!res.ok || json.error) {
+        throw new Error(json.error?.message || `${res.status} ${res.statusText} from ${url}`);
+      }
+      if (json.result === undefined) throw new Error(`Empty RPC result from ${url}`);
+      return json.result;
     } catch (error) {
       last = error;
     }
@@ -67,17 +78,36 @@ export async function readBalances(address: string): Promise<Omit<WalletSession,
   throw last instanceof Error ? last : new Error("Solana RPC could not read this wallet");
 }
 
-async function readBalancesFrom(conn: Connection, pk: PublicKey): Promise<Omit<WalletSession, "provider">> {
-  const [lamports, tokenAccs, solPriceUsd] = await Promise.all([
-    conn.getBalance(pk, "confirmed"),
-    conn.getParsedTokenAccountsByOwner(pk, { mint: new PublicKey(USDC_MINT) }),
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+function usdcAta(owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), new PublicKey(USDC_MINT).toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM,
+  )[0];
+}
+
+async function readUsdc(owner: PublicKey): Promise<number> {
+  const ata = usdcAta(owner);
+  const acc = await rpc<{
+    value?: {
+      data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
+    } | null;
+  }>("getAccountInfo", [ata.toBase58(), { encoding: "jsonParsed" }]);
+  if (!acc.value) return 0;
+  const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
+  return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+}
+
+export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
+  const pk = new PublicKey(address);
+  const [lamports, usdc, solPriceUsd] = await Promise.all([
+    rpc<{ value: number }>("getBalance", [pk.toBase58()]),
+    readUsdc(pk),
     liveSolPrice(),
   ]);
-  const sol = lamports / 1_000_000_000;
-  const usdc = tokenAccs.value.reduce((sum, acc) => {
-    const amt = acc.account.data.parsed?.info?.tokenAmount?.uiAmount;
-    return sum + (typeof amt === "number" && Number.isFinite(amt) ? amt : 0);
-  }, 0);
+  const sol = lamports.value / 1_000_000_000;
   const equityUsd = usdc + (solPriceUsd !== null ? sol * solPriceUsd : 0);
   return { address: pk.toBase58(), sol, usdc, solPriceUsd, equityUsd };
 }
