@@ -1,10 +1,10 @@
 import { buildDesk } from "@/lib/desk";
-import { attachWallet, DEFAULT_CONFIG, detachWallet, getActiveWallet, mutateState } from "@/lib/store";
+import { adoptLiveEquity, attachWallet, DEFAULT_CONFIG, detachWallet, getActiveWallet, mutateState } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
-import { closePosition } from "@/lib/trading/paper";
+import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 
-export { attachWallet, detachWallet, getActiveWallet };
+export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet };
 
 export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);
@@ -27,7 +27,7 @@ export async function closeTicket(positionId: string): Promise<DeskPayload> {
   await mutateState((state) => {
     const pos = state.positions.find((p) => p.id === positionId);
     if (!pos) return state;
-    return closePosition(state, pos.id, pos.markPrice, "manual");
+    return pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
   });
   return buildDesk();
 }

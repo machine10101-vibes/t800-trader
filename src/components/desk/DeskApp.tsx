@@ -1,8 +1,8 @@
 "use client";
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
-import { attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
-import { fetchOhlcvFromPools } from "@/lib/market/providers";
+import { adoptLiveEquity, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
+import { fetchOhlcv } from "@/lib/market/providers";
 import {
   connectWallet,
   detectedWalletName,
@@ -153,24 +153,21 @@ export function DeskApp() {
     return () => clearInterval(id);
   }, []);
 
+  const focusPool = useMemo(() => {
+    const row = desk?.research.find((r) => r.candidate.mint === focusMint) ?? desk?.research[0];
+    return row?.candidate.poolAddress ?? null;
+  }, [desk?.research, focusMint]);
+
   useEffect(() => {
-    const pools = [
-      desk?.research.find((r) => r.candidate.mint === focusMint)?.candidate.poolAddress,
-      ...(desk?.research.map((r) => r.candidate.poolAddress) ?? []),
-    ].filter((p): p is string => Boolean(p));
-    if (!pools.length) {
-      setCandles([]);
-      return;
-    }
+    if (!focusPool) return;
     let live = true;
+    setCandles([]);
     const pull = () => {
-      fetchOhlcvFromPools(pools, 80)
+      fetchOhlcv(focusPool, 80)
         .then((rows) => {
-          if (live) setCandles(rows);
+          if (live && rows.length) setCandles(rows);
         })
-        .catch(() => {
-          if (live) setCandles([]);
-        });
+        .catch(() => undefined);
     };
     pull();
     const id = setInterval(pull, 180_000);
@@ -178,7 +175,7 @@ export function DeskApp() {
       live = false;
       clearInterval(id);
     };
-  }, [desk?.research, focusMint]);
+  }, [focusPool]);
 
   useEffect(() => {
     if (!wallet || !desk?.bot.running) return;
@@ -261,8 +258,12 @@ export function DeskApp() {
         if (action === "start") await attachWallet(session.address, session.equityUsd);
         applyDesk(await controlBot(action));
         if (action === "reset") {
-          await attachWallet(session.address, session.equityUsd);
-          applyDesk(await loadDesk());
+          await adoptLiveEquity(session.equityUsd);
+          const next = await loadDesk();
+          applyDesk(next);
+          if (next.portfolio.equityUsd < MIN_TRADE_USD) {
+            setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
+          }
         }
         return;
       }

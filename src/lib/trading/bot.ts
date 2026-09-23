@@ -186,7 +186,7 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
     return emptyState(state.config);
   }
   if (action === "flatten") {
-    const flat = flattenBook(state, "manual");
+    const flat = pushEquity(flattenBook(state, "manual"));
     return {
       ...flat,
       bot: { ...flat.bot, running: false, lastNote: "Book flattened by hand" },

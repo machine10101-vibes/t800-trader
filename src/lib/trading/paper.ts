@@ -20,6 +20,21 @@ export function exitProceeds(position: Pick<Position, "side" | "qty" | "entryPri
   return position.qty * position.entryPrice + pnlUsd;
 }
 
+function syncBook(state: AppState): AppState {
+  const equity = state.portfolio.cashUsd + state.positions.reduce((acc, p) => acc + positionValue(p), 0);
+  const unreal = state.positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
+  return {
+    ...state,
+    portfolio: {
+      ...state.portfolio,
+      equityUsd: equity,
+      peakEquity: Math.max(state.portfolio.peakEquity, equity),
+      unrealizedPnlUsd: unreal,
+      dayPnlUsd: equity - state.portfolio.dayStartEquity,
+    },
+  };
+}
+
 export function openPosition(state: AppState, signal: Signal, qty: number): AppState {
   const price = fillPrice(signal.price, signal.side, "open");
   const room = state.portfolio.cashUsd * 0.98;
@@ -75,7 +90,7 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     note: signal.thesis,
   };
 
-  return {
+  return syncBook({
     ...state,
     portfolio: {
       ...state.portfolio,
@@ -84,7 +99,7 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     },
     positions: [position, ...state.positions],
     trades: [trade, ...state.trades].slice(0, 250),
-  };
+  });
 }
 
 export function closePosition(state: AppState, positionId: string, priceHint: number, reason: Trade["reason"]): AppState {
@@ -113,7 +128,7 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
   const winCount = state.portfolio.winCount + (pnl.usd >= 0 ? 1 : 0);
   const lossCount = state.portfolio.lossCount + (pnl.usd < 0 ? 1 : 0);
 
-  return {
+  return syncBook({
     ...state,
     portfolio: {
       ...state.portfolio,
@@ -125,7 +140,7 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
     },
     positions: state.positions.filter((p) => p.id !== positionId),
     trades: [trade, ...state.trades].slice(0, 250),
-  };
+  });
 }
 
 export function markBook(state: AppState, prices: Map<string, number>): AppState {
@@ -180,12 +195,14 @@ export function scaleOut(state: AppState, positionId: string, fraction = 0.5): A
     at: new Date().toISOString(),
     note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run`,
   };
-  return {
+  return syncBook({
     ...state,
     portfolio: {
       ...state.portfolio,
       cashUsd: state.portfolio.cashUsd + proceeds,
       realizedPnlUsd: state.portfolio.realizedPnlUsd + pnl.usd,
+      winCount: state.portfolio.winCount + (pnl.usd >= 0 ? 1 : 0),
+      lossCount: state.portfolio.lossCount + (pnl.usd < 0 ? 1 : 0),
       tradeCount: state.portfolio.tradeCount + 1,
     },
     positions: state.positions.map((p) =>
@@ -194,7 +211,7 @@ export function scaleOut(state: AppState, positionId: string, fraction = 0.5): A
         : p,
     ),
     trades: [trade, ...state.trades].slice(0, 250),
-  };
+  });
 }
 
 export function flattenBook(state: AppState, reason: Trade["reason"] = "manual"): AppState {

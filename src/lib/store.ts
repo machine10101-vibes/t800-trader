@@ -98,6 +98,22 @@ export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppS
   return emptyState({ ...state.config, startingEquity: liveEquityUsd });
 }
 
+/** Flat book only. A sub-$5 live read leaves an already funded book alone. */
+export function freshBook(state: AppState, liveEquityUsd: number): AppState {
+  if (state.positions.length > 0 || state.trades.length > 0) return state;
+  if (liveEquityUsd < MIN_TRADE_USD) return state;
+  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+}
+
+export async function adoptLiveEquity(liveEquityUsd: number): Promise<AppState> {
+  if (!activeWallet) throw new Error("Connect a Solana wallet to load a live book.");
+  const current = memory ?? readBrowserState(activeWallet) ?? emptyState();
+  const next = freshBook(current, liveEquityUsd);
+  memory = next;
+  writeBrowserState(activeWallet, next);
+  return next;
+}
+
 export async function attachWallet(address: string, liveEquityUsd: number): Promise<AppState> {
   if (activeWallet === address && memory) {
     const next = seedFromLiveEquity(memory, liveEquityUsd);
