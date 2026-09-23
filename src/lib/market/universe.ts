@@ -34,6 +34,28 @@ const WATCH_BY_SYMBOL = new Map(WATCHLIST.map((t) => [t.symbol.toUpperCase(), t]
 
 const STABLE_SYMS = new Set(["USDC", "USDT", "USD1", "PYUSD", "USDS", "DAI", "FDUSD", "CASH"]);
 const QUOTE_SYMS = new Set(["SOL", "WSOL", "USDC", "USDT"]);
+const WRAPPED_OR_FOREIGN = new Set([
+  "WETH",
+  "ETH",
+  "WBTC",
+  "BTC",
+  "CBBTC",
+  "TBTC",
+  "HBTC",
+  "ZEC",
+  "WZEC",
+  "XMR",
+  "LTC",
+  "DOGE",
+  "SHIB",
+]);
+
+export function isForeignOrWrapped(symbol: string, name: string): boolean {
+  const sym = symbol.toUpperCase();
+  if (WRAPPED_OR_FOREIGN.has(sym)) return true;
+  const blob = `${sym} ${name}`.toLowerCase();
+  return /\b(wrapped (eth|btc|ether|bitcoin)|weth|wbtc)\b/.test(blob);
+}
 
 export function isStable(symbol: string): boolean {
   return STABLE_SYMS.has(symbol.toUpperCase().replace(/\s+/g, ""));
@@ -55,7 +77,7 @@ export function classifySector(symbol: string, name: string): Sector {
   if (/(lend|kamino|solend|margin|borrow)/.test(blob)) return "Lending";
   if (/(render|helium|depin|hivemapper|nosana|io.net)/.test(blob)) return "DePIN";
   if (/(bridge|wormhole|layerzero|infra)/.test(blob)) return "Infra";
-  if (/(pay|usdc|cash|stripe)/.test(blob)) return "Payments";
+  if (/(payment|payfi|stripe|usdc)/.test(blob)) return "Payments";
   return "Unknown";
 }
 

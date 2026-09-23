@@ -141,15 +141,21 @@ async function gtPools(path: string, source: string): Promise<TokenCandidate[]> 
 
 async function watchlistPools(): Promise<TokenCandidate[]> {
   const results = await Promise.allSettled(
-    WATCHLIST.slice(0, 12).map((t) =>
-      gtPools(`networks/solana/tokens/${t.mint}/pools?page=1`, `geckoterminal:token:${t.symbol}`),
-    ),
+    WATCHLIST.slice(0, 12).map(async (t) => {
+      const pools = await gtPools(
+        `networks/solana/tokens/${t.mint}/pools?page=1`,
+        `geckoterminal:token:${t.symbol}`,
+      );
+      return pools
+        .filter((p) => p.mint === t.mint)
+        .map((p) => ({ ...p, watchlist: true, symbol: t.symbol, name: t.name, sector: t.sector }));
+    }),
   );
   const pools = settled(results).flat();
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
     const prev = best.get(p.mint);
-    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(p.mint, { ...p, watchlist: true });
+    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(p.mint, p);
   }
   return [...best.values()];
 }

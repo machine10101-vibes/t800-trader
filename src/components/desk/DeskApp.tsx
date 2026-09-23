@@ -200,7 +200,12 @@ export function DeskApp() {
           {NAV.map((item) => (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
+              aria-label={item.label}
+              onClick={() => {
+                setTab(item.id);
+                setThesis(null);
+                window.scrollTo({ top: 0, behavior: "auto" });
+              }}
               className={`mb-1 flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left ${
                 tab === item.id ? "bg-[rgba(255,255,255,0.06)]" : "hover:bg-[rgba(255,255,255,0.03)]"
               }`}
@@ -226,7 +231,7 @@ export function DeskApp() {
           </p>
         </aside>
 
-        <main className="min-w-0 space-y-5">
+        <main className="min-w-0 space-y-5 pt-1">
           {error ? (
             <div className="rounded-2xl border border-[rgba(255,59,74,0.3)] bg-[rgba(255,59,74,0.08)] px-4 py-3 text-sm text-[var(--crimson)]">
               {error}
@@ -405,15 +410,15 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
   return (
     <div className="space-y-4 boot-fade">
       <div>
-        <h2 className="text-2xl font-medium">Research radar</h2>
+        <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
           Broad Solana universe, weak names eliminated, then only the strongest finalists. Scores use live pool tape, not social
           heat. Missing unlocks, revenue, and holder data are labeled — never invented.
         </p>
       </div>
-      <div className="glass hairline desk-scroll overflow-x-auto rounded-3xl">
+      <div className="glass hairline desk-scroll overflow-x-auto rounded-3xl p-1">
         <table className="w-full min-w-[980px] text-left text-sm">
-          <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+          <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
             <tr>
               <th className="px-4 py-3">Asset</th>
               <th>Ticker</th>
@@ -433,7 +438,7 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
               <tr
                 key={r.id}
                 onClick={() => onOpen(r)}
-                className="cursor-pointer border-t border-[var(--line)] hover:bg-[rgba(255,255,255,0.03)]"
+                className="cursor-pointer border-t border-[var(--line)] hover:bg-[rgba(255,255,255,0.04)]"
               >
                 <td className="px-4 py-3 font-medium">{r.asset}</td>
                 <td className="num">{r.ticker}</td>

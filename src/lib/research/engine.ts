@@ -4,23 +4,29 @@ import { snapshotTechnical } from "@/lib/trading/signals";
 import { usd } from "@/lib/utils";
 import { scoreCandidate, screenCandidate } from "./scoring";
 
-function sectorCap(items: ScoredCandidate[], maxMeme = 2): ScoredCandidate[] {
+function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number, maxUnknown: number): boolean {
+  if (out.some((x) => x.mint === item.mint)) return false;
+  const count = (sector: string) => out.filter((x) => x.sector === sector).length;
+  if (item.sector === "Meme" && count("Meme") >= maxMeme) return false;
+  if (item.sector === "Unknown" && count("Unknown") >= maxUnknown) return false;
+  if (item.sector !== "Meme" && item.sector !== "Unknown" && count(item.sector) >= 3) return false;
+  return true;
+}
+
+function pickFinalists(items: ScoredCandidate[], maxMeme = 2): ScoredCandidate[] {
+  const ranked = [...items].sort((a, b) => b.researchScore - a.researchScore);
+  const watch = ranked.filter((c) => c.watchlist);
+  const rest = ranked.filter((c) => !c.watchlist);
   const out: ScoredCandidate[] = [];
-  let memes = 0;
-  const seenSectors = new Map<string, number>();
-  for (const item of items) {
-    if (item.sector === "Meme") {
-      if (memes >= maxMeme) continue;
-      memes += 1;
-    } else {
-      const n = seenSectors.get(item.sector) ?? 0;
-      if (n >= 3) continue;
-      seenSectors.set(item.sector, n + 1);
-    }
-    out.push(item);
-    if (out.length >= 8) break;
+  for (const item of watch) {
+    if (canTake(out, item, Math.min(maxMeme, 1), 0)) out.push(item);
+    if (out.length >= 6) break;
   }
-  return out;
+  for (const item of rest) {
+    if (out.length >= 8) break;
+    if (canTake(out, item, maxMeme, 1)) out.push(item);
+  }
+  return out.slice(0, 8);
 }
 
 function catalystsFor(c: ScoredCandidate): Catalyst[] {
@@ -203,6 +209,10 @@ let researchCache:
 
 const RESEARCH_CACHE_MS = 45_000;
 
+export function clearResearchCache(): void {
+  researchCache = null;
+}
+
 export async function runResearch(
   config: BotConfig,
   force = false,
@@ -234,17 +244,17 @@ export async function runResearch(
     passed.push(c);
   }
 
-  const rankedSeed = passed
-    .map((c) => ({
-      c,
-      heat: c.volume24hUsd + c.liquidityUsd * 2 + (c.watchlist ? 5_000_000 : 0),
-    }))
+  const watchPassed = passed.filter((c) => c.watchlist);
+  const otherPassed = passed
+    .filter((c) => !c.watchlist)
+    .map((c) => ({ c, heat: c.volume24hUsd + c.liquidityUsd * 2 }))
     .sort((a, b) => b.heat - a.heat)
-    .slice(0, 18);
+    .map((x) => x.c);
+  const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 22);
 
   const scored: ScoredCandidate[] = [];
   await Promise.all(
-    rankedSeed.map(async ({ c }) => {
+    rankedSeed.map(async (c) => {
       try {
         const candles = await fetchOhlcv(c.poolAddress, 70);
         const technical = snapshotTechnical(candles);
@@ -265,7 +275,7 @@ export async function runResearch(
   );
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
-  const finalists = sectorCap(scored, config.allowMemes ? 2 : 0);
+  const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);
   const research = finalists.map((c) => thesisFrom(c, market.regime));
 
   const value = {

@@ -1,8 +1,13 @@
-import { runResearch, wrongAbout } from "@/lib/research/engine";
+import { invalidateMarketCache } from "@/lib/market/providers";
+import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState } from "@/lib/store";
 import type { DeskPayload } from "@/lib/types";
 
 export async function buildDesk(force = false): Promise<DeskPayload> {
+  if (force) {
+    invalidateMarketCache();
+    clearResearchCache();
+  }
   const state = await loadState();
   const research = await runResearch(state.config, force);
   return {

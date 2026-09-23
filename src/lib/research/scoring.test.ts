@@ -58,6 +58,26 @@ describe("screenCandidate", () => {
     assert.ok(reason?.includes("Liquidity"));
   });
 
+  it("rejects wrapped majors", () => {
+    const reason = screenCandidate(token({ symbol: "WETH", name: "Wrapped Ether", watchlist: false }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+    });
+    assert.ok(reason?.includes("Wrapped"));
+  });
+
+  it("rejects wrapped majors even if they were mis-tagged watchlist", () => {
+    const reason = screenCandidate(token({ symbol: "ZEC", name: "Zcash", watchlist: true }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+    });
+    assert.ok(reason?.includes("Wrapped"));
+  });
+
   it("passes liquid watchlist names", () => {
     const reason = screenCandidate(token(), {
       minLiquidityUsd: 120_000,

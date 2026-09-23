@@ -1,4 +1,5 @@
 import type { ScoredCandidate, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
+import { isForeignOrWrapped } from "@/lib/market/universe";
 import { clamp } from "@/lib/utils";
 
 export interface ScreenConfig {
@@ -9,13 +10,18 @@ export interface ScreenConfig {
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
-  if (c.liquidityUsd < cfg.minLiquidityUsd) return `Liquidity ${c.liquidityUsd.toFixed(0)} below ${cfg.minLiquidityUsd}`;
-  if (c.volume24hUsd < cfg.minVolume24hUsd) return `Volume ${c.volume24hUsd.toFixed(0)} below ${cfg.minVolume24hUsd}`;
+  const minLiq = c.watchlist ? Math.min(cfg.minLiquidityUsd, 80_000) : cfg.minLiquidityUsd;
+  const minVol = c.watchlist ? Math.min(cfg.minVolume24hUsd, 40_000) : cfg.minVolume24hUsd;
+  if (c.liquidityUsd < minLiq) return `Liquidity ${c.liquidityUsd.toFixed(0)} below ${minLiq}`;
+  if (c.volume24hUsd < minVol) return `Volume ${c.volume24hUsd.toFixed(0)} below ${minVol}`;
   if (c.ageHours !== null && c.ageHours < cfg.minAgeHours && !c.watchlist) {
     return `Pool age ${c.ageHours.toFixed(1)}h below ${cfg.minAgeHours}h`;
   }
   if (!cfg.allowMemes && c.sector === "Meme" && !c.watchlist) return "Meme sector excluded by risk policy";
   if (c.priceUsd <= 0) return "Invalid price";
+  if (isForeignOrWrapped(c.symbol, c.name)) {
+    return "Wrapped or non-Solana-native asset";
+  }
   return null;
 }
 
@@ -157,6 +163,10 @@ export function scoreRisk(c: TokenCandidate): { score: number; notes: string[] }
   if (c.dex === "pumpswap" || c.dex === "pump-fun" || c.dex.includes("pump")) {
     score -= 10;
     notes.push("Launchpad venue — treat as high-adversarial flow");
+  }
+  if (c.sector === "Unknown" && !c.watchlist) {
+    score -= 12;
+    notes.push("Unclassified token — no mapped protocol");
   }
   return { score: clamp(score, 0, 100), notes };
 }
