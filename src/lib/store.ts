@@ -1,5 +1,3 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
 import type { AppState, BotConfig } from "@/lib/types";
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -14,6 +12,8 @@ export const DEFAULT_CONFIG: BotConfig = {
   allowMemes: true,
   scanSeconds: 8,
 };
+
+const STORAGE_KEY = "t800-trader-state";
 
 export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
   return {
@@ -38,36 +38,52 @@ export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
   };
 }
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const STATE_PATH = path.join(DATA_DIR, "state.json");
-
 let memory: AppState | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
+function readBrowserState(): AppState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AppState;
+    if (!parsed?.config || !parsed?.portfolio) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBrowserState(next: AppState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Quota or private-mode — keep the in-memory book.
+  }
+}
+
 export async function loadState(): Promise<AppState> {
   if (memory) return memory;
-  try {
-    const raw = await readFile(STATE_PATH, "utf8");
-    memory = JSON.parse(raw) as AppState;
-    return memory;
-  } catch {
-    memory = emptyState();
-    return memory;
-  }
+  memory = readBrowserState() ?? emptyState();
+  return memory;
 }
 
 export async function saveState(next: AppState): Promise<AppState> {
   memory = next;
-  writeQueue = writeQueue.then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(STATE_PATH, JSON.stringify(next, null, 2), "utf8");
-  });
-  await writeQueue;
+  writeBrowserState(next);
   return next;
 }
 
 export async function mutateState(fn: (state: AppState) => AppState | Promise<AppState>): Promise<AppState> {
-  const current = await loadState();
-  const next = await fn(structuredClone(current));
-  return saveState(next);
+  const run = writeQueue.then(async () => {
+    const current = await loadState();
+    const next = await fn(structuredClone(current));
+    return saveState(next);
+  });
+  writeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }

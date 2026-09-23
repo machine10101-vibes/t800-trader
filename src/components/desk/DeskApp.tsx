@@ -1,5 +1,6 @@
 "use client";
 
+import { configureBot, controlBot, loadDesk } from "@/lib/client";
 import type { BotConfig, DeskPayload, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -15,13 +16,6 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "risk", label: "Risk", kicker: "05" },
 ];
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { cache: "no-store", ...init });
-  const data = (await res.json()) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
-}
-
 export function DeskApp() {
   const [tab, setTab] = useState<Tab>("overview");
   const [desk, setDesk] = useState<DeskPayload | null>(null);
@@ -31,18 +25,21 @@ export function DeskApp() {
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
 
+  const applyDesk = useCallback((next: DeskPayload) => {
+    setDesk(next);
+    setError(null);
+    setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      const next = await json<DeskPayload>("/api/desk");
-      setDesk(next);
-      setError(null);
-      setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
+      applyDesk(await loadDesk());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Desk refresh failed");
     } finally {
       setBooting(false);
     }
-  }, []);
+  }, [applyDesk]);
 
   useEffect(() => {
     refresh();
@@ -62,18 +59,13 @@ export function DeskApp() {
     const seconds = Math.max(6, desk.config.scanSeconds);
     const id = setInterval(async () => {
       try {
-        await json("/api/bot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "tick" }),
-        });
-        await refresh();
+        applyDesk(await controlBot("tick"));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Tick failed");
       }
     }, seconds * 1000);
     return () => clearInterval(id);
-  }, [desk?.bot.running, desk?.config.scanSeconds, refresh]);
+  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,19 +83,7 @@ export function DeskApp() {
   const control = async (action: "start" | "stop" | "reset" | "tick") => {
     setBusy(true);
     try {
-      await json("/api/bot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      if (action === "start") {
-        await json("/api/bot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "tick" }),
-        });
-      }
-      await refresh();
+      applyDesk(await controlBot(action));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
     } finally {
@@ -114,12 +94,7 @@ export function DeskApp() {
   const saveConfig = async (config: Partial<BotConfig>) => {
     setBusy(true);
     try {
-      await json("/api/bot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "configure", config }),
-      });
-      await refresh();
+      applyDesk(await configureBot(config));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Config failed");
     } finally {

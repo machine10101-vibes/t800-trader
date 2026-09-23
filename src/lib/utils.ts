@@ -99,14 +99,18 @@ export async function fetchJson<T>(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? 12_000);
   try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...opts?.headers,
+    };
+    // Browsers forbid User-Agent and a custom UA trips CORS preflight on public feeds.
+    if (typeof window === "undefined") {
+      headers["User-Agent"] = "t800-trader/0.1";
+    }
     const res = await fetch(url, {
       signal: ctrl.signal,
       cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "t800-trader/0.1",
-        ...opts?.headers,
-      },
+      headers,
     });
     if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText} for ${url}`);

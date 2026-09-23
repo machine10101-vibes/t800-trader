@@ -2,9 +2,13 @@
 
 Solana-first research desk and short-term **paper** trading bot.
 
+Play it at **https://machine10101-vibes.github.io/t800-trader/**
+
 The desk does not start from a celebrity coin list. It pulls a live Solana universe (watchlist venues plus trending, new, and high-volume pools), throws out thin or obviously adversarial tape, then keeps 5–8 finalists. A separate execution loop will only paper-trade names that survived that screen, and only when 5-minute structure, volume, and risk limits agree.
 
 This is a research and simulation tool. It is **not** financial advice and it does **not** place live on-chain orders.
+
+The published site is a **static** Next.js export. Overview, Radar, thesis drawer, Arm / Force tick, Book, and Risk all run in the browser. Paper state lives in `localStorage` (key `t800-trader-state`). There is no Node server and no `data/state.json` on GitHub Pages.
 
 ## What you get
 
@@ -33,14 +37,14 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Press **Space** to arm or disarm the bot.
+Open [http://localhost:3000/t800-trader/](http://localhost:3000/t800-trader/). The `/t800-trader` base path matches GitHub Pages. Press **Space** to arm or disarm the bot.
 
 ```bash
 npm test
 npm run build
 ```
 
-Paper state is stored in `data/state.json` (gitignored). Reset it from the Risk tab.
+`next build` writes a static export to `out/` (project Pages layout: `basePath` / `assetPrefix` `/t800-trader`). Paper state is stored in the browser. Reset it from the Risk tab.
 
 ## Data sources
 
@@ -51,7 +55,7 @@ Paper state is stored in `data/state.json` (gitignored). Reset it from the Risk 
 | [DefiLlama](https://defillama.com) | Solana TVL and DEX volume |
 | [GeckoTerminal](https://www.geckoterminal.com) | Solana pools, flow, OHLCV |
 
-No API keys required for the public endpoints above. Rate limits apply.
+No API keys required for the public endpoints above. Rate limits apply. On Pages the browser calls these feeds directly, so a blocked or rate-limited origin degrades that slice (the rest of the desk still boots).
 
 ## Honest limits
 
@@ -60,6 +64,7 @@ No API keys required for the public endpoints above. Rate limits apply.
 - Unlock calendars, treasuries, audits, and protocol revenue are **not** in these feeds.
 - A research score is a ranking heuristic, not a valuation.
 - Fast 5m signals overfit noise. Silence is a valid position.
+- Static Pages cannot persist a shared book. Each browser has its own paper account.
 
 ## License
 
