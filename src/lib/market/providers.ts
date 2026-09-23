@@ -186,6 +186,9 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
   return [...map.values()];
 }
 
+const ohlcvCache = new Map<string, { at: number; rows: Candle[] }>();
+const OHLCV_TTL_MS = 60_000;
+
 async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour", aggregate: number, limit: number): Promise<Candle[]> {
   const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
   const json = await fetchJson<{
@@ -198,31 +201,30 @@ async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour",
 }
 
 export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candle[]> {
-  for (const [timeframe, aggregate] of [
-    ["minute", 5],
-    ["minute", 15],
-    ["hour", 1],
-  ] as const) {
-    try {
-      const rows = await fetchOhlcvOnce(poolAddress, timeframe, aggregate, limit);
-      if (rows.length) return rows;
-    } catch {
-      // Try a coarser tape before giving up on this pool.
-    }
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit && Date.now() - hit.at < OHLCV_TTL_MS) return hit.rows;
+  try {
+    const rows = await fetchOhlcvOnce(poolAddress, "minute", 5, limit);
+    if (rows.length) ohlcvCache.set(poolAddress, { at: Date.now(), rows });
+    return rows;
+  } catch (error) {
+    if (hit?.rows.length) return hit.rows;
+    throw error;
   }
-  return [];
 }
 
 export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): Promise<Candle[]> {
-  const seen = new Set<string>();
-  for (const pool of [...poolAddresses, ...SOL_USDC_POOLS]) {
-    if (!pool || seen.has(pool)) continue;
-    seen.add(pool);
+  const ordered = uniqueBy([...poolAddresses, ...SOL_USDC_POOLS], (p) => p).filter(Boolean);
+  for (const pool of ordered) {
+    const hit = ohlcvCache.get(pool);
+    if (hit?.rows.length && Date.now() - hit.at < OHLCV_TTL_MS) return hit.rows;
+  }
+  for (const pool of ordered.slice(0, 3)) {
     try {
       const rows = await fetchOhlcv(pool, limit);
       if (rows.length) return rows;
     } catch {
-      // Next pool.
+      // Next pool — research may have already 429'd this origin.
     }
   }
   return [];

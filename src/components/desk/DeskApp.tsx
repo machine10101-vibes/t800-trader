@@ -9,7 +9,6 @@ import {
   disconnectWallet,
   listenWallet,
   refreshWallet,
-  walletInstalled,
   type WalletSession,
 } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, ResearchThesis } from "@/lib/types";
@@ -41,6 +40,7 @@ export function DeskApp() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [focusMint, setFocusMint] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [walletHint, setWalletHint] = useState<string | null>(null);
 
   const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
@@ -89,6 +89,10 @@ export function DeskApp() {
     setError(null);
     setBooting(false);
   }, [wallet]);
+
+  useEffect(() => {
+    setWalletHint(detectedWalletName());
+  }, []);
 
   useEffect(() => {
     void connect(true);
@@ -242,7 +246,6 @@ export function DeskApp() {
   const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
 
   if (!wallet) {
-    const detected = detectedWalletName();
     return (
       <div className="grid min-h-screen place-items-center px-6 py-10">
         <div className="neon boot-fade w-full max-w-xl p-8 sm:p-10">
@@ -260,10 +263,10 @@ export function DeskApp() {
           </div>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
           <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
-            {walletBusy ? "Waiting on wallet…" : detected ? `Connect ${detected}` : walletInstalled() ? "Connect Solana wallet" : "Install Phantom or Solflare"}
+            {walletBusy ? "Waiting on wallet…" : walletHint ? `Connect ${walletHint}` : "Connect Solana wallet"}
           </button>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
-            {detected ? `${detected} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
+            {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
             Fills stay simulated at live marks so the account is yours, not a $10k dummy.
           </p>
         </div>
