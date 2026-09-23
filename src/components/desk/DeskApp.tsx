@@ -173,7 +173,7 @@ export function DeskApp() {
         });
     };
     pull();
-    const id = setInterval(pull, 45_000);
+    const id = setInterval(pull, 180_000);
     return () => {
       live = false;
       clearInterval(id);

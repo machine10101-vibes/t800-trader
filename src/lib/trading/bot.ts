@@ -1,4 +1,4 @@
-import { fetchOhlcv, loadMarket } from "@/lib/market/providers";
+import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, MarketRegime, Signal } from "@/lib/types";
@@ -15,7 +15,7 @@ import {
   sizePosition,
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
-import { buildSignals, snapshotTechnical } from "./signals";
+import { buildFlowSignals, buildSignals, snapshotTechnical } from "./signals";
 
 function priceMap(state: AppState, extras: { mint: string; price: number }[]): Map<string, number> {
   const map = new Map<string, number>();
@@ -70,32 +70,17 @@ export async function tickBot(): Promise<AppState> {
           .sort((a, b) => b.researchScore - a.researchScore)
           .slice(0, 10);
 
-        let candleTries = 0;
+        const tapeCtx = {
+          stance: market.regime.stance,
+          fearGreed: market.regime.fearGreed?.value ?? null,
+          solChange: market.regime.sol.change24h,
+        };
         for (const token of focus) {
-          let tech = token.technical;
-          if (tech.rsi14 === null) {
-            if (candleTries >= 2) {
-              blocked.push(`${token.symbol}: 5m tape not loaded`);
-              continue;
-            }
-            candleTries += 1;
-            try {
-              const candles = await fetchOhlcv(token.poolAddress, 70);
-              if (candles.length < 20) {
-                blocked.push(`${token.symbol}: 5m tape too short`);
-                continue;
-              }
-              tech = snapshotTechnical(candles);
-            } catch {
-              blocked.push(`${token.symbol}: 5m tape rate-limited`);
-              continue;
-            }
-          }
-          const found = buildSignals(token, tech, token.researchScore, next.config.allowShorts, {
-            stance: market.regime.stance,
-            fearGreed: market.regime.fearGreed?.value ?? null,
-            solChange: market.regime.sol.change24h,
-          });
+          const candles = cachedOhlcv(token.poolAddress);
+          const found =
+            candles && candles.length >= 20
+              ? buildSignals(token, snapshotTechnical(candles), token.researchScore, next.config.allowShorts, tapeCtx)
+              : buildFlowSignals(token, token.researchScore, next.config.allowShorts, tapeCtx);
           signals.push(...found);
         }
 

@@ -269,3 +269,99 @@ export function buildSignals(
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 1);
 }
+
+/** Score the book from pool flow when 5m candles are rate-limited. */
+export function technicalFromFlows(token: TokenCandidate): TechnicalSnapshot {
+  const price = token.priceUsd > 0 ? token.priceUsd : 0;
+  const h1 = token.flows.h1.priceChangePct;
+  const m15 = token.flows.m15.priceChangePct;
+  const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
+  const runRate = token.volume24hUsd > 0 ? token.volume24hUsd / 24 : 0;
+  const burst = runRate > 0 ? token.flows.h1.volumeUsd / runRate : 1;
+  return {
+    rsi14: clamp(50 + h1 * 2.4 + m15 * 1.2, 8, 92),
+    ema9: price,
+    ema21: price * (1 - h1 / 200),
+    vwap: price,
+    atrPct: clamp(Math.abs(m15) * 0.55 + Math.abs(h1) * 0.25 + 0.7, 0.55, 4.8),
+    volumeZ: clamp((burst - 1) * 1.4, -2, 4),
+    lastClose: price || null,
+    extensionPct: m15 * 0.5,
+    closeStrength: tape,
+    priorHigh: price > 0 ? price * (1 + Math.max(-m15, 0) / 100) : null,
+    priorLow: price > 0 ? price * (1 - Math.max(m15, 0) / 100) : null,
+    barsAboveEma9: h1 > 0.2 ? 3 : 0,
+  };
+}
+
+/** Trade the pool tape the desk already loaded. No candle request. */
+export function buildFlowSignals(
+  token: TokenCandidate,
+  researchScore: number | null,
+  _allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+): Signal[] {
+  const stance = typeof ctx === "string" ? ctx : ctx.stance;
+  const fearGreed = typeof ctx === "string" ? null : ctx.fearGreed;
+  const solChange = typeof ctx === "string" ? 0 : ctx.solChange;
+  const price = token.priceUsd;
+  if (!(price > 0)) return [];
+
+  const h1 = token.flows.h1.priceChangePct;
+  const m15 = token.flows.m15.priceChangePct;
+  const m5 = token.flows.m5.priceChangePct;
+  const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
+  const defensive = stance === "defensive";
+  const solDump = solChange < -4.5;
+  if (h1 <= -6 || m15 <= -4 || m5 <= -3.5 || solDump) return [];
+  if (token.sector === "Meme" && (defensive || (fearGreed !== null && fearGreed >= 75))) return [];
+  if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
+
+  const held =
+    token.watchlist &&
+    h1 > (defensive ? -3.5 : -2) &&
+    h1 < 9 &&
+    m15 > (defensive ? -2.2 : -1.2) &&
+    m15 < 7 &&
+    tape >= (defensive ? 0.45 : 0.48);
+  const impulse =
+    !defensive &&
+    token.sector !== "Meme" &&
+    m15 > 0.55 &&
+    m5 > -0.3 &&
+    h1 > -0.8 &&
+    h1 < 12 &&
+    tape >= 0.52;
+  if (!held && !impulse) return [];
+
+  const stopPct = clamp(1.35 + Math.abs(Math.min(m15, 0)) * 0.35 + (defensive ? 0.2 : 0), 1.2, 3.1);
+  const rr = withMinRR(stopPct, stopPct * 1.7);
+  const confidence = clamp(
+    61 +
+      (token.watchlist ? 5 : 0) +
+      (tape - 0.5) * 22 +
+      Math.max(h1, 0) * 0.5 +
+      (researchScore !== null ? (researchScore - 55) * 0.12 : 0),
+    60,
+    86,
+  );
+  const reason: Signal["reason"] = impulse && m15 >= 1.2 ? "breakout" : "reclaim";
+  const side: Signal["side"] = "long";
+  return [
+    {
+      id: id("sig"),
+      mint: token.mint,
+      symbol: token.symbol,
+      poolAddress: token.poolAddress,
+      sector: token.sector,
+      price,
+      researchScore,
+      createdAt: new Date().toISOString(),
+      side,
+      reason,
+      confidence,
+      ...rr,
+      thesis: `${token.symbol} pool flow is tradable on a ${stance} tape — 15m ${m15.toFixed(2)}%, 1h ${h1.toFixed(2)}%, buy share ${(tape * 100).toFixed(0)}%. Sized from the wallet, not from a candle feed.`,
+    },
+  ].filter((s) => rewardToRisk(s.stopPct, s.targetPct) >= 1.6);
+}

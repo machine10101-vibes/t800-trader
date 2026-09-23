@@ -61,7 +61,7 @@ let cache:
     }
   | null = null;
 
-const CACHE_MS = 25_000;
+const CACHE_MS = 120_000;
 
 function mintFromGtId(id: string | undefined): string {
   if (!id) return "";
@@ -226,6 +226,12 @@ async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour",
 function staleCandles(poolAddress: string): Candle[] | null {
   const hit = ohlcvCache.get(poolAddress);
   if (hit?.rows.length && Date.now() - hit.at < OHLCV_STALE_MS) return hit.rows;
+  return null;
+}
+
+export function cachedOhlcv(poolAddress: string): Candle[] | null {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit?.rows.length) return hit.rows;
   return null;
 }
 

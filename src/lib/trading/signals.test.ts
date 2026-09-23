@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildSignals, ema, rewardToRisk, rsi, snapshotTechnical } from "./signals";
-import type { Candle, TechnicalSnapshot, TokenCandidate } from "../types";
+import { atrTradeable, buildFlowSignals, buildSignals, ema, rewardToRisk, rsi, snapshotTechnical } from "./signals";
+import { canOpen, cashConcentration, sizePosition } from "./risk";
+import { DEFAULT_CONFIG } from "../store";
+import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
 
 function candles(n: number, start = 100): Candle[] {
   const out: Candle[] = [];
@@ -102,6 +104,95 @@ describe("indicators", () => {
       barsAboveEma9: 0,
     } as TechnicalSnapshot;
     const found = buildSignals(token, tech, 60, true, { stance: "mixed", fearGreed: 50, solChange: -1 });
+    assert.equal(found.length, 0);
+  });
+
+  it("buys a watchlist name from pool flow when the hour is only slightly red", () => {
+    const flow = (priceChangePct: number, buys = 52, sells = 48) => ({
+      buys,
+      sells,
+      buyers: 20,
+      sellers: 18,
+      volumeUsd: 10_000,
+      priceChangePct,
+    });
+    const token = {
+      symbol: "SOL",
+      mint: "sol",
+      poolAddress: "pool",
+      sector: "L1",
+      watchlist: true,
+      priceUsd: 115,
+      flows: {
+        m5: flow(-0.1),
+        m15: flow(-0.3),
+        m30: flow(0.2),
+        h1: flow(-0.6),
+        h6: flow(-1),
+        h24: flow(-1.5),
+      },
+    } as TokenCandidate;
+    const found = buildFlowSignals(token, 67, true, { stance: "defensive", fearGreed: 71, solChange: -1.8 });
+    assert.equal(found.length, 1);
+    assert.equal(found[0]?.side, "long");
+    assert.equal(found[0]?.reason, "reclaim");
+    assert.ok((found[0]?.confidence ?? 0) >= 58);
+    const signal = found[0]!;
+    const book = {
+      cashUsd: 6,
+      equityUsd: 6,
+      peakEquity: 6,
+      dayStartEquity: 6,
+      dayPnlUsd: 0,
+      realizedPnlUsd: 0,
+      unrealizedPnlUsd: 0,
+      winCount: 0,
+      lossCount: 0,
+      tradeCount: 0,
+    };
+    assert.equal(
+      canOpen({ positions: [], signal, config: DEFAULT_CONFIG, portfolio: book, stance: "defensive" }),
+      null,
+    );
+    const sized = sizePosition({
+      equity: 6,
+      price: signal.price,
+      stopPct: signal.stopPct,
+      config: DEFAULT_CONFIG,
+      regime: { stance: "defensive" } as MarketRegime,
+      researchScore: 67,
+      confidence: signal.confidence,
+    });
+    assert.ok(sized.notional >= 1);
+    assert.ok(sized.notional <= 6 * cashConcentration(6));
+  });
+
+  it("does not buy a crashing watchlist name from pool flow", () => {
+    const flow = (priceChangePct: number) => ({
+      buys: 30,
+      sells: 70,
+      buyers: 8,
+      sellers: 20,
+      volumeUsd: 10_000,
+      priceChangePct,
+    });
+    const token = {
+      symbol: "SOL",
+      mint: "sol",
+      poolAddress: "pool",
+      sector: "L1",
+      watchlist: true,
+      priceUsd: 115,
+      flows: {
+        m5: flow(-4),
+        m15: flow(-5),
+        m30: flow(-6),
+        h1: flow(-8),
+        h6: flow(-8),
+        h24: flow(-8),
+      },
+    } as TokenCandidate;
+    const found = buildFlowSignals(token, 60, true, { stance: "defensive", fearGreed: 40, solChange: -6 });
     assert.equal(found.length, 0);
   });
 
