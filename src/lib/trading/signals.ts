@@ -1,5 +1,10 @@
-import type { Candle, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
+import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { clamp, id, mean, stdev } from "@/lib/utils";
+
+function buyShare(buys: number, sells: number): number {
+  const t = buys + sells;
+  return t > 0 ? buys / t : 0.5;
+}
 
 export function ema(values: number[], period: number): number | null {
   if (values.length < period) return null;
@@ -88,6 +93,7 @@ export function buildSignals(
   tech: TechnicalSnapshot,
   researchScore: number | null,
   allowShorts: boolean,
+  stance: MarketRegime["stance"] = "mixed",
 ): Signal[] {
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
   const price = tech.lastClose;
@@ -97,12 +103,14 @@ export function buildSignals(
   const h15 = token.flows.m15.priceChangePct;
   const h30 = token.flows.m30.priceChangePct;
   const h1 = token.flows.h1.priceChangePct;
+  const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
   const signals: Signal[] = [];
 
   const base = {
     mint: token.mint,
     symbol: token.symbol,
     poolAddress: token.poolAddress,
+    sector: token.sector,
     price,
     researchScore,
     createdAt: new Date().toISOString(),
@@ -110,7 +118,8 @@ export function buildSignals(
 
   const trendUp = tech.ema9 > tech.ema21 && h1 > -1.5;
   const notEuphoric = tech.rsi14 < 72 && ext < 5.5;
-  if (trendUp && notEuphoric && volZ > 1.15 && h15 > 0.4 && tech.rsi14 > 50) {
+  const allowBreakout = stance !== "defensive" || (token.watchlist && (researchScore ?? 0) >= 70);
+  if (allowBreakout && trendUp && notEuphoric && volZ > 1.15 && h15 > 0.4 && tech.rsi14 > 50 && tape >= 0.52) {
     signals.push({
       ...base,
       id: id("sig"),
@@ -119,11 +128,11 @@ export function buildSignals(
       confidence: clamp(58 + volZ * 6 + (researchScore ? (researchScore - 50) * 0.2 : 0), 50, 92),
       stopPct: clamp(atr * 1.35, 0.8, 4.2),
       targetPct: clamp(atr * 2.2, 1.3, 7.5),
-      thesis: `${token.symbol} 5m trend is up (EMA9>EMA21), RSI ${tech.rsi14.toFixed(0)}, volume z ${volZ.toFixed(1)}. Breakout scalp, not a bag-hold.`,
+      thesis: `${token.symbol} 5m trend is up (EMA9>EMA21), RSI ${tech.rsi14.toFixed(0)}, 15m buy share ${(tape * 100).toFixed(0)}%, volume z ${volZ.toFixed(1)}. Breakout scalp, not a bag-hold.`,
     });
   }
 
-  if (tech.rsi14 < 34 && volZ > 0.2 && ext < 1 && h30 > -18) {
+  if (tech.rsi14 < 34 && volZ > 0.2 && ext < 1 && h30 > -18 && tape >= 0.45) {
     signals.push({
       ...base,
       id: id("sig"),
@@ -136,7 +145,22 @@ export function buildSignals(
     });
   }
 
-  if (allowShorts && (h30 > 11 || h1 > 18) && tech.rsi14 > 76 && ext > 4.5) {
+  const nearVwap =
+    tech.vwap !== null && price <= tech.vwap * 1.006 && price >= tech.vwap * 0.99 && tech.rsi14 >= 44 && tech.rsi14 <= 60;
+  if (trendUp && nearVwap && volZ > 0.25 && tape >= 0.5 && stance !== "defensive") {
+    signals.push({
+      ...base,
+      id: id("sig"),
+      side: "long",
+      reason: "reclaim",
+      confidence: clamp(57 + volZ * 4 + (researchScore ? (researchScore - 50) * 0.15 : 0), 52, 86),
+      stopPct: clamp(atr * 1.15, 0.7, 3.4),
+      targetPct: clamp(atr * 1.85, 1.1, 5.8),
+      thesis: `${token.symbol} is hugging VWAP with EMA9>EMA21. Pullback long — only if the 5m trend holds.`,
+    });
+  }
+
+  if (allowShorts && stance !== "defensive" && (h30 > 11 || h1 > 18) && tech.rsi14 > 76 && ext > 4.5 && tape <= 0.48) {
     signals.push({
       ...base,
       id: id("sig"),

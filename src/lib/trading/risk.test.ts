@@ -75,6 +75,7 @@ describe("risk", () => {
       mint: "abc",
       symbol: "ABC",
       poolAddress: "p",
+      sector: "DEX",
       side: "long",
       reason: "breakout",
       confidence: 70,
@@ -92,6 +93,7 @@ describe("risk", () => {
           mint: "abc",
           symbol: "ABC",
           poolAddress: "p",
+          sector: "DEX",
           side: "long",
           qty: 1,
           entryPrice: 1,
@@ -112,5 +114,78 @@ describe("risk", () => {
       portfolio: portfolio(),
     });
     assert.equal(reason, "Already in this mint");
+  });
+
+  it("blocks a third ticket in the same sector", () => {
+    const signal = {
+      id: "s2",
+      mint: "def",
+      symbol: "DEF",
+      poolAddress: "q",
+      sector: "DEX",
+      side: "long",
+      reason: "breakout",
+      confidence: 70,
+      price: 1,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 60,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    const pos = (mint: string) => ({
+      id: mint,
+      mint,
+      symbol: mint,
+      poolAddress: mint,
+      sector: "DEX" as const,
+      side: "long" as const,
+      qty: 1,
+      entryPrice: 1,
+      markPrice: 1,
+      stopPrice: 0.9,
+      targetPrice: 1.1,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "breakout" as const,
+      researchScore: 60,
+      highWater: 1,
+      lowWater: 1,
+      notional: 1,
+    });
+    const reason = canOpen({
+      positions: [pos("aaa"), pos("bbb")],
+      signal,
+      config: DEFAULT_CONFIG,
+      portfolio: portfolio(),
+    });
+    assert.equal(reason, "Already two DEX tickets");
+  });
+
+  it("blocks shorts when the tape is defensive", () => {
+    const signal = {
+      id: "s3",
+      mint: "xyz",
+      symbol: "XYZ",
+      poolAddress: "z",
+      sector: "Meme",
+      side: "short",
+      reason: "fade",
+      confidence: 80,
+      price: 1,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 60,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    const reason = canOpen({
+      positions: [],
+      signal,
+      config: DEFAULT_CONFIG,
+      portfolio: portfolio(),
+      stance: "defensive",
+    });
+    assert.equal(reason, "No shorts in a defensive tape");
   });
 });

@@ -29,7 +29,17 @@ export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
   const equity = Math.max(0, config.startingEquity);
   return {
     config: { ...config, startingEquity: equity },
-    bot: { running: false, lastTickAt: null, lastError: null, ticks: 0, startedAt: null },
+    bot: {
+      running: false,
+      lastTickAt: null,
+      lastError: null,
+      ticks: 0,
+      startedAt: null,
+      lastNote: null,
+      lastOpened: 0,
+      lastClosed: 0,
+      blocked: [],
+    },
     portfolio: {
       cashUsd: equity,
       equityUsd: equity,

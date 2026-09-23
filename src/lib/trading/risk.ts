@@ -1,4 +1,4 @@
-import type { BotConfig, MarketRegime, Portfolio, Position, Signal } from "@/lib/types";
+import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 
 export function dayLossBreached(portfolio: Portfolio, config: BotConfig): boolean {
   const dd = ((portfolio.dayStartEquity - portfolio.equityUsd) / Math.max(portfolio.dayStartEquity, 1)) * 100;
@@ -35,18 +35,36 @@ export function sizePosition(args: {
   return { qty, notional };
 }
 
+const COOLDOWN_MS = 20 * 60_000;
+
 export function canOpen(args: {
   positions: Position[];
   signal: Signal;
   config: BotConfig;
   portfolio: Portfolio;
+  trades?: Trade[];
+  stance?: MarketRegime["stance"];
 }): string | null {
-  const { positions, signal, config, portfolio } = args;
+  const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (positions.length >= config.maxPositions) return "Max positions reached";
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   if (portfolio.cashUsd < 25) return "Insufficient cash";
+  if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
+  if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < 70) {
+    return "Breakouts need a 70+ score when defensive";
+  }
+  const sector = signal.sector ?? "Unknown";
+  const sameSector = positions.filter((p) => (p.sector ?? "Unknown") === sector).length;
+  if (sameSector >= 2) return `Already two ${sector} tickets`;
+  if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
+    return "Meme cluster capped off risk-on";
+  }
+  const lastStop = trades.find((t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time"));
+  if (lastStop && Date.now() - Date.parse(lastStop.at) < COOLDOWN_MS) {
+    return "Cooldown after a stop/time-out on this mint";
+  }
   return null;
 }
 
@@ -70,9 +88,10 @@ export function unrealizedPnl(position: Position): { usd: number; pct: number } 
   return { usd, pct };
 }
 
-export function exitReason(position: Position, nowMs = Date.now()): "stop" | "target" | "trail" | "time" | null {
+export function exitReason(position: Position, nowMs = Date.now()): "stop" | "target" | "trail" | "time" | "risk-off" | null {
   const { usd } = unrealizedPnl(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
+  const timeCap = (position.sector ?? "Unknown") === "Meme" ? 28 : 50;
   if (position.side === "long") {
     if (position.markPrice <= position.stopPrice) return "stop";
     if (position.markPrice >= position.targetPrice) return "target";
@@ -84,6 +103,12 @@ export function exitReason(position: Position, nowMs = Date.now()): "stop" | "ta
     const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * 0.55;
     if (usd > 0 && position.lowWater <= locked && position.markPrice > locked) return "trail";
   }
-  if (ageMin > 50) return "time";
+  if (ageMin > timeCap) return "time";
   return null;
+}
+
+export function shouldFlattenMeme(position: Position, stance: MarketRegime["stance"]): boolean {
+  if (stance !== "defensive") return false;
+  if ((position.sector ?? "Unknown") !== "Meme") return false;
+  return unrealizedPnl(position).usd < 0;
 }

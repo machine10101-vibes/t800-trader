@@ -279,6 +279,52 @@ input[type="range"] {
   box-shadow: inset 3px 0 0 var(--magenta);
 }
 
+.toast-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  min-width: 220px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: rgba(12, 12, 20, 0.92);
+  padding: 10px 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  animation: boot 280ms ease both;
+}
+
+.range-track {
+  position: relative;
+  height: 7px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.range-mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 13px;
+  border-radius: 99px;
+}
+
+.cmd {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

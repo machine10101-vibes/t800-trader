@@ -25,6 +25,7 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     mint: signal.mint,
     symbol: signal.symbol,
     poolAddress: signal.poolAddress,
+    sector: signal.sector ?? "Unknown",
     side: signal.side,
     qty,
     entryPrice: price,
@@ -127,6 +128,10 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
       dayPnlUsd: equity - state.portfolio.dayStartEquity,
     },
   };
+}
+
+export function flattenBook(state: AppState, reason: Trade["reason"] = "manual"): AppState {
+  return state.positions.reduce((acc, pos) => closePosition(acc, pos.id, pos.markPrice, reason), state);
 }
 
 export function pushEquity(state: AppState): AppState {

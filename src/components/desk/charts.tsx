@@ -1,5 +1,28 @@
 import type { Candle, TapeDot } from "@/lib/types";
 
+function rollingEma(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = values.map(() => null);
+  if (values.length < period) return out;
+  const k = 2 / (period + 1);
+  let e = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[period - 1] = e;
+  for (let i = period; i < values.length; i++) {
+    e = values[i] * k + e * (1 - k);
+    out[i] = e;
+  }
+  return out;
+}
+
+function linePath(
+  values: (number | null)[],
+  xOf: (i: number) => number,
+  yOf: (v: number) => number,
+): string {
+  return values
+    .map((v, i) => (v === null ? "" : `${i && values[i - 1] !== null ? "L" : "M"}${xOf(i)},${yOf(v)}`))
+    .join(" ");
+}
+
 export function CandleChart({ candles }: { candles: Candle[] }) {
   if (candles.length < 1) {
     return <EmptyPlot label="No live OHLCV for this pool" />;
@@ -10,13 +33,25 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
   const slice = candles.slice(-72);
   const highs = slice.map((c) => c.high);
   const lows = slice.map((c) => c.low);
+  const closes = slice.map((c) => c.close);
   const min = Math.min(...lows);
   const max = Math.max(...highs);
   const span = max - min || 1;
   const bw = Math.max(2.2, (w - pad * 2) / slice.length - 1.4);
+  const xOf = (i: number) => pad + (i + 0.5) * ((w - pad * 2) / slice.length);
   const y = (v: number) => pad + ((max - v) / span) * (h - pad * 2);
   const last = slice[slice.length - 1];
   const up = last.close >= last.open;
+  const ema9 = rollingEma(closes, 9);
+  const ema21 = rollingEma(closes, 21);
+  let vwPv = 0;
+  let vwVol = 0;
+  const vwap = slice.map((c) => {
+    const typical = (c.high + c.low + c.close) / 3;
+    vwPv += typical * c.volume;
+    vwVol += c.volume;
+    return vwVol > 0 ? vwPv / vwVol : null;
+  });
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
       {[0.25, 0.5, 0.75].map((p) => (
@@ -29,8 +64,11 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
           stroke="rgba(255,255,255,0.05)"
         />
       ))}
+      <path d={linePath(vwap, xOf, y)} fill="none" stroke="rgba(243,193,91,0.55)" strokeWidth="1.2" strokeDasharray="3 3" />
+      <path d={linePath(ema21, xOf, y)} fill="none" stroke="rgba(121,212,255,0.7)" strokeWidth="1.3" />
+      <path d={linePath(ema9, xOf, y)} fill="none" stroke="rgba(255,74,216,0.85)" strokeWidth="1.4" />
       {slice.map((c, i) => {
-        const x = pad + (i + 0.5) * ((w - pad * 2) / slice.length);
+        const x = xOf(i);
         const green = c.close >= c.open;
         const color = green ? "#3ee8a8" : "#ff3b8f";
         return (

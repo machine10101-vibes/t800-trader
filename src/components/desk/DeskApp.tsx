@@ -1,7 +1,7 @@
 "use client";
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
-import { attachWallet, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
+import { attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
 import { fetchOhlcvFromPools } from "@/lib/market/providers";
 import {
   connectWallet,
@@ -11,9 +11,9 @@ import {
   refreshWallet,
   type WalletSession,
 } from "@/lib/solana/wallet";
-import type { BotConfig, Candle, DeskPayload, ResearchThesis } from "@/lib/types";
+import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
 type Tab = "overview" | "radar" | "bot" | "book" | "risk";
@@ -41,6 +41,8 @@ export function DeskApp() {
   const [focusMint, setFocusMint] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [walletHint, setWalletHint] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
+  const lastTradeId = useRef<string | null>(null);
 
   const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
@@ -193,18 +195,52 @@ export function DeskApp() {
         setThesis(null);
         return;
       }
-      if (e.code !== "Space" || e.repeat || !wallet || !desk) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key >= "1" && e.key <= "5") {
+        const next = NAV[Number(e.key) - 1];
+        if (next) {
+          setTab(next.id);
+          setThesis(null);
+        }
+        return;
+      }
+      if (e.key.toLowerCase() === "r" && wallet) {
+        e.preventDefault();
+        void refresh();
+        return;
+      }
+      if (e.key.toLowerCase() === "f" && wallet && desk) {
+        e.preventDefault();
+        void control("flatten");
+        return;
+      }
+      if (e.code !== "Space" || e.repeat || !wallet || !desk) return;
       e.preventDefault();
       void control(desk.bot.running ? "stop" : "start");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desk?.bot.running, wallet]);
+  }, [desk?.bot.running, wallet, refresh]);
 
-  const control = async (action: "start" | "stop" | "reset" | "tick") => {
+  useEffect(() => {
+    const latest = desk?.trades[0];
+    if (!latest) return;
+    if (lastTradeId.current === null) {
+      lastTradeId.current = latest.id;
+      return;
+    }
+    if (latest.id === lastTradeId.current) return;
+    lastTradeId.current = latest.id;
+    const text = `${latest.action.toUpperCase()} ${latest.symbol} ${latest.reason}${latest.pnlUsd !== null ? ` ${usd(latest.pnlUsd)}` : ""}`;
+    setToasts((cur) => [...cur, { id: latest.id, text }].slice(-4));
+    window.setTimeout(() => {
+      setToasts((cur) => cur.filter((t) => t.id !== latest.id));
+    }, 4200);
+  }, [desk?.trades]);
+
+  const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten") => {
     if (!wallet) {
       setError("Connect a Solana wallet to trade.");
       return;
@@ -230,6 +266,18 @@ export function DeskApp() {
       applyDesk(await configureBot(config));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Config failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closePos = async (positionId: string) => {
+    if (!wallet) return;
+    setBusy(true);
+    try {
+      applyDesk(await closeTicket(positionId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Close failed");
     } finally {
       setBusy(false);
     }
@@ -331,8 +379,9 @@ export function DeskApp() {
           >
             {desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
-          <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--faint)]">
-            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks. Space to arm.
+          {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
+          <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
+            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks.
           </p>
           <button onClick={() => void disconnect()} className="mt-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
@@ -364,14 +413,30 @@ export function DeskApp() {
               ) : null}
               {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
               {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
-              {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} /> : null}
+              {tab === "book" ? (
+                <Book desk={desk} wallet={wallet} winRate={winRate} busy={busy} onClose={closePos} onFlatten={() => void control("flatten")} />
+              ) : null}
               {tab === "risk" ? <RiskView desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
             </div>
           )}
+          {desk ? (
+            <div className="cmd">
+              1–5 tabs · Space arm · R refresh · F flatten · Esc thesis
+            </div>
+          ) : null}
         </main>
       </div>
 
       {thesis ? <ThesisDrawer thesis={thesis} onClose={() => setThesis(null)} /> : null}
+      {toasts.length ? (
+        <div className="toast-stack">
+          {toasts.map((t) => (
+            <div key={t.id} className="toast text-sm">
+              {t.text}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -446,7 +511,13 @@ function Header({
           <button onClick={onDisconnect} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
             Disconnect
           </button>
-          <div className="num hidden text-[var(--muted)] lg:block">{updatedAt ? new Date(updatedAt).toLocaleTimeString() : clock}</div>
+            {desk ? (
+              <div className="hidden text-right md:block">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Day P&L</div>
+                <Tone value={desk.portfolio.dayPnlUsd}>{usd(desk.portfolio.dayPnlUsd)}</Tone>
+              </div>
+            ) : null}
+            <div className="num hidden text-[var(--muted)] lg:block">{updatedAt ? new Date(updatedAt).toLocaleTimeString() : clock}</div>
         </div>
       </div>
     </header>
@@ -475,6 +546,47 @@ function BootSkeleton({ address }: { address: string }) {
       <div className="neon h-56 p-3">
         <div className="skel h-full w-full" />
       </div>
+    </div>
+  );
+}
+
+function PositionRail({ positions }: { positions: Position[] }) {
+  return (
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {positions.map((p) => {
+        const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
+        return (
+          <div key={p.id} className="neon p-4">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">
+                {p.symbol} <span className="text-[11px] text-[var(--faint)]">{p.side}</span>
+              </div>
+              <Tone value={pnlPct} />
+            </div>
+            <div className="mt-2 text-xs text-[var(--muted)]">
+              {priceFmt(p.entryPrice)} → {priceFmt(p.markPrice)} · {p.reason}
+            </div>
+            <div className="mt-3">
+              <RangeBar position={p} />
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function RangeBar({ position }: { position: Position }) {
+  const pts = [position.stopPrice, position.entryPrice, position.markPrice, position.targetPrice];
+  const lo = Math.min(...pts);
+  const hi = Math.max(...pts);
+  const x = (v: number) => `${((v - lo) / (hi - lo || 1)) * 100}%`;
+  return (
+    <div className="range-track">
+      <span className="range-mark bg-[var(--crimson)]" style={{ left: x(position.stopPrice) }} />
+      <span className="range-mark bg-white" style={{ left: x(position.entryPrice) }} />
+      <span className="range-mark bg-[var(--magenta)]" style={{ left: x(position.markPrice) }} />
+      <span className="range-mark bg-[var(--mint)]" style={{ left: x(position.targetPrice) }} />
     </div>
   );
 }
@@ -546,7 +658,10 @@ function Overview({
           </button>
         </section>
         <section className="neon p-3">
-          <Label>{focus ? `${focus.ticker} tape` : "Live candles"}</Label>
+          <div className="flex items-center justify-between px-1">
+            <Label>{focus ? `${focus.ticker} tape` : "Live candles"}</Label>
+            <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">EMA9 · EMA21 · VWAP</span>
+          </div>
           <div className="h-[168px]">
             <CandleChart candles={candles} />
           </div>
@@ -562,6 +677,19 @@ function Overview({
           </div>
         </section>
       </div>
+
+      {desk.positions.length ? <PositionRail positions={desk.positions} /> : null}
+
+      <section className="grid gap-3 md:grid-cols-4">
+        <Stat label="Day P&L" value={<Tone value={desk.portfolio.dayPnlUsd}>{usd(desk.portfolio.dayPnlUsd)}</Tone>} sub={`DD ${desk.stats.maxDrawdownPct.toFixed(1)}%`} />
+        <Stat label="Expectancy" value={usd(desk.stats.expectancyUsd)} sub={`${desk.stats.closedTrades} closed`} />
+        <Stat
+          label="Profit factor"
+          value={desk.stats.profitFactor === null ? "—" : Number.isFinite(desk.stats.profitFactor) ? desk.stats.profitFactor.toFixed(2) : "∞"}
+          sub={`avg W ${usd(desk.stats.avgWinUsd)}`}
+        />
+        <Stat label="Unrealized" value={<Tone value={desk.portfolio.unrealizedPnlUsd}>{usd(desk.portfolio.unrealizedPnlUsd)}</Tone>} sub={`${desk.positions.length} open`} />
+      </section>
 
       <section className="neon p-3">
         <div className="mb-2 flex items-center justify-between px-2">
@@ -723,7 +851,7 @@ function BotView({
 }: {
   desk: DeskPayload;
   busy: boolean;
-  onControl: (a: "start" | "stop" | "reset" | "tick") => void;
+  onControl: (a: "start" | "stop" | "reset" | "tick" | "flatten") => void;
   onOpen: (t: ResearchThesis) => void;
 }) {
   return (
@@ -734,8 +862,8 @@ function BotView({
             <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? "Scanning Solana" : "Idle"}</Pill>
             <h2 className="mt-3 text-3xl font-medium">Wallet-gated ticks. Time-boxed.</h2>
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-              The bot only trades names that survive the live screen, and only after a real wallet is connected. No dummy
-              account.
+              {desk.bot.lastNote ??
+                "The bot only trades names that survive the live screen, and only after a real wallet is connected."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -749,10 +877,20 @@ function BotView({
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-4">
           <Stat label="Ticks" value={desk.bot.ticks} sub={desk.bot.lastTickAt ? new Date(desk.bot.lastTickAt).toLocaleTimeString() : "—"} />
+          <Stat label="Opened / closed" value={`${desk.bot.lastOpened ?? 0} / ${desk.bot.lastClosed ?? 0}`} sub="Last armed tick" />
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
-          <Stat label="Max risk / trade" value={`${desk.config.maxRiskPerTradePct}%`} />
           <Stat label="Daily loss cap" value={`${desk.config.dailyLossLimitPct}%`} />
         </div>
+        {(desk.bot.blocked ?? []).length ? (
+          <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
+            <Label>Blocked this tick</Label>
+            <ul className="space-y-1">
+              {(desk.bot.blocked ?? []).map((b) => (
+                <li key={b}>— {b}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="neon p-5">
@@ -801,19 +939,37 @@ function BotView({
   );
 }
 
-function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSession; winRate: number }) {
+function Book({
+  desk,
+  wallet,
+  winRate,
+  busy,
+  onClose,
+  onFlatten,
+}: {
+  desk: DeskPayload;
+  wallet: WalletSession;
+  winRate: number;
+  busy: boolean;
+  onClose: (id: string) => void;
+  onFlatten: () => void;
+}) {
   const curve = desk.equityCurve.map((p) => p.equity);
   const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat label="Wallet mark" value={usd(wallet.equityUsd)} sub={`${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`} />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} />
+        <Stat label="Expectancy" value={usd(desk.stats.expectancyUsd)} sub={`PF ${desk.stats.profitFactor === null ? "—" : Number.isFinite(desk.stats.profitFactor) ? desk.stats.profitFactor.toFixed(2) : "∞"}`} />
       </div>
       <div className="neon overflow-x-auto">
-        <div className="px-4 pt-4">
+        <div className="flex items-center justify-between px-4 pt-4">
           <Label>Open positions</Label>
+          <button disabled={busy || desk.positions.length === 0} onClick={onFlatten} className="btn btn-ghost py-1.5 text-xs">
+            Flatten book
+          </button>
         </div>
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
@@ -826,12 +982,14 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
               <th>Target</th>
               <th>Notional</th>
               <th>P&L</th>
+              <th>Range</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {desk.positions.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
                   Flat. No live position.
                 </td>
               </tr>
@@ -840,7 +998,9 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
                 const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
                 return (
                   <tr key={p.id} className="border-t border-[var(--line)]">
-                    <td className="px-4 py-3 font-medium">{p.symbol}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {p.symbol} <span className="text-[11px] text-[var(--faint)]">{p.sector ?? ""}</span>
+                    </td>
                     <td>{p.side}</td>
                     <td className="num">{priceFmt(p.entryPrice)}</td>
                     <td className="num">{priceFmt(p.markPrice)}</td>
@@ -849,6 +1009,14 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
                     <td className="num">{usd(p.notional)}</td>
                     <td>
                       <Tone value={pnlPct} />
+                    </td>
+                    <td className="w-36 pr-3">
+                      <RangeBar position={p} />
+                    </td>
+                    <td className="pr-3">
+                      <button disabled={busy} onClick={() => onClose(p.id)} className="text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)]">
+                        Close
+                      </button>
                     </td>
                   </tr>
                 );

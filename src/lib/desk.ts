@@ -1,6 +1,7 @@
 import { invalidateMarketCache } from "@/lib/market/providers";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState } from "@/lib/store";
+import { bookStats } from "@/lib/trading/stats";
 import type { DeskPayload } from "@/lib/types";
 
 export async function buildDesk(force = false): Promise<DeskPayload> {
@@ -32,6 +33,7 @@ export async function buildDesk(force = false): Promise<DeskPayload> {
       liquidityUsd: c.liquidityUsd,
       volume24hUsd: c.volume24hUsd,
     })),
+    stats: bookStats(state.trades, state.portfolio, state.equityCurve),
     generatedAt: new Date().toISOString(),
   };
 }

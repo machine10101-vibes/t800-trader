@@ -1,6 +1,7 @@
 import { buildDesk } from "@/lib/desk";
 import { attachWallet, DEFAULT_CONFIG, detachWallet, getActiveWallet, mutateState } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
+import { closePosition } from "@/lib/trading/paper";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 
 export { attachWallet, detachWallet, getActiveWallet };
@@ -9,7 +10,7 @@ export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);
 }
 
-export async function controlBot(action: "start" | "stop" | "reset" | "tick"): Promise<DeskPayload> {
+export async function controlBot(action: "start" | "stop" | "reset" | "tick" | "flatten"): Promise<DeskPayload> {
   if (action === "tick") {
     await tickBot();
     return buildDesk();
@@ -19,6 +20,15 @@ export async function controlBot(action: "start" | "stop" | "reset" | "tick"): P
   if (action === "start") {
     await tickBot();
   }
+  return buildDesk();
+}
+
+export async function closeTicket(positionId: string): Promise<DeskPayload> {
+  await mutateState((state) => {
+    const pos = state.positions.find((p) => p.id === positionId);
+    if (!pos) return state;
+    return closePosition(state, pos.id, pos.markPrice, "manual");
+  });
   return buildDesk();
 }
 

@@ -152,6 +152,7 @@ export interface Signal {
   mint: string;
   symbol: string;
   poolAddress: string;
+  sector: Sector;
   side: Side;
   reason: TradeReason;
   confidence: number;
@@ -168,6 +169,7 @@ export interface Position {
   mint: string;
   symbol: string;
   poolAddress: string;
+  sector: Sector;
   side: Side;
   qty: number;
   entryPrice: number;
@@ -217,6 +219,10 @@ export interface BotState {
   lastError: string | null;
   ticks: number;
   startedAt: string | null;
+  lastNote: string | null;
+  lastOpened: number;
+  lastClosed: number;
+  blocked: string[];
 }
 
 export interface Portfolio {
@@ -256,6 +262,15 @@ export interface TapeDot {
   volume24hUsd: number;
 }
 
+export interface BookStats {
+  expectancyUsd: number;
+  profitFactor: number | null;
+  avgWinUsd: number;
+  avgLossUsd: number;
+  closedTrades: number;
+  maxDrawdownPct: number;
+}
+
 export interface DeskPayload {
   regime: MarketRegime;
   research: ResearchThesis[];
@@ -271,5 +286,6 @@ export interface DeskPayload {
   equityCurve: EquityPoint[];
   whatCouldBeWrong: string[];
   tapeDots: TapeDot[];
+  stats: BookStats;
   generatedAt: string;
 }
