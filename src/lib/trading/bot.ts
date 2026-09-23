@@ -11,6 +11,7 @@ import {
   dayLossUsedPct,
   managePosition,
   MIN_TICKET_USD,
+  rollSession,
   shouldFlattenMeme,
   sizePosition,
 } from "./risk";
@@ -35,6 +36,7 @@ export async function tickBot(): Promise<AppState> {
       }));
 
       let next = markBook(state, priceMap(state, marks));
+      next = { ...next, portfolio: rollSession(next.portfolio) };
       let closed = 0;
       const blocked: string[] = [];
 
@@ -85,8 +87,11 @@ export async function tickBot(): Promise<AppState> {
         }
 
         signals.sort((a, b) => b.confidence - a.confidence);
-        const signal = signals[0];
-        if (signal) {
+        for (const signal of signals) {
+          if (opened) {
+            blocked.push(`${signal.symbol}: passed over — one new ticket per tick`);
+            continue;
+          }
           const gate = canOpen({
             positions: next.positions,
             signal,
@@ -97,37 +102,38 @@ export async function tickBot(): Promise<AppState> {
           });
           if (gate) {
             blocked.push(`${signal.symbol} ${signal.side}: ${gate}`);
-          } else {
-            const token = byMint.get(signal.mint);
-            const streak = consecutiveLosses(next.trades);
-            const sized = token
-              ? sizePosition({
-                  equity: next.portfolio.equityUsd,
-                  price: signal.price,
-                  stopPct: signal.stopPct,
-                  config: next.config,
-                  regime: market.regime,
-                  researchScore: signal.researchScore,
-                  confidence: signal.confidence,
-                  lossStreak: streak,
-                  dayUsed: dayLossUsedPct(next.portfolio, next.config),
-                })
-              : { qty: 0, notional: 0 };
-            const cashCap = cashConcentration(next.portfolio.equityUsd);
-            if (!token) {
-              blocked.push(`${signal.symbol}: missing live mark`);
-            } else if (sized.notional < MIN_TICKET_USD || sized.qty <= 0) {
-              blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(2)} too small`);
-            } else if (sized.notional > next.portfolio.cashUsd * cashCap) {
-              blocked.push(`${signal.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
-            } else {
-              next = openPosition(next, signal, sized.qty);
-              opened += 1;
-            }
+            continue;
           }
-        }
-        for (const extra of signals.slice(1)) {
-          blocked.push(`${extra.symbol}: passed over — one new ticket per tick`);
+          const token = byMint.get(signal.mint);
+          const streak = consecutiveLosses(next.trades);
+          const sized = token
+            ? sizePosition({
+                equity: next.portfolio.equityUsd,
+                price: signal.price,
+                stopPct: signal.stopPct,
+                config: next.config,
+                regime: market.regime,
+                researchScore: signal.researchScore,
+                confidence: signal.confidence,
+                lossStreak: streak,
+                dayUsed: dayLossUsedPct(next.portfolio, next.config),
+              })
+            : { qty: 0, notional: 0 };
+          const cashCap = cashConcentration(next.portfolio.equityUsd);
+          const room = next.portfolio.cashUsd * Math.min(0.98, cashCap);
+          const qty = signal.price > 0 ? Math.min(sized.qty, room / signal.price) : 0;
+          if (!token) {
+            blocked.push(`${signal.symbol}: missing live mark`);
+          } else if (sized.notional < MIN_TICKET_USD || sized.qty <= 0) {
+            blocked.push(`${signal.symbol}: size ${sized.notional.toFixed(2)} too small`);
+          } else if (qty * signal.price < MIN_TICKET_USD) {
+            blocked.push(`${signal.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
+          } else {
+            const before = next.positions.length;
+            next = openPosition(next, signal, qty);
+            if (next.positions.length > before) opened += 1;
+            else blocked.push(`${signal.symbol}: cash could not fill the ticket`);
+          }
         }
       } else if (next.bot.running && dayLossBreached(next.portfolio, next.config)) {
         blocked.push("Daily loss cap — new risk is closed");

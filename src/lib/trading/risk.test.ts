@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, sizePosition } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Signal } from "../types";
 
@@ -313,6 +313,43 @@ describe("risk", () => {
     });
     assert.ok(defensive.notional >= 1);
     assert.ok(defensive.notional <= 5 * 0.6);
+  });
+
+  it("rolls yesterday's loss cap so a new session can trade", () => {
+    const rolled = rollSession(
+      { ...portfolio({ equityUsd: 6, dayStartEquity: 10, dayPnlUsd: -4 }), sessionDay: "2020-01-01" },
+      new Date("2026-09-23T12:00:00Z"),
+    );
+    assert.equal(rolled.sessionDay, "2026-09-23");
+    assert.equal(rolled.dayStartEquity, 6);
+    assert.equal(rolled.dayPnlUsd, 0);
+  });
+
+  it("lets a flat watchlist trade work past 12 minutes", () => {
+    const openedAt = new Date(Date.now() - 20 * 60_000).toISOString();
+    const plan = managePosition({
+      id: "p",
+      mint: "m",
+      symbol: "SOL",
+      poolAddress: "x",
+      sector: "L1",
+      side: "long",
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 100,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt,
+      lastUpdate: openedAt,
+      reason: "reclaim",
+      researchScore: 70,
+      highWater: 100,
+      lowWater: 100,
+      notional: 100,
+      initialStop: 98,
+      scaled: false,
+    });
+    assert.equal(plan.exit, undefined);
   });
 
   it("moves a winner to breakeven and asks to scale at 1R", () => {

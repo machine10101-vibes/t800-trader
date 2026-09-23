@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint",
-    "test": "tsx --test src/lib/research/scoring.test.ts src/lib/trading/signals.test.ts src/lib/trading/risk.test.ts src/lib/store.test.ts"
+    "test": "tsx --test src/lib/research/scoring.test.ts src/lib/trading/signals.test.ts src/lib/trading/risk.test.ts src/lib/trading/paper.test.ts src/lib/store.test.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",

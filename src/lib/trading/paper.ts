@@ -1,6 +1,6 @@
 import type { AppState, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
-import { markPosition, unrealizedPnl } from "./risk";
+import { MIN_TICKET_USD, markPosition, unrealizedPnl } from "./risk";
 
 const SLIP_BPS = 8;
 
@@ -10,10 +10,27 @@ export function fillPrice(signalPrice: number, side: "long" | "short", action: "
   return side === "long" ? signalPrice - slip : signalPrice + slip;
 }
 
+export function positionValue(position: Position): number {
+  if (position.side === "long") return position.qty * position.markPrice;
+  return position.qty * (2 * position.entryPrice - position.markPrice);
+}
+
+export function exitProceeds(position: Pick<Position, "side" | "qty" | "entryPrice">, fill: number, pnlUsd: number): number {
+  if (position.side === "long") return position.qty * fill;
+  return position.qty * position.entryPrice + pnlUsd;
+}
+
 export function openPosition(state: AppState, signal: Signal, qty: number): AppState {
   const price = fillPrice(signal.price, signal.side, "open");
-  const notional = qty * price;
-  if (notional > state.portfolio.cashUsd) return state;
+  const room = state.portfolio.cashUsd * 0.98;
+  let filledQty = qty;
+  let notional = filledQty * price;
+  if (notional > room) {
+    if (room < MIN_TICKET_USD) return state;
+    filledQty = room / price;
+    notional = filledQty * price;
+  }
+  qty = filledQty;
 
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
@@ -76,7 +93,7 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
   const price = fillPrice(priceHint, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
-  const proceeds = pos.qty * price;
+  const proceeds = exitProceeds(pos, price, pnl.usd);
   const trade: Trade = {
     id: id("tr"),
     mint: pos.mint,
@@ -117,7 +134,7 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
     return markPosition(p, px);
   });
   const unreal = positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
-  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + p.qty * p.markPrice, 0);
+  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + positionValue(p), 0);
   const peak = Math.max(state.portfolio.peakEquity, equity);
   return {
     ...state,
@@ -147,7 +164,7 @@ export function scaleOut(state: AppState, positionId: string, fraction = 0.5): A
   const price = fillPrice(pos.markPrice, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price, qty }, price);
   const pnl = unrealizedPnl(marked);
-  const proceeds = qty * price;
+  const proceeds = exitProceeds({ ...pos, qty }, price, pnl.usd);
   const remain = pos.qty - qty;
   const trade: Trade = {
     id: id("tr"),

@@ -242,6 +242,7 @@ export interface Portfolio {
   winCount: number;
   lossCount: number;
   tradeCount: number;
+  sessionDay?: string;
 }
 
 export interface EquityPoint {

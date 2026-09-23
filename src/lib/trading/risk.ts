@@ -142,7 +142,7 @@ export function unrealizedPnl(position: Position): { usd: number; pct: number } 
 export function exitReason(position: Position, nowMs = Date.now()): "stop" | "target" | "trail" | "time" | "risk-off" | null {
   const { usd } = unrealizedPnl(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
-  const timeCap = (position.sector ?? "Unknown") === "Meme" ? 28 : 50;
+  const timeCap = (position.sector ?? "Unknown") === "Meme" ? 40 : 120;
   if (position.side === "long") {
     if (position.markPrice <= position.stopPrice) return "stop";
     if (position.markPrice >= position.targetPrice) return "target";
@@ -156,6 +156,18 @@ export function exitReason(position: Position, nowMs = Date.now()): "stop" | "ta
   }
   if (ageMin > timeCap) return "time";
   return null;
+}
+
+export function rollSession(portfolio: Portfolio, now = new Date()): Portfolio {
+  const day = now.toISOString().slice(0, 10);
+  if (!portfolio.sessionDay) return { ...portfolio, sessionDay: day };
+  if (portfolio.sessionDay === day) return portfolio;
+  return {
+    ...portfolio,
+    sessionDay: day,
+    dayStartEquity: portfolio.equityUsd,
+    dayPnlUsd: 0,
+  };
 }
 
 export function shouldFlattenMeme(position: Position, stance: MarketRegime["stance"]): boolean {
@@ -179,10 +191,14 @@ export function managePosition(
   if (hard && hard !== "time") return { exit: hard };
   const r = rMultiple(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
-  if (ageMin >= 12 && r < 0.2) return { exit: "time" };
+  const staleMin = (position.sector ?? "Unknown") === "Meme" ? 22 : 45;
+  if (ageMin >= staleMin && r < 0.15) return { exit: "time" };
   if (hard) return { exit: hard };
 
-  const be = position.side === "long" ? position.entryPrice * 1.0006 : position.entryPrice * 0.9994;
+  const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
+  const lockR = r >= 1.5 ? 0.45 : 0.05;
+  const be =
+    position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
   if (r >= 0.8) {
     const tighter =
       position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);

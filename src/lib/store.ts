@@ -52,6 +52,7 @@ export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
       winCount: 0,
       lossCount: 0,
       tradeCount: 0,
+      sessionDay: new Date().toISOString().slice(0, 10),
     },
     positions: [],
     trades: [],

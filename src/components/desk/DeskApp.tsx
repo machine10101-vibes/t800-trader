@@ -1012,6 +1012,8 @@ function Book({
             ) : (
               desk.positions.map((p) => {
                 const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
+                const pnlUsd = p.qty * p.entryPrice * (pnlPct / 100);
+                const r = rMultiple(p);
                 return (
                   <tr key={p.id} className="border-t border-[var(--line)]">
                     <td className="px-4 py-3 font-medium">
@@ -1024,7 +1026,8 @@ function Book({
                     <td className="num">{priceFmt(p.targetPrice)}</td>
                     <td className="num">{usd(p.notional)}</td>
                     <td>
-                      <Tone value={pnlPct} />
+                      <Tone value={pnlUsd}>{usd(pnlUsd)}</Tone>
+                      <div className="text-[10px] text-[var(--faint)]">{r.toFixed(2)}R · {pct(pnlPct)}</div>
                     </td>
                     <td className="w-36 pr-3">
                       <RangeBar position={p} />
