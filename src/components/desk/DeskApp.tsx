@@ -174,6 +174,10 @@ export function DeskApp() {
     return t ? (desk.portfolio.winCount / t) * 100 : 0;
   }, [desk]);
 
+  const solRow = desk?.research.find((r) => r.ticker === "SOL");
+  const solPx = desk?.regime.sol.price || solRow?.price || 0;
+  const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
+
   if (!wallet) {
     return (
       <div className="grid min-h-screen place-items-center px-6">
@@ -240,7 +244,7 @@ export function DeskApp() {
             </div>
           </div>
           <div className="hidden items-center gap-5 md:flex">
-            <Ticker label="SOL" value={desk.regime.sol.price ? priceFmt(desk.regime.sol.price) : "—"} chg={desk.regime.sol.price ? desk.regime.sol.change24h : undefined} />
+            <Ticker label="SOL" value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
             <Ticker label="BTC" value={desk.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"} chg={desk.regime.btc.price ? desk.regime.btc.change24h : undefined} />
             <Ticker label="ETH" value={desk.regime.eth.price ? priceFmt(desk.regime.eth.price) : "—"} chg={desk.regime.eth.price ? desk.regime.eth.change24h : undefined} />
             {desk.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
