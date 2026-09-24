@@ -1,4 +1,5 @@
 import { armButton, buildDesk, shellDesk } from "@/lib/desk";
+import { authorizeTrading, reclaimTrading, tradingBudgetAddress, tradingSnapshot } from "@/lib/solana/authorize";
 import { executorFor } from "@/lib/solana/swap";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
@@ -7,7 +8,7 @@ import { applyControl, tickBot } from "@/lib/trading/bot";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 
-export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk };
+export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingSnapshot };
 
 export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);
@@ -41,8 +42,9 @@ async function sellSignedPositions(executor: ChainExecutor): Promise<void> {
 async function budgetFor(session?: WalletSession | null): Promise<WalletBudget | null> {
   if (!session) return null;
   try {
-    const live = await readBalances(session.address);
-    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? 0 };
+    const address = await tradingBudgetAddress(session.address);
+    const live = await readBalances(address);
+    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
   } catch {
     return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
   }
@@ -58,14 +60,46 @@ export async function controlBot(
     await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
     return buildDesk();
   }
-  if ((action === "flatten" || action === "reset") && executor) {
+  if ((action === "stop" || action === "flatten" || action === "reset") && executor) {
     await sellSignedPositions(executor);
+  }
+  let reclaimed: string | null = null;
+  if ((action === "stop" || action === "flatten" || action === "reset") && session) {
+    const open = (await loadState()).positions.some((p) => p.signature && p.side === "long");
+    reclaimed = await reclaimTrading(session.address, open ? 0.015 : 0);
+  }
+
+  let auth: { signature: string; botAddress: string; reused: boolean } | null = null;
+  if (action === "start" && session) {
+    const state = await loadState();
+    if (state.config.walletSwaps) auth = await authorizeTrading(session);
   }
 
   await mutateState((state) => {
     const unsold = state.config.walletSwaps && state.positions.some((p) => p.signature && p.side === "long");
     if ((action === "flatten" || action === "reset") && unsold) return state;
-    return applyControl(state, action);
+    const next = applyControl(state, action);
+    if (reclaimed && (action === "stop" || action === "flatten")) {
+      const short = `${reclaimed.slice(0, 8)}…`;
+      return {
+        ...next,
+        bot: {
+          ...next.bot,
+          lastNote: action === "stop" ? `Disarmed — returned ${short}` : `Book flattened — returned ${short}`,
+        },
+      };
+    }
+    if (action !== "start" || !auth) return next;
+    const short = auth.reused ? "trading key already funded" : `signed ${auth.signature.slice(0, 8)}…`;
+    return {
+      ...next,
+      bot: {
+        ...next.bot,
+        swapAuthSignature: auth.signature,
+        swapBot: auth.botAddress,
+        lastNote: `Armed — ${short}. Swaps send from that signature.`,
+      },
+    };
   });
   if (action === "start") {
     const state = await loadState();

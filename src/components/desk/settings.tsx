@@ -64,11 +64,11 @@ export function SettingsPanel({
 
       <Section
         title="Wallet"
-        hint="Live swaps are on. Each armed buy or sell asks the wallet to sign. Turn this off only if you want the blotter to stay simulated."
+        hint="Live swaps are on. Arming asks the wallet to sign once. That transaction funds a trading key in this browser, and that key sends each swap. Turn this off only to keep a simulated blotter."
       >
         <Toggle
           label="Send swaps to this wallet"
-          hint="On routes the next long through Jupiter and asks Phantom or Solflare to sign. Off leaves every fill in this browser. Shorts are not sent on-chain. Rows without a signature stay simulated."
+          hint="On: Arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain."
           checked={local.walletSwaps}
           onChange={(v) => set({ walletSwaps: v })}
         />

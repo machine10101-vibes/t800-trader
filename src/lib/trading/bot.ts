@@ -333,7 +333,7 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
         startedAt: state.bot.startedAt ?? new Date().toISOString(),
         lastError: null,
         lastNote: state.config.walletSwaps
-          ? "Armed — the next ticket asks your wallet to sign"
+          ? "Armed — waiting on the wallet signature"
           : "Armed — first tick incoming",
         lastOpened: state.bot.lastOpened ?? 0,
         lastClosed: state.bot.lastClosed ?? 0,

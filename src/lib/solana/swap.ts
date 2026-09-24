@@ -1,8 +1,9 @@
-import { VersionedTransaction } from "@solana/web3.js";
+import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { dexesForVenues } from "@/lib/market/venues";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
-import { mintDecimals, readBalances, type WalletSession } from "./wallet";
+import { tradingBudgetAddress, tradingKeypair } from "./authorize";
+import { broadcastTransaction, mintDecimals, readBalances, type WalletSession } from "./wallet";
 
 export const SLIPPAGE_BPS = 80;
 const FEE_SOL = 0.02;
@@ -139,8 +140,15 @@ function uiAmount(units: string, decimals: number): number {
   return n / 10 ** decimals;
 }
 
+function signLocally(tx: VersionedTransaction, key: Keypair): Uint8Array {
+  tx.sign([key]);
+  return tx.serialize();
+}
+
 export async function settleSpot(session: WalletSession, order: ChainOrder): Promise<ChainFill> {
-  const balances = await readBalances(session.address);
+  const trader = await tradingBudgetAddress(session.address);
+  const signer = trader === session.address ? null : tradingKeypair(session.address);
+  const balances = await readBalances(trader);
   const tokenDecimals =
     order.tokenDecimals ?? (order.kind === "open" ? undefined : await mintDecimals(order.mint));
   const plan = planSpotOrder({
@@ -171,7 +179,7 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   }
   const built = await postJson<{ swapTransaction?: string; simulationError?: unknown; error?: string }>(SWAP_URL, {
     quoteResponse: quote,
-    userPublicKey: session.address,
+    userPublicKey: trader,
     wrapAndUnwrapSol: true,
     dynamicComputeUnitLimit: true,
     prioritizationFeeLamports: "auto",
@@ -183,14 +191,19 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   const tx = decodeTx(built.swapTransaction);
   const provider = session.provider;
   let signature: string;
-  if (provider.signAndSendTransaction) {
+  if (trader !== session.address && !signer) {
+    throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
+  }
+  if (signer) {
+    signature = await broadcastTransaction(signLocally(tx, signer));
+  } else if (provider.signAndSendTransaction) {
     const signed = await provider.signAndSendTransaction(tx);
     signature = typeof signed === "string" ? signed : signed.signature;
   } else if (provider.signTransaction) {
     const signed = await provider.signTransaction(tx);
     signature = await sendRaw(signed.serialize());
   } else {
-    throw new Error("This wallet cannot sign a Solana transaction");
+    throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
   }
   if (!signature) throw new Error("Wallet did not return a signature");
 

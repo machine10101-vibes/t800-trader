@@ -3,7 +3,7 @@
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { adoptLiveEquity, armButton, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk, shellDesk } from "@/lib/client";
+import { adoptLiveEquity, armButton, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk, shellDesk, tradingSnapshot } from "@/lib/client";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
@@ -35,6 +35,7 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
 export function DeskApp() {
   const [tab, setTab] = useState<Tab>("overview");
   const [wallet, setWallet] = useState<WalletSession | null>(null);
+  const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [desk, setDesk] = useState<DeskPayload | null>(null);
@@ -118,6 +119,7 @@ export function DeskApp() {
     await disconnectWallet(wallet?.provider);
     detachWallet();
     setWallet(null);
+    setTrading(null);
     setDesk(null);
     setThesis(null);
     setCandles([]);
@@ -142,6 +144,7 @@ export function DeskApp() {
       onDisconnect: () => {
         detachWallet();
         setWallet(null);
+        setTrading(null);
         setDesk(null);
         setLiveTape(false);
       },
@@ -171,15 +174,28 @@ export function DeskApp() {
 
   useEffect(() => {
     if (!wallet) return;
+    let live = true;
+    const pullTrading = () => {
+      void tradingSnapshot(wallet.address)
+        .then((snap) => {
+          if (live) setTrading(snap);
+        })
+        .catch(() => undefined);
+    };
+    pullTrading();
     const id = setInterval(() => {
       void refreshWallet(wallet)
         .then(async (session) => {
           setWallet(session);
           await attachWallet(session.address, session.equityUsd);
+          pullTrading();
         })
         .catch(() => undefined);
     }, 30_000);
-    return () => clearInterval(id);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
   }, [wallet]);
 
   useEffect(() => {
@@ -305,11 +321,15 @@ export function DeskApp() {
         const session = await refreshWallet(wallet);
         setWallet(session);
         if (action === "start" && session.equityUsd < MIN_TRADE_USD) {
-          setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
-          return;
+          const funded = await tradingSnapshot(session.address);
+          if (!funded || funded.equityUsd < MIN_TRADE_USD) {
+            setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
+            return;
+          }
         }
-        if (action === "start") await attachWallet(session.address, session.equityUsd);
+        if (action === "start") await attachWallet(session.address, Math.max(session.equityUsd, trading?.equityUsd ?? 0));
         applyDesk(await controlBot(action, session));
+        setTrading(await tradingSnapshot(session.address).catch(() => null));
         if (action === "reset") {
           await adoptLiveEquity(session.equityUsd);
           const next = await loadDesk();
@@ -321,6 +341,7 @@ export function DeskApp() {
         return;
       }
       applyDesk(await controlBot(action, wallet));
+      setTrading(await tradingSnapshot(wallet.address).catch(() => null));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
     } finally {
@@ -457,6 +478,7 @@ export function DeskApp() {
         onDisconnect={() => void disconnect()}
         onRefresh={() => void refresh()}
         onWatch={() => openWatch(wallet.address)}
+        trading={trading}
       />
 
       <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[228px_1fr]">
@@ -491,8 +513,11 @@ export function DeskApp() {
           </button>
           {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
           <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
-            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC.{" "}
-            {desk?.config.walletSwaps ? "Next ticket asks this wallet to sign." : "Fills stay in this browser."}
+            {trading
+              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
+              : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC. ${
+                  desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
+                }`}
           </p>
           <button onClick={() => void disconnect()} className="mt-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
@@ -514,6 +539,7 @@ export function DeskApp() {
                 <Overview
                   desk={desk}
                   wallet={wallet}
+                  trading={trading}
                   candles={candles}
                   winRate={winRate}
                   focusMint={focusMint}
@@ -529,6 +555,7 @@ export function DeskApp() {
                 <Book
                   desk={desk}
                   wallet={wallet}
+                  trading={trading}
                   winRate={winRate}
                   busy={busy}
                   onClose={closePos}
@@ -580,6 +607,7 @@ function Header({
   onDisconnect,
   onRefresh,
   onWatch,
+  trading,
 }: {
   desk: DeskPayload | null;
   wallet: WalletSession;
@@ -590,6 +618,7 @@ function Header({
   onDisconnect: () => void;
   onRefresh: () => void;
   onWatch: () => void;
+  trading: { equityUsd: number } | null;
 }) {
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] backdrop-blur-xl">
@@ -630,8 +659,8 @@ function Header({
             {desk?.bot.running ? "Armed" : "Standby"}
           </Pill>
           <div className="hidden text-right sm:block">
-            <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Wallet</div>
-            <div className="num">{usd(wallet.equityUsd)}</div>
+            <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
+            <div className="num">{usd(trading ? trading.equityUsd : wallet.equityUsd)}</div>
           </div>
           <button onClick={onDisconnect} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
             Disconnect
@@ -732,6 +761,7 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
 function Overview({
   desk,
   wallet,
+  trading,
   candles,
   winRate,
   focusMint,
@@ -742,6 +772,7 @@ function Overview({
 }: {
   desk: DeskPayload;
   wallet: WalletSession;
+  trading: { equityUsd: number } | null;
   candles: Candle[];
   winRate: number;
   focusMint: string | null;
@@ -753,7 +784,8 @@ function Overview({
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const curve = desk.equityCurve.map((p) => p.equity);
-  const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
+  const marked = trading?.equityUsd || wallet.equityUsd;
+  const equitySeries = curve.length >= 1 ? curve : marked ? [marked] : [];
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
@@ -890,7 +922,7 @@ function Overview({
           <Label>Execution log</Label>
           {desk.trades.length === 0 && desk.signals.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
-              No tickets yet. Arm the bot and the next buy asks this wallet to sign. Fund at least $5 of priced SOL/USDC.
+              No tickets yet. Arm the bot and approve the one wallet signature. That signature moves a trading balance, and the trading key sends the swaps. Fund at least $5 of priced SOL/USDC.
             </p>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
@@ -1139,6 +1171,7 @@ function BotView({
 function Book({
   desk,
   wallet,
+  trading,
   winRate,
   busy,
   onClose,
@@ -1147,6 +1180,7 @@ function Book({
 }: {
   desk: DeskPayload;
   wallet: WalletSession;
+  trading: { address: string; sol: number; usdc: number; equityUsd: number } | null;
   winRate: number;
   busy: boolean;
   onClose: (id: string) => void;
@@ -1154,7 +1188,8 @@ function Book({
   onWalletSwaps: (on: boolean) => void;
 }) {
   const curve = desk.equityCurve.map((p) => p.equity);
-  const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
+  const marked = trading?.equityUsd || wallet.equityUsd;
+  const equitySeries = curve.length >= 1 ? curve : marked ? [marked] : [];
   const swaps = desk.config.walletSwaps;
   return (
     <div className="space-y-4">
@@ -1164,8 +1199,8 @@ function Book({
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
-                ? "Armed scans send the next long through Jupiter and pop Phantom or Solflare for a signature. Unsigned rows were paper fills and will never show in the wallet. Approve the popup or the ticket is not sent."
-                : "Wallet swaps are off, so this book only simulates fills. Turn them on and the next armed ticket asks you to sign."}
+                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Disarm sends the leftover SOL and USDC back. Open tickets are sold first."
+                : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
             </p>
           </div>
           <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
@@ -1175,7 +1210,15 @@ function Book({
       </div>
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
-        <Stat label="Wallet mark" value={usd(wallet.equityUsd)} sub={`${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`} />
+        <Stat
+          label={trading ? "Trading balance" : "Wallet mark"}
+          value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
+          sub={
+            trading
+              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC · ${shortAddress(trading.address)}`
+              : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`
+          }
+        />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} />
         <Stat label="Expectancy" value={usd(desk.stats.expectancyUsd)} sub={`PF ${desk.stats.profitFactor === null ? "—" : Number.isFinite(desk.stats.profitFactor) ? desk.stats.profitFactor.toFixed(2) : "∞"}`} />
       </div>

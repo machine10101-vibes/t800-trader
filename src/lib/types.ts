@@ -295,6 +295,10 @@ export interface BotState {
   blocked: string[];
   /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
   swapHoldUntil?: string | null;
+  /** Signature of the arm transaction that funded the browser trading key. */
+  swapAuthSignature?: string | null;
+  /** Address that signs Jupiter swaps after that arm transaction. */
+  swapBot?: string | null;
 }
 
 export interface Portfolio {

@@ -76,7 +76,7 @@ async function rpcOnce<T>(url: string, method: string, params: unknown[], signal
 }
 
 /** First healthy endpoint wins. A hung public RPC no longer blocks the next one. */
-async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), RPC_TIMEOUT_MS);
   try {
@@ -103,6 +103,35 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   }
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+}
+
+/** One endpoint at a time. A broadcast must not race, or three RPCs each try to land it. */
+export async function broadcastTransaction(bytes: Uint8Array): Promise<string> {
+  const raw = bytesToBase64(bytes);
+  let last: unknown;
+  for (const url of RPCS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      return await rpcOnce<string>(
+        url,
+        "sendTransaction",
+        [raw, { encoding: "base64", skipPreflight: false, maxRetries: 3 }],
+        ctrl.signal,
+      );
+    } catch (error) {
+      last = error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw last instanceof Error ? last : new Error("Solana rejected the transaction");
+}
+
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
@@ -115,7 +144,7 @@ function usdcAta(owner: PublicKey): PublicKey {
 
 async function readUsdc(owner: PublicKey): Promise<number> {
   const ata = usdcAta(owner);
-  const acc = await rpc<{
+  const acc = await solanaRpc<{
     value?: {
       data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
     } | null;
@@ -128,7 +157,7 @@ async function readUsdc(owner: PublicKey): Promise<number> {
 export async function mintDecimals(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
   if (mint === USDC_MINT) return 6;
-  const acc = await rpc<{
+  const acc = await solanaRpc<{
     value?: { data?: { parsed?: { type?: string; info?: { decimals?: number } } } } | null;
   }>("getAccountInfo", [mint, { encoding: "jsonParsed" }]);
   const decimals = acc.value?.data?.parsed?.info?.decimals;
@@ -141,7 +170,7 @@ export async function mintDecimals(mint: string): Promise<number> {
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
   const pk = new PublicKey(address);
   const [lamports, usdc, solPriceUsd] = await Promise.all([
-    rpc<{ value: number }>("getBalance", [pk.toBase58()]),
+    solanaRpc<{ value: number }>("getBalance", [pk.toBase58()]),
     readUsdc(pk),
     liveSolPrice(),
   ]);
