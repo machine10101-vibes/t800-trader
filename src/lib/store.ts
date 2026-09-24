@@ -117,6 +117,21 @@ export function emptyState(config: Partial<BotConfig> = DEFAULT_CONFIG): AppStat
   };
 }
 
+export function peekBook(address: string): AppState | null {
+  return readBrowserState(address);
+}
+
+export function listLocalBooks(): string[] {
+  if (typeof window === "undefined") return [];
+  const prefix = "t800-trader-state:";
+  const out: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i);
+    if (key?.startsWith(prefix)) out.push(key.slice(prefix.length));
+  }
+  return out;
+}
+
 function readBrowserState(wallet: string): AppState | null {
   if (typeof window === "undefined") return null;
   try {

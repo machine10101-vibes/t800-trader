@@ -2,7 +2,10 @@
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
+import { WatchScreen } from "@/components/desk/watch";
 import { adoptLiveEquity, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
+import { listLocalBooks } from "@/lib/store";
+import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
 import {
   connectWallet,
@@ -44,7 +47,31 @@ export function DeskApp() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [walletHint, setWalletHint] = useState<string | null>(null);
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
+  const [watchAddress, setWatchAddress] = useState<string | null>(null);
+  const [watchDraft, setWatchDraft] = useState("");
+  const [watchError, setWatchError] = useState<string | null>(null);
+  const [knownBooks, setKnownBooks] = useState<string[]>([]);
   const lastTradeId = useRef<string | null>(null);
+
+  const openWatch = useCallback((raw: string) => {
+    const parsed = parseWalletAddress(raw);
+    if (!parsed) {
+      setWatchError("That is not a Solana address.");
+      return;
+    }
+    setWatchError(null);
+    setWatchAddress(parsed);
+    const url = new URL(window.location.href);
+    url.searchParams.set("watch", parsed);
+    window.history.replaceState(null, "", url);
+  }, []);
+
+  const closeWatch = useCallback(() => {
+    setWatchAddress(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("watch");
+    window.history.replaceState(null, "", url);
+  }, []);
 
   const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
@@ -99,6 +126,8 @@ export function DeskApp() {
   }, []);
 
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search).get("watch");
+    if (query && parseWalletAddress(query)) return;
     void connect(true);
   }, [connect]);
 
@@ -146,6 +175,15 @@ export function DeskApp() {
     }, 30_000);
     return () => clearInterval(id);
   }, [wallet]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search).get("watch");
+    if (query) {
+      const parsed = parseWalletAddress(query);
+      if (parsed) setWatchAddress(parsed);
+    }
+    setKnownBooks(listLocalBooks());
+  }, []);
 
   useEffect(() => {
     const tick = () => setClock(new Date().toLocaleTimeString());
@@ -310,9 +348,14 @@ export function DeskApp() {
   const solPx = desk?.regime.sol.price || solRow?.price || wallet?.solPriceUsd || 0;
   const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
 
+  if (watchAddress) {
+    return <WatchScreen address={watchAddress} onClose={closeWatch} />;
+  }
+
   if (!wallet) {
     return (
-      <div className="grid min-h-screen place-items-center px-6 py-10">
+      <div className="min-h-screen overflow-y-auto px-6 py-10">
+        <div className="mx-auto w-full max-w-xl">
         <div className="neon boot-fade w-full max-w-xl p-8 sm:p-10">
           <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // Solana</div>
@@ -330,10 +373,45 @@ export function DeskApp() {
           <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
             {walletBusy ? "Waiting on wallet…" : walletHint ? `Connect ${walletHint}` : "Connect Solana wallet"}
           </button>
+          <form
+            className="mt-6 border-t border-[var(--line)] pt-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              openWatch(watchDraft);
+            }}
+          >
+            <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--faint)]">Watch a book</div>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              Paste a Solana address. This page shows that wallet&apos;s live SOL and USDC, plus the paper trades stored in this browser.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={watchDraft}
+                onChange={(event) => setWatchDraft(event.target.value)}
+                placeholder="Wallet address"
+                spellCheck={false}
+                className="num w-full rounded-xl border border-[var(--line)] bg-black/30 px-3 py-3 text-sm outline-none"
+              />
+              <button type="submit" className="btn btn-ink shrink-0">
+                Watch
+              </button>
+            </div>
+            {watchError ? <p className="mt-2 text-sm text-[var(--crimson)]">{watchError}</p> : null}
+            {knownBooks.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {knownBooks.map((addr) => (
+                  <button key={addr} type="button" onClick={() => openWatch(addr)} className="rounded-full border border-[var(--line)] px-3 py-1 text-[11px] text-[var(--muted)]">
+                    {shortAddress(addr)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
             {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
             Fills stay simulated at live marks so the account is yours, not a $10k dummy.
           </p>
+        </div>
         </div>
       </div>
     );
@@ -364,6 +442,7 @@ export function DeskApp() {
         updatedAt={updatedAt}
         onDisconnect={() => void disconnect()}
         onRefresh={() => void refresh()}
+        onWatch={() => openWatch(wallet.address)}
       />
 
       <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[228px_1fr]">
@@ -476,6 +555,7 @@ function Header({
   updatedAt,
   onDisconnect,
   onRefresh,
+  onWatch,
 }: {
   desk: DeskPayload | null;
   wallet: WalletSession;
@@ -485,6 +565,7 @@ function Header({
   updatedAt: string | null;
   onDisconnect: () => void;
   onRefresh: () => void;
+  onWatch: () => void;
 }) {
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] backdrop-blur-xl">
@@ -515,6 +596,9 @@ function Header({
         <div className="ml-auto flex items-center gap-3 text-sm">
           <button onClick={onRefresh} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
             Refresh
+          </button>
+          <button onClick={onWatch} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
+            Watch
           </button>
           <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
           <Pill tone={desk?.bot.running ? "mint" : "default"}>
