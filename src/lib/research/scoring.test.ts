@@ -115,4 +115,31 @@ describe("scoreCandidate", () => {
     assert.ok(good.researchScore > bad.researchScore);
     assert.ok(good.researchScore > 50);
   });
+
+  it("lifts a sourced LST yield and marks a split price as a penalty", () => {
+    const plain = scoreCandidate(token({ sector: "LST", symbol: "JITOSOL" }), blankTech);
+    const yielded = scoreCandidate(
+      token({
+        sector: "LST",
+        symbol: "JITOSOL",
+        apyPct: 5,
+        apySources: ["jito:stake-pool"],
+        priceAgreement: "agree",
+        sources: ["geckoterminal:price", "jupiter:price", "defillama:price"],
+      }),
+      blankTech,
+    );
+    const split = scoreCandidate(token({ priceAgreement: "split" }), blankTech);
+    const aligned = scoreCandidate(token(), blankTech);
+    const meme = scoreCandidate(token({ sector: "Meme", symbol: "BONK", name: "Bonk" }), blankTech);
+    const memeYield = scoreCandidate(
+      token({ sector: "Meme", symbol: "BONK", name: "Bonk", apyPct: 20, apySources: ["junk"] }),
+      blankTech,
+    );
+    assert.ok(yielded.researchScore > plain.researchScore);
+    assert.ok(yielded.strengths.some((n) => n.includes("Sourced yield")));
+    assert.ok(split.researchScore < aligned.researchScore);
+    assert.ok(split.penalties.some((n) => /disagree/i.test(n)));
+    assert.equal(memeYield.researchScore, meme.researchScore);
+  });
 });

@@ -1,6 +1,7 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { liveMajors } from "./marks";
+import { crossCheck, type YieldQuote } from "./quotes";
 import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
@@ -130,6 +131,9 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string)
     flows: flowsFromPool(pool.attributes),
     watchlist: Boolean(watch),
     sources: [source],
+    priceAgreement: "thin",
+    apyPct: null,
+    apySources: [],
   };
 }
 
@@ -393,6 +397,7 @@ async function fetchRegime(): Promise<MarketRegime> {
         : stance === "defensive"
           ? ["Capital preservation", "SOL/USDC only", "Avoid illiquid launches"]
           : ["Liquid majors", "Mean-reversion fades", "Research over tape-chasing"],
+    yields: [],
   };
 }
 
@@ -415,9 +420,25 @@ export async function loadMarket(force = false): Promise<{
   ]);
   const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
 
-  const candidates = mergeCandidates([watch, trending, topVol, newPools]);
-  cache = { at: Date.now(), candidates, regime };
-  return { candidates, regime, scanned: candidates.length };
+  const merged = mergeCandidates([watch, trending, topVol, newPools]);
+  let candidates = merged;
+  let yields: YieldQuote[] = [];
+  try {
+    const crossed = await crossCheck(merged);
+    candidates = crossed.candidates;
+    yields = crossed.yields;
+  } catch {
+    candidates = merged;
+  }
+  const stamped = withYields(regime, yields);
+  cache = { at: Date.now(), candidates, regime: stamped };
+  return { candidates, regime: stamped, scanned: candidates.length };
+}
+
+function withYields(regime: MarketRegime, yields: YieldQuote[]): MarketRegime {
+  if (!yields.length) return { ...regime, yields };
+  const line = `Live APY: ${yields.map((y) => `${y.label} ${y.apyPct.toFixed(2)}% (${y.source})`).join("; ")}.`;
+  return { ...regime, yields, overview: `${regime.overview} ${line}` };
 }
 
 export function invalidateMarketCache(): void {

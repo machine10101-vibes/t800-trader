@@ -10,6 +10,8 @@ export interface WatchToken {
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+export const JITO_SOL_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+export const JLP_MINT = "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4";
 
 /** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
 export const SOL_USDC_POOLS = [
@@ -21,10 +23,12 @@ export const WATCHLIST: WatchToken[] = [
   { symbol: "SOL", name: "Solana", mint: SOL_MINT, sector: "L1" },
   { symbol: "JUP", name: "Jupiter", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", sector: "DEX" },
   { symbol: "JTO", name: "Jito", mint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL", sector: "LST" },
+  { symbol: "JITOSOL", name: "Jito Staked SOL", mint: JITO_SOL_MINT, sector: "LST" },
   { symbol: "RAY", name: "Raydium", mint: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", sector: "DEX" },
   { symbol: "ORCA", name: "Orca", mint: "orcaEKTdK7LKz57vaA7iQxNhMvpvA2aP8VDgQ1sVR8", sector: "DEX" },
   { symbol: "PYTH", name: "Pyth", mint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", sector: "Oracle" },
   { symbol: "DRIFT", name: "Drift", mint: "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7", sector: "Perps" },
+  { symbol: "JLP", name: "Jupiter Perps LP", mint: JLP_MINT, sector: "Perps" },
   { symbol: "MNDE", name: "Marinade", mint: "MNDEFzGvMt87ueuHvVU9VcTQSQB6XND51pVSJD1YJXB", sector: "LST" },
   { symbol: "HNT", name: "Helium", mint: "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrE3XEbKcP", sector: "DePIN" },
   { symbol: "RENDER", name: "Render", mint: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", sector: "DePIN" },
@@ -32,7 +36,6 @@ export const WATCHLIST: WatchToken[] = [
   { symbol: "TNSR", name: "Tensor", mint: "TNSRxcUxoT9xBG3de7PiWmgQhEQ1e6bwS4P8Cdgx31A", sector: "Infra" },
   { symbol: "BONK", name: "Bonk", mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", sector: "Meme" },
   { symbol: "WIF", name: "dogwifhat", mint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", sector: "Meme" },
-  { symbol: "JLP", name: "Jupiter Perps LP", mint: "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4", sector: "Perps" },
 ];
 
 const WATCH_BY_MINT = new Map(WATCHLIST.map((t) => [t.mint, t]));

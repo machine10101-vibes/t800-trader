@@ -88,6 +88,9 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     c.flows.h24.buys + c.flows.h24.sells > 0 ? c.flows.h24.buys / (c.flows.h24.buys + c.flows.h24.sells) : null;
   const missing: string[] = [];
   if (mc === null) missing.push("Circulating market cap");
+  if ((c.sector === "LST" || c.sector === "Perps" || c.sector === "Lending") && !(c.apyPct && c.apyPct > 0)) {
+    missing.push("Confirmed APY for this mint");
+  }
   if (fdv === null) missing.push("FDV");
   missing.push("Official unlock / vesting schedule");
   missing.push("Protocol revenue / token fee switch");
@@ -107,7 +110,10 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     c.watchlist ? "Mapped to a known Solana protocol on the internal watchlist." : "Not on the conservative watchlist — treat as tape-first.",
     `24h unique takers ${ (c.flows.h24.buyers + c.flows.h24.sellers).toLocaleString() }.`,
     mc ? `Reported market cap ${usd(mc)}.` : "Market cap not published by GeckoTerminal for this pool.",
-  ];
+    c.apyPct && c.apyPct > 0
+      ? `Live APY ${c.apyPct.toFixed(2)}% from ${c.apySources?.join(", ") || "a public yield feed"}.`
+      : null,
+  ].filter((line): line is string => Boolean(line));
 
   const onchain = [
     `24h pool volume ${usd(c.volume24hUsd)} against reserves ${usd(c.liquidityUsd)}.`,
@@ -115,7 +121,12 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     `1h change ${c.flows.h1.priceChangePct.toFixed(2)}% on ${usd(c.flows.h1.volumeUsd)} volume.`,
     c.ageHours !== null ? `Oldest observed pool age ${c.ageHours.toFixed(1)} hours.` : "Pool age unavailable.",
     techLine(c),
-  ];
+    c.priceAgreement === "split"
+      ? "Independent price feeds disagree. The desk keeps the GeckoTerminal mark and will not open a new ticket on it."
+      : c.priceAgreement === "agree"
+        ? `Mark cross-checked by ${c.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price")).join(", ")}.`
+        : null,
+  ].filter((line): line is string => Boolean(line));
 
   const tokenomics = [
     fdv && mc ? `FDV ${usd(fdv)} vs circulating ${usd(mc)} (${(fdv / mc).toFixed(2)}x).` : "FDV/circ not fully available.",

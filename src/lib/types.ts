@@ -63,6 +63,11 @@ export interface TokenCandidate {
   flows: Record<Timeframe, FlowWindow>;
   watchlist: boolean;
   sources: string[];
+  /** Cross-checked mark. `split` means feeds disagree and the book will not open a new ticket. */
+  priceAgreement?: "agree" | "thin" | "split";
+  /** Percent, already scaled (4.98 means 4.98%). Null when no feed confirmed a yield for this mint. */
+  apyPct?: number | null;
+  apySources?: string[];
 }
 
 export interface TechnicalSnapshot {
@@ -149,6 +154,8 @@ export interface MarketRegime {
   overlooked: string[];
   overview: string;
   narratives: string[];
+  /** Compact public yields (LST, JLP, lend). Empty when those feeds missed the cycle. */
+  yields?: { label: string; apyPct: number; source: string }[];
 }
 
 export interface Signal {

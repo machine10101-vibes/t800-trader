@@ -47,6 +47,11 @@ export function scoreOrganic(c: TokenCandidate): { score: number; notes: string[
   }
 
   if (uniqueShare > 0.45 && uniqueShare < 0.62) score += 8;
+  const priceFeeds = c.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price"));
+  if (c.priceAgreement === "agree" && priceFeeds.length >= 2) {
+    score += 4;
+    notes.push(`Marks agree across ${priceFeeds.length} price feeds`);
+  }
   if (burst > 8 && !c.watchlist) {
     score -= 12;
     notes.push("1h volume is an extreme multiple of the 24h run-rate");
@@ -111,6 +116,13 @@ export function scoreValuation(c: TokenCandidate): { score: number; metric: stri
     score -= 6;
   }
 
+  const yieldSector = c.sector === "LST" || c.sector === "Lending" || c.sector === "Perps";
+  if (yieldSector && c.apyPct && c.apyPct > 0) {
+    score += clamp(3 + c.apyPct * 0.35, 3, 8);
+    const via = c.apySources?.length ? ` via ${c.apySources.join(", ")}` : "";
+    notes.push(`Sourced yield ${c.apyPct.toFixed(2)}%${via}`);
+  }
+
   return { score: clamp(score, 0, 100), metric, notes };
 }
 
@@ -168,6 +180,10 @@ export function scoreRisk(c: TokenCandidate): { score: number; notes: string[] }
     score -= 12;
     notes.push("Unclassified token — no mapped protocol");
   }
+  if (c.priceAgreement === "split") {
+    score -= 12;
+    notes.push("Price feeds disagree");
+  }
   return { score: clamp(score, 0, 100), notes };
 }
 
@@ -220,7 +236,7 @@ export function scoreCandidate(c: TokenCandidate, technical: TechnicalSnapshot):
   });
 
   const penalties = [...organic.notes, ...valuation.notes, ...activity.notes, ...risk.notes].filter((n) =>
-    /risk|below|heavy|stale|violent|young|meme|launchpad|casino|dwarfs|not published|thin|excluded/i.test(n),
+    /risk|below|heavy|stale|violent|young|meme|launchpad|casino|dwarfs|not published|thin|excluded|disagree/i.test(n),
   );
   const strengths = [...organic.notes, ...valuation.notes, ...activity.notes].filter((n) => !penalties.includes(n));
 

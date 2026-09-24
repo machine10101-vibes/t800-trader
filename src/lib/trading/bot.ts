@@ -90,6 +90,10 @@ export async function tickBot(): Promise<AppState> {
           solChange: market.regime.sol.change24h,
         };
         for (const token of focus) {
+          if (token.priceAgreement === "split") {
+            blocked.push(`${token.symbol}: price feeds disagree`);
+            continue;
+          }
           const candles = cachedOhlcv(token.poolAddress);
           const found =
             candles && candles.length >= 20

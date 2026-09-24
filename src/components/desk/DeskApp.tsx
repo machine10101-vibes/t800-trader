@@ -827,6 +827,15 @@ function Overview({
             <span className="text-xs text-[var(--faint)]">{shortAddress(wallet.address)}</span>
           </div>
           <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{desk.regime.overview}</p>
+          {(desk.regime.yields ?? []).length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(desk.regime.yields ?? []).map((y) => (
+                <Pill key={y.label} tone="mint">
+                  {y.label} {y.apyPct.toFixed(2)}% APY
+                </Pill>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
               <Label>Crowded</Label>
@@ -873,6 +882,9 @@ function Overview({
               >
                 <span>
                   {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
+                  {r.candidate.apyPct ? (
+                    <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
+                  ) : null}
                 </span>
                 <span className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
               </button>
@@ -894,12 +906,13 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
         </p>
       </div>
       <div className="neon desk-scroll overflow-x-auto p-1">
-        <table className="w-full min-w-[980px] text-left text-sm">
+        <table className="w-full min-w-[1080px] text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
             <tr>
               <th className="px-4 py-3">Asset</th>
               <th>Ticker</th>
               <th>Price</th>
+              <th>APY</th>
               <th>Market cap</th>
               <th>FDV</th>
               <th>Sector</th>
@@ -913,7 +926,7 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
           <tbody>
             {desk.research.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={11}>
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={12}>
                   No live finalists this cycle.
                 </td>
               </tr>
@@ -926,7 +939,17 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
                 >
                   <td className="px-4 py-3 font-medium">{r.asset}</td>
                   <td className="num">{r.ticker}</td>
-                  <td className="num">{priceFmt(r.price)}</td>
+                  <td className="num">
+                    {priceFmt(r.price)}
+                    {r.candidate.priceAgreement === "split" ? (
+                      <span className="block text-[10px] uppercase tracking-wide text-[var(--crimson)]">feeds split</span>
+                    ) : r.candidate.priceAgreement === "agree" ? (
+                      <span className="block text-[10px] text-[var(--faint)]">
+                        {r.candidate.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price")).length} feeds
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="num">{r.candidate.apyPct ? `${r.candidate.apyPct.toFixed(2)}%` : "—"}</td>
                   <td className="num">{usd(r.marketCap)}</td>
                   <td className="num">{usd(r.fdv)}</td>
                   <td>{r.sector}</td>
@@ -1057,6 +1080,12 @@ function BotView({
                 >
                   <span>
                     {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
+                    {r.candidate.apyPct ? (
+                      <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
+                    ) : null}
+                    {r.candidate.priceAgreement === "split" ? (
+                      <span className="text-[var(--crimson)]"> split</span>
+                    ) : null}
                   </span>
                   <span className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
                 </button>
@@ -1265,7 +1294,16 @@ function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: ()
         <List title="Missing data (not invented)" items={thesis.missingData} />
         <List title="Sources" items={thesis.sources} />
         <div className="mt-6 text-xs text-[var(--faint)]">
-          24h {pct(thesis.candidate.flows.h24.priceChangePct)} · Liq {usd(thesis.candidate.liquidityUsd)} · Vol {usd(thesis.candidate.volume24hUsd)}
+          24h {pct(thesis.candidate.flows.h24.priceChangePct)} · Liq {usd(thesis.candidate.liquidityUsd)} · Vol{" "}
+          {usd(thesis.candidate.volume24hUsd)}
+          {thesis.candidate.apyPct
+            ? ` · APY ${thesis.candidate.apyPct.toFixed(2)}% (${(thesis.candidate.apySources ?? []).join(", ")})`
+            : ""}
+          {thesis.candidate.priceAgreement === "agree"
+            ? " · marks agree"
+            : thesis.candidate.priceAgreement === "split"
+              ? " · marks split — no new ticket"
+              : ""}
         </div>
       </aside>
     </div>
