@@ -1,5 +1,5 @@
 import { armButton, buildDesk, shellDesk } from "@/lib/desk";
-import { authorizeTrading, reclaimTrading, tradingBudgetAddress, tradingSnapshot } from "@/lib/solana/authorize";
+import { authorizeTrading, reclaimTrading, tradingBudgetAddress, tradingKeypair, tradingSnapshot } from "@/lib/solana/authorize";
 import { executorFor } from "@/lib/solana/swap";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
@@ -41,12 +41,17 @@ async function sellSignedPositions(executor: ChainExecutor): Promise<void> {
 
 async function budgetFor(session?: WalletSession | null): Promise<WalletBudget | null> {
   if (!session) return null;
+  const bot = tradingKeypair(session.address);
+  const address = tradingBudgetAddress(session.address);
   try {
-    const address = await tradingBudgetAddress(session.address);
-    const live = await readBalances(address);
+    let live = await readBalances(address);
+    if (bot && live.usdc < 1 && live.sol < 0.01) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      live = await readBalances(address);
+    }
     return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
   } catch {
-    return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+    return bot ? { usdc: 0, sol: 0, solPriceUsd: session.solPriceUsd ?? 0 } : { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
   }
 }
 

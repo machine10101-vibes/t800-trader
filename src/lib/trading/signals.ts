@@ -334,14 +334,16 @@ export function buildFlowSignals(
   if (token.sector === "Meme" && (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))) return [];
   if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
 
+  const stackGreen = m5 > 0 && m15 >= 0.35 && h1 > 0 && h1 < 8;
+  const tapeFloor = stackGreen ? 0.42 : defensive ? 0.51 : 0.5;
   const aligned =
     token.watchlist &&
-    m15 >= (defensive ? 0.1 : 0.15) &&
+    m15 >= 0.1 &&
     m15 < (defensive ? 5 : 6) &&
-    m5 > (defensive ? -0.2 : -0.15) &&
-    h1 > (defensive ? -1 : -0.4) &&
+    m5 > -0.2 &&
+    h1 > -1 &&
     h1 < (defensive ? 6 : 8) &&
-    tape >= (defensive ? 0.51 : 0.5);
+    tape >= tapeFloor;
   const impulse =
     !defensive &&
     token.sector !== "Meme" &&

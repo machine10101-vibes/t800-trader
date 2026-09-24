@@ -2,7 +2,7 @@ import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { dexesForVenues } from "@/lib/market/venues";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
-import { tradingBudgetAddress, tradingKeypair } from "./authorize";
+import { tradingKeypair } from "./authorize";
 import { broadcastTransaction, mintDecimals, readBalances, type WalletSession } from "./wallet";
 
 export const SLIPPAGE_BPS = 80;
@@ -109,31 +109,6 @@ function decodeTx(b64: string): VersionedTransaction {
   return VersionedTransaction.deserialize(bytes);
 }
 
-function encodeBase64(bytes: Uint8Array): string {
-  let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
-  return btoa(text);
-}
-
-async function sendRaw(bytes: Uint8Array): Promise<string> {
-  const res = await fetch("https://solana.publicnode.com", {
-    method: "POST",
-    cache: "no-store",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "sendTransaction",
-      params: [encodeBase64(bytes), { encoding: "base64", skipPreflight: false, maxRetries: 3 }],
-    }),
-  });
-  const json = (await res.json()) as { result?: string; error?: { message?: string } };
-  if (!res.ok || json.error || !json.result) {
-    throw new Error(json.error?.message || "Solana rejected the signed transaction");
-  }
-  return json.result;
-}
-
 function uiAmount(units: string, decimals: number): number {
   const n = Number(units);
   if (!Number.isFinite(n) || n <= 0) throw new Error("Jupiter returned an empty fill");
@@ -146,8 +121,9 @@ function signLocally(tx: VersionedTransaction, key: Keypair): Uint8Array {
 }
 
 export async function settleSpot(session: WalletSession, order: ChainOrder): Promise<ChainFill> {
-  const trader = await tradingBudgetAddress(session.address);
-  const signer = trader === session.address ? null : tradingKeypair(session.address);
+  const signer = tradingKeypair(session.address);
+  if (!signer) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
+  const trader = signer.publicKey.toBase58();
   const balances = await readBalances(trader);
   const tokenDecimals =
     order.tokenDecimals ?? (order.kind === "open" ? undefined : await mintDecimals(order.mint));
@@ -189,22 +165,7 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   const simulatedError = typeof simulated === "string" ? simulated : simulated?.error;
   if (simulatedError) throw new Error(`Jupiter could not simulate this swap (${simulatedError})`);
   const tx = decodeTx(built.swapTransaction);
-  const provider = session.provider;
-  let signature: string;
-  if (trader !== session.address && !signer) {
-    throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
-  }
-  if (signer) {
-    signature = await broadcastTransaction(signLocally(tx, signer));
-  } else if (provider.signAndSendTransaction) {
-    const signed = await provider.signAndSendTransaction(tx);
-    signature = typeof signed === "string" ? signed : signed.signature;
-  } else if (provider.signTransaction) {
-    const signed = await provider.signTransaction(tx);
-    signature = await sendRaw(signed.serialize());
-  } else {
-    throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
-  }
+  const signature = await broadcastTransaction(signLocally(tx, signer));
   if (!signature) throw new Error("Wallet did not return a signature");
 
   const outDecimals = plan.outputMint === USDC_MINT ? 6 : plan.outputMint === SOL_MINT ? 9 : await mintDecimals(plan.outputMint);

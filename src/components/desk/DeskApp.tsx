@@ -42,7 +42,6 @@ export function DeskApp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(false);
-  const [liveTape, setLiveTape] = useState(false);
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -55,6 +54,9 @@ export function DeskApp() {
   const [watchError, setWatchError] = useState<string | null>(null);
   const [knownBooks, setKnownBooks] = useState<string[]>([]);
   const lastTradeId = useRef<string | null>(null);
+  const walletRef = useRef(wallet);
+  walletRef.current = wallet;
+  const armEnsure = useRef<string | null>(null);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = parseWalletAddress(raw);
@@ -76,11 +78,10 @@ export function DeskApp() {
     window.history.replaceState(null, "", url);
   }, []);
 
-  const applyDesk = useCallback((next: DeskPayload, opts?: { live?: boolean }) => {
+  const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
     setError(null);
     setUpdatedAt(next.generatedAt);
-    if (opts?.live !== false) setLiveTape(true);
     setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
     setFocusMint((cur) => {
       if (cur && next.research.some((r) => r.candidate.mint === cur)) return cur;
@@ -105,7 +106,7 @@ export function DeskApp() {
     try {
       const session = await connectWallet(trusted);
       const book = await attachWallet(session.address, session.equityUsd);
-      applyDesk(shellDesk(book), { live: false });
+      applyDesk(shellDesk(book));
       setWallet(session);
       setBooting(false);
     } catch (e) {
@@ -125,7 +126,6 @@ export function DeskApp() {
     setCandles([]);
     setError(null);
     setBooting(false);
-    setLiveTape(false);
   }, [wallet]);
 
   useEffect(() => {
@@ -146,7 +146,6 @@ export function DeskApp() {
         setWallet(null);
         setTrading(null);
         setDesk(null);
-        setLiveTape(false);
       },
       onAccountChanged: (address) => {
         if (!address) {
@@ -157,7 +156,7 @@ export function DeskApp() {
           detachWallet();
           const session = await refreshWallet({ ...wallet, address });
           const book = await attachWallet(session.address, session.equityUsd);
-          applyDesk(shellDesk(book), { live: false });
+          applyDesk(shellDesk(book));
           setWallet(session);
           setBooting(false);
         })();
@@ -239,16 +238,22 @@ export function DeskApp() {
   }, [focusPool]);
 
   useEffect(() => {
-    if (!wallet || !liveTape || !desk?.bot.running) return;
+    const session = walletRef.current;
+    if (!session || !desk?.bot.running) return;
     const seconds = Math.max(6, desk.config.scanSeconds);
     let cancel = false;
+    let inflight = false;
     const run = async () => {
+      const current = walletRef.current;
+      if (!current || cancel || inflight) return;
+      inflight = true;
       try {
-        const next = await controlBot("tick", wallet);
-        if (cancel) return;
-        applyDesk(next);
+        const next = await controlBot("tick", current);
+        if (!cancel) applyDesk(next);
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
+      } finally {
+        inflight = false;
       }
     };
     void run();
@@ -257,7 +262,35 @@ export function DeskApp() {
       cancel = true;
       clearInterval(id);
     };
-  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, liveTape, wallet]);
+  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, wallet?.address]);
+
+  useEffect(() => {
+    const session = walletRef.current;
+    if (!session || !desk?.bot.running || !desk.config.walletSwaps) return;
+    if (trading && trading.equityUsd >= MIN_TRADE_USD) {
+      armEnsure.current = session.address;
+      return;
+    }
+    if (armEnsure.current === session.address) return;
+    armEnsure.current = session.address;
+    let cancel = false;
+    void (async () => {
+      try {
+        const fresh = await refreshWallet(session);
+        if (cancel) return;
+        setWallet(fresh);
+        const next = await controlBot("start", fresh);
+        if (cancel) return;
+        applyDesk(next);
+        setTrading(await tradingSnapshot(fresh.address).catch(() => null));
+      } catch (e) {
+        if (!cancel) setError(e instanceof Error ? e.message : "Arm signature failed");
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [applyDesk, desk?.bot.running, desk?.config.walletSwaps, trading, wallet?.address]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -316,6 +349,7 @@ export function DeskApp() {
       return;
     }
     setBusy(true);
+    if (action === "start") armEnsure.current = wallet.address;
     try {
       if (action === "start" || action === "reset") {
         const session = await refreshWallet(wallet);

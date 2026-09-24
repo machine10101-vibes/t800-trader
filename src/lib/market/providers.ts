@@ -408,6 +408,8 @@ async function fetchRegime(): Promise<MarketRegime> {
   };
 }
 
+let marketInflight: Promise<{ candidates: TokenCandidate[]; regime: MarketRegime; scanned: number }> | null = null;
+
 export async function loadMarket(force = false): Promise<{
   candidates: TokenCandidate[];
   regime: MarketRegime;
@@ -416,7 +418,21 @@ export async function loadMarket(force = false): Promise<{
   if (!force && cache && Date.now() - cache.at < CACHE_MS) {
     return { candidates: cache.candidates, regime: cache.regime, scanned: cache.candidates.length };
   }
+  if (!force && marketInflight) return marketInflight;
 
+  const run = loadMarketOnce();
+  marketInflight = run;
+  void run.finally(() => {
+    if (marketInflight === run) marketInflight = null;
+  });
+  return run;
+}
+
+async function loadMarketOnce(): Promise<{
+  candidates: TokenCandidate[];
+  regime: MarketRegime;
+  scanned: number;
+}> {
   const [regime, pools] = await Promise.all([
     fetchRegime(),
     (async () => {

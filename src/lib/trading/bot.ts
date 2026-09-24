@@ -1,7 +1,7 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
-import type { AppState, ChainExecutor, MarketRegime, Position, Signal, TradeReason } from "@/lib/types";
+import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 import { emptyState, mutateState } from "@/lib/store";
 import { advise, studyTape } from "./learn";
@@ -13,6 +13,8 @@ import {
   dayLossUsedPct,
   managePosition,
   MIN_TICKET_USD,
+  MIN_TRADE_USD,
+  payableUsd,
   rollSession,
   shouldFlattenMeme,
   shouldScratch,
@@ -22,6 +24,13 @@ import {
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
+
+/** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
+function huntRank(token: ScoredCandidate): number {
+  const m15 = token.flows.m15.priceChangePct;
+  const green = m15 >= 0.1 ? 200 + Math.min(m15, 4) * 8 : m15;
+  return green + token.researchScore * 0.15 + (token.watchlist ? 25 : 0);
+}
 
 function priceMap(state: AppState, extras: { mint: string; price: number }[]): Map<string, number> {
   const map = new Map<string, number>();
@@ -141,10 +150,14 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
       if (next.bot.running && !dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config);
         next = studyTape(next, research.candidates, market.regime.stance);
+        const spendable = budget ? payableUsd(budget) : 0;
+        if (next.config.walletSwaps && spendable < MIN_TRADE_USD) {
+          blocked.push("Trading balance is under $5 — the arm signature has to land before a swap is sent");
+        }
         const focus = research.candidates
           .filter((c) => !screenCandidate(c, next.config))
-          .sort((a, b) => b.researchScore - a.researchScore)
-          .slice(0, 10);
+          .sort((a, b) => huntRank(b) - huntRank(a))
+          .slice(0, 16);
 
         const tapeCtx = {
           stance: market.regime.stance,
@@ -277,8 +290,12 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
       next = pushEquity(next);
       const mode = next.config.walletSwaps ? " · wallet swaps" : " · simulated";
       const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
+      const hunting =
+        next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
+          ? " · scanning — the next green 15m long is sent automatically"
+          : "";
       const note = next.bot.running
-        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${held}`
+        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${hunting}${held}`
         : `Standby · closed ${closed} · ${market.regime.stance}${mode}${held}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;

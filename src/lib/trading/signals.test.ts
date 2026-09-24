@@ -203,6 +203,62 @@ describe("indicators", () => {
     assert.ok(sized.notional <= 6 * cashConcentration(6));
   });
 
+  it("buys a green 15m watchlist name when the hour is still slightly red", () => {
+    const flow = (priceChangePct: number, buys = 58, sells = 40) => ({
+      buys,
+      sells,
+      buyers: 20,
+      sellers: 16,
+      volumeUsd: 10_000,
+      priceChangePct,
+    });
+    const token = {
+      symbol: "JUP",
+      mint: "jup",
+      poolAddress: "pool",
+      sector: "DEX",
+      watchlist: true,
+      priceUsd: 1.2,
+      flows: {
+        m5: flow(0.2),
+        m15: flow(0.4),
+        m30: flow(0.1),
+        h1: flow(-0.6),
+        h6: flow(0.2),
+        h24: flow(1),
+      },
+    } as TokenCandidate;
+    const found = buildFlowSignals(token, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
+    assert.equal(found.length, 1);
+    assert.equal(found[0]?.side, "long");
+    const unknown = { ...token, symbol: "PUMP", sector: "Unknown", watchlist: false };
+    assert.equal(buildFlowSignals(unknown, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
+    const bid = {
+      ...token,
+      flows: {
+        m5: flow(1.1, 45, 55),
+        m15: flow(2, 45, 55),
+        m30: flow(0.4, 45, 55),
+        h1: flow(0.7, 45, 55),
+        h6: flow(0.2, 45, 55),
+        h24: flow(1, 45, 55),
+      },
+    };
+    assert.equal(buildFlowSignals(bid, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 1);
+    const sold = {
+      ...token,
+      flows: {
+        m5: flow(2.3, 20, 41),
+        m15: flow(2, 20, 41),
+        m30: flow(0.4, 20, 41),
+        h1: flow(0.7, 20, 41),
+        h6: flow(0.2, 20, 41),
+        h24: flow(1, 20, 41),
+      },
+    };
+    assert.equal(buildFlowSignals(sold, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
+  });
+
   it("does not buy a crashing watchlist name from pool flow", () => {
     const flow = (priceChangePct: number) => ({
       buys: 30,

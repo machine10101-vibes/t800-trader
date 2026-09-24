@@ -273,8 +273,20 @@ export async function runResearch(
     .map((c) => ({ c, heat: c.volume24hUsd + c.liquidityUsd * 2 }))
     .sort((a, b) => b.heat - a.heat)
     .map((x) => x.c);
-  const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 12);
-  const scored = rankedSeed.map((c) => scoreCandidate(c, technicalFromFlows(c)));
+  const seen = new Set<string>();
+  const rankedSeed: TokenCandidate[] = [];
+  const pushSeed = (row: TokenCandidate) => {
+    if (seen.has(row.mint)) return;
+    seen.add(row.mint);
+    rankedSeed.push(row);
+  };
+  for (const row of watchPassed) pushSeed(row);
+  for (const row of otherPassed) {
+    if (row.sector !== "Unknown" && row.sector !== "Meme" && row.flows.m15.priceChangePct >= 0.1) pushSeed(row);
+  }
+  for (const row of otherPassed) pushSeed(row);
+  const seed = rankedSeed.slice(0, 20);
+  const scored = seed.map((c) => scoreCandidate(c, technicalFromFlows(c)));
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);

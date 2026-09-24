@@ -321,10 +321,8 @@ export async function tradingSnapshot(owner: string): Promise<TradingSnap | null
   return { address: held.address, sol: held.sol, usdc: held.usdc, equityUsd: held.equityUsd };
 }
 
-export async function tradingBudgetAddress(owner: string): Promise<string> {
+/** The browser key is the swap signer once Arm has created it. An empty read must not fall back to Phantom. */
+export function tradingBudgetAddress(owner: string): string {
   const bot = tradingKeypair(owner);
-  if (!bot) return owner;
-  const held = await readBalances(bot.publicKey.toBase58()).catch(() => null);
-  if (held && (held.usdc >= 1 || held.sol >= BOT_MIN_SOL)) return bot.publicKey.toBase58();
-  return owner;
+  return bot ? bot.publicKey.toBase58() : owner;
 }
