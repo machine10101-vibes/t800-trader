@@ -3,7 +3,21 @@
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { adoptLiveEquity, armButton, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk, shellDesk, tradingSnapshot } from "@/lib/client";
+import {
+  adoptLiveEquity,
+  armButton,
+  attachWallet,
+  baselineTradingPrincipal,
+  closeTicket,
+  configureBot,
+  controlBot,
+  detachWallet,
+  loadDesk,
+  shellDesk,
+  tradingProfitUsd,
+  tradingSnapshot,
+  withdrawTradingProfit,
+} from "@/lib/client";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
@@ -56,6 +70,7 @@ export function DeskApp() {
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
+  const busyRef = useRef(false);
   const armEnsure = useRef<string | null>(null);
 
   const openWatch = useCallback((raw: string) => {
@@ -176,8 +191,12 @@ export function DeskApp() {
     let live = true;
     const pullTrading = () => {
       void tradingSnapshot(wallet.address)
-        .then((snap) => {
-          if (live) setTrading(snap);
+        .then(async (snap) => {
+          if (!live) return;
+          setTrading(snap);
+          if (!snap) return;
+          const wrote = await baselineTradingPrincipal(snap.equityUsd);
+          if (wrote && live) applyDesk(await loadDesk());
         })
         .catch(() => undefined);
     };
@@ -195,7 +214,7 @@ export function DeskApp() {
       live = false;
       clearInterval(id);
     };
-  }, [wallet]);
+  }, [applyDesk, wallet]);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("watch");
@@ -245,7 +264,7 @@ export function DeskApp() {
     let inflight = false;
     const run = async () => {
       const current = walletRef.current;
-      if (!current || cancel || inflight) return;
+      if (!current || cancel || inflight || busyRef.current) return;
       inflight = true;
       try {
         const next = await controlBot("tick", current);
@@ -348,6 +367,7 @@ export function DeskApp() {
       setError("Connect a Solana wallet to trade.");
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     if (action === "start") armEnsure.current = wallet.address;
     try {
@@ -379,6 +399,30 @@ export function DeskApp() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
     } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const withdrawProfit = async () => {
+    if (!wallet) {
+      setError("Connect a Solana wallet to trade.");
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      applyDesk(await withdrawTradingProfit(wallet));
+      const [session, snap] = await Promise.all([
+        refreshWallet(wallet),
+        tradingSnapshot(wallet.address).catch(() => null),
+      ]);
+      setWallet(session);
+      setTrading(snap);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send profit to the wallet");
+    } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -545,6 +589,17 @@ export function DeskApp() {
           >
             {desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
+          {desk?.config.walletSwaps ? (
+            <button
+              disabled={busy || !trading || tradingProfitUsd(trading.equityUsd, desk?.bot.swapPrincipalUsd) < 1}
+              onClick={() => void withdrawProfit()}
+              className="btn btn-ink mt-2 w-full"
+            >
+              {trading && tradingProfitUsd(trading.equityUsd, desk?.bot.swapPrincipalUsd) >= 1
+                ? `Send ${usd(tradingProfitUsd(trading.equityUsd, desk?.bot.swapPrincipalUsd))} profit`
+                : "Send profits"}
+            </button>
+          ) : null}
           {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
           <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
             {trading
@@ -595,6 +650,7 @@ export function DeskApp() {
                   onClose={closePos}
                   onFlatten={() => void control("flatten")}
                   onWalletSwaps={(on) => void saveConfig({ walletSwaps: on })}
+                  onWithdraw={() => void withdrawProfit()}
                 />
               ) : null}
               {tab === "risk" ? <SettingsPanel desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
@@ -1211,6 +1267,7 @@ function Book({
   onClose,
   onFlatten,
   onWalletSwaps,
+  onWithdraw,
 }: {
   desk: DeskPayload;
   wallet: WalletSession;
@@ -1220,11 +1277,13 @@ function Book({
   onClose: (id: string) => void;
   onFlatten: () => void;
   onWalletSwaps: (on: boolean) => void;
+  onWithdraw: () => void;
 }) {
   const curve = desk.equityCurve.map((p) => p.equity);
   const marked = trading?.equityUsd || wallet.equityUsd;
   const equitySeries = curve.length >= 1 ? curve : marked ? [marked] : [];
   const swaps = desk.config.walletSwaps;
+  const profit = trading ? tradingProfitUsd(trading.equityUsd, desk.bot.swapPrincipalUsd) : 0;
   return (
     <div className="space-y-4">
       <div className="neon p-5">
@@ -1233,13 +1292,20 @@ function Book({
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
-                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Disarm sends the leftover SOL and USDC back. Open tickets are sold first."
+                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sends the leftover SOL and USDC back. Open tickets are sold first."
                 : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
             </p>
           </div>
-          <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
-            {swaps ? "Stop wallet swaps" : "Send swaps to my wallet"}
-          </button>
+          <div className="flex flex-col gap-2">
+            {swaps ? (
+              <button disabled={busy || profit < 1} onClick={onWithdraw} className="btn btn-magenta">
+                {profit >= 1 ? `Send ${usd(profit)} profit to my wallet` : "Send profits to my wallet"}
+              </button>
+            ) : null}
+            <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
+              {swaps ? "Stop wallet swaps" : "Send swaps to my wallet"}
+            </button>
+          </div>
         </div>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
@@ -1249,7 +1315,7 @@ function Book({
           value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
           sub={
             trading
-              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC · ${shortAddress(trading.address)}`
+              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
               : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`
           }
         />

@@ -299,6 +299,8 @@ export interface BotState {
   swapAuthSignature?: string | null;
   /** Address that signs Jupiter swaps after that arm transaction. */
   swapBot?: string | null;
+  /** USD marked on the trading key when it was funded. Cash above this is profit. */
+  swapPrincipalUsd?: number | null;
 }
 
 export interface Portfolio {

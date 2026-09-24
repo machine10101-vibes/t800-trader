@@ -195,6 +195,47 @@ export interface ArmAuth {
   signature: string;
   botAddress: string;
   reused: boolean;
+  /** Trading-key equity after this arm, in USD. */
+  equityUsd: number;
+  /** New USD that moved onto the trading key. Zero when the key was already funded. */
+  depositedUsd: number;
+}
+
+const MIN_PROFIT_USD = 1;
+
+/** Cash on the trading key above the deposit. Open tickets are not cash, so they are not included. */
+export function tradingProfitUsd(equityUsd: number, principalUsd: number | null | undefined): number {
+  if (principalUsd == null || !Number.isFinite(principalUsd) || !Number.isFinite(equityUsd)) return 0;
+  return Math.max(0, equityUsd - principalUsd);
+}
+
+export function planProfitWithdrawal(input: {
+  usdc: number;
+  sol: number;
+  solPriceUsd: number;
+  principalUsd: number;
+  keepSol?: number;
+}): { usdc: number; sol: number; profitUsd: number } {
+  const price = input.solPriceUsd > 0 ? input.solPriceUsd : 0;
+  const keep = Math.max(input.keepSol ?? 0.01, 0.008);
+  const equity = Math.max(0, input.usdc) + Math.max(0, input.sol) * price;
+  const profit = equity - input.principalUsd;
+  if (!(profit >= MIN_PROFIT_USD)) {
+    throw new Error("No trading profit to send yet. The bot keeps the balance it is still using.");
+  }
+  let usdcSend = Math.min(Math.max(0, input.usdc), profit);
+  if (usdcSend < 0.01) usdcSend = 0;
+  usdcSend = round(usdcSend, 6);
+  const left = profit - usdcSend;
+  const solFree = Math.max(0, input.sol - keep);
+  let solSend = price > 0 ? Math.min(solFree, left / price) : 0;
+  if (solSend * price < 0.5) solSend = 0;
+  solSend = round(solSend, 9);
+  const sent = usdcSend + solSend * price;
+  if (sent < MIN_PROFIT_USD) {
+    throw new Error("The bot is keeping that SOL for swap fees. Close a winning ticket, then send the USDC profit.");
+  }
+  return { usdc: usdcSend, sol: solSend, profitUsd: round(sent, 2) };
 }
 
 let arming: Promise<ArmAuth> | null = null;
@@ -220,7 +261,9 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     plan = planAuthorization(sol, usdc);
   } catch (error) {
     const held = await readBalances(botAddress).catch(() => null);
-    if (botCanTrade(held)) return { signature: "already-authorized", botAddress, reused: true };
+    if (botCanTrade(held)) {
+      return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
+    }
     throw error;
   }
 
@@ -259,9 +302,13 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     tx.add(createAtaIdempotent(owner, bot.publicKey, usdcMint));
     tx.add(transferChecked(source, usdcMint, associatedToken(bot.publicKey, usdcMint), owner, usdcUnits, 6));
   }
+  const before = await readBalances(botAddress).catch(() => null);
   const signature = await walletSignature(session, tx);
   await confirmSignature(signature);
-  return { signature, botAddress, reused: false };
+  const after = await readBalances(botAddress).catch(() => null);
+  const equityUsd = after?.equityUsd ?? 0;
+  const depositedUsd = Math.max(0, equityUsd - (before?.equityUsd ?? 0));
+  return { signature, botAddress, reused: false, equityUsd, depositedUsd };
 }
 
 /** Send leftover USDC and SOL from the trading key back to the connected wallet. */
@@ -303,6 +350,58 @@ export async function reclaimTrading(ownerAddress: string, keepSol = 0): Promise
   const sent = await broadcastTransaction(tx.serialize());
   if (!sent) throw new Error("Could not return the trading balance to the wallet");
   return sent;
+}
+
+/** Send cash profit from the trading key to the connected wallet. The deposit stays so the bot can keep trading. */
+export async function sendTradingProfit(
+  ownerAddress: string,
+  principalUsd: number,
+  keepSol = 0.01,
+): Promise<{ signature: string; profitUsd: number }> {
+  const bot = tradingKeypair(ownerAddress);
+  if (!bot) throw new Error("Arm the bot before sending profit back to the wallet.");
+  const priced = await readBalances(bot.publicKey.toBase58());
+  const plan = planProfitWithdrawal({
+    usdc: priced.usdc,
+    sol: priced.sol,
+    solPriceUsd: priced.solPriceUsd ?? 0,
+    principalUsd,
+    keepSol,
+  });
+  const held = await chainHoldings(bot.publicKey);
+  const owner = new PublicKey(ownerAddress);
+  const usdcMint = new PublicKey(USDC_MINT);
+  let usdcUnits = BigInt(Math.floor(plan.usdc * 1_000_000 + 1e-6));
+  if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+  const feeKeep = BigInt(Math.round(Math.max(keepSol, 0.008) * 1_000_000_000));
+  let solBack = BigInt(Math.floor(plan.sol * 1_000_000_000));
+  if (held.lamports < solBack + feeKeep) solBack = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
+  if (usdcUnits > 0n && !(await accountExists(associatedToken(owner, usdcMint)))) {
+    const rentNeed = feeKeep + ATA_RENT_LAMPORTS + FEE_BUFFER_LAMPORTS;
+    if (held.lamports < solBack + rentNeed) {
+      solBack = held.lamports > rentNeed ? held.lamports - rentNeed : 0n;
+    }
+  }
+  if (usdcUnits <= 0n && solBack <= 0n) {
+    throw new Error("No trading profit to send yet. The bot keeps the balance it is still using.");
+  }
+
+  const tx = new Transaction();
+  tx.feePayer = bot.publicKey;
+  tx.recentBlockhash = await latestBlockhash();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+  if (usdcUnits > 0n) {
+    tx.add(createAtaIdempotent(bot.publicKey, owner, usdcMint));
+    tx.add(transferChecked(associatedToken(bot.publicKey, usdcMint), usdcMint, associatedToken(owner, usdcMint), bot.publicKey, usdcUnits, 6));
+  }
+  if (solBack > 0n) {
+    tx.add(SystemProgram.transfer({ fromPubkey: bot.publicKey, toPubkey: owner, lamports: Number(solBack) }));
+  }
+  tx.sign(bot);
+  const sent = await broadcastTransaction(tx.serialize());
+  if (!sent) throw new Error("Could not send the trading profit to the wallet");
+  await confirmSignature(sent);
+  return { signature: sent, profitUsd: plan.profitUsd };
 }
 
 export interface TradingSnap {

@@ -1,5 +1,13 @@
 import { armButton, buildDesk, shellDesk } from "@/lib/desk";
-import { authorizeTrading, reclaimTrading, tradingBudgetAddress, tradingKeypair, tradingSnapshot } from "@/lib/solana/authorize";
+import {
+  authorizeTrading,
+  reclaimTrading,
+  sendTradingProfit,
+  tradingBudgetAddress,
+  tradingKeypair,
+  tradingProfitUsd,
+  tradingSnapshot,
+} from "@/lib/solana/authorize";
 import { executorFor } from "@/lib/solana/swap";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
@@ -8,7 +16,7 @@ import { applyControl, tickBot } from "@/lib/trading/bot";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 
-export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingSnapshot };
+export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd, tradingSnapshot };
 
 export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);
@@ -69,12 +77,23 @@ export async function controlBot(
     await sellSignedPositions(executor);
   }
   let reclaimed: string | null = null;
+  let principalAfter: number | null = null;
   if ((action === "stop" || action === "flatten" || action === "reset") && session) {
+    const bot = tradingKeypair(session.address);
+    const before = bot ? await readBalances(bot.publicKey.toBase58()).catch(() => null) : null;
     const open = (await loadState()).positions.some((p) => p.signature && p.side === "long");
     reclaimed = await reclaimTrading(session.address, open ? 0.015 : 0);
+    if (bot) {
+      const after = await readBalances(bot.publicKey.toBase58()).catch(() => null);
+      const returned = Math.max(0, (before?.equityUsd ?? 0) - (after?.equityUsd ?? 0));
+      const prior = (await loadState()).bot.swapPrincipalUsd;
+      principalAfter = Math.max(0, (prior ?? before?.equityUsd ?? 0) - returned);
+    } else {
+      principalAfter = 0;
+    }
   }
 
-  let auth: { signature: string; botAddress: string; reused: boolean } | null = null;
+  let auth: { signature: string; botAddress: string; reused: boolean; equityUsd: number; depositedUsd: number } | null = null;
   if (action === "start" && session) {
     const state = await loadState();
     if (state.config.walletSwaps) auth = await authorizeTrading(session);
@@ -90,18 +109,31 @@ export async function controlBot(
         ...next,
         bot: {
           ...next.bot,
+          swapPrincipalUsd: principalAfter ?? next.bot.swapPrincipalUsd,
           lastNote: action === "stop" ? `Disarmed — returned ${short}` : `Book flattened — returned ${short}`,
         },
       };
     }
-    if (action !== "start" || !auth) return next;
+    if (action !== "start" || !auth) {
+      if (principalAfter == null) return next;
+      return { ...next, bot: { ...next.bot, swapPrincipalUsd: principalAfter } };
+    }
     const short = auth.reused ? "trading key already funded" : `signed ${auth.signature.slice(0, 8)}…`;
+    const prior = next.bot.swapPrincipalUsd;
+    let swapPrincipalUsd = prior;
+    if (prior == null) {
+      swapPrincipalUsd = auth.reused ? auth.equityUsd : Math.max(0, auth.equityUsd - auth.depositedUsd) + auth.depositedUsd;
+    } else if (!auth.reused) {
+      const baselineGrabbedDeposit = auth.depositedUsd > 0 && Math.abs(prior - auth.equityUsd) < 0.5;
+      swapPrincipalUsd = baselineGrabbedDeposit ? prior : prior + auth.depositedUsd;
+    }
     return {
       ...next,
       bot: {
         ...next.bot,
         swapAuthSignature: auth.signature,
         swapBot: auth.botAddress,
+        swapPrincipalUsd,
         lastNote: `Armed — ${short}. Swaps send from that signature.`,
       },
     };
@@ -110,6 +142,39 @@ export async function controlBot(
     const state = await loadState();
     await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
   }
+  return buildDesk();
+}
+
+/** Record the current trading equity once, so an older funded key is not treated as profit. */
+export async function baselineTradingPrincipal(equityUsd: number): Promise<boolean> {
+  if (!(equityUsd >= 1)) return false;
+  let wrote = false;
+  await mutateState((state) => {
+    if (state.bot.swapPrincipalUsd != null) return state;
+    wrote = true;
+    return { ...state, bot: { ...state.bot, swapPrincipalUsd: equityUsd } };
+  });
+  return wrote;
+}
+
+/** Move cash profit from the trading key back to the connected wallet. The deposit stays. */
+export async function withdrawTradingProfit(session: WalletSession): Promise<DeskPayload> {
+  const state = await loadState();
+  const principal = state.bot.swapPrincipalUsd;
+  if (principal == null) {
+    const held = await readBalances(tradingBudgetAddress(session.address));
+    await baselineTradingPrincipal(held.equityUsd);
+    throw new Error("No trading profit to send yet. The bot keeps the balance it is still using.");
+  }
+  const open = state.positions.some((p) => p.signature && p.side === "long");
+  const sent = await sendTradingProfit(session.address, principal, open ? 0.015 : 0.01);
+  await mutateState((current) => ({
+    ...current,
+    bot: {
+      ...current.bot,
+      lastNote: `Sent $${sent.profitUsd.toFixed(2)} profit to the wallet · ${sent.signature.slice(0, 8)}…`,
+    },
+  }));
   return buildDesk();
 }
 
