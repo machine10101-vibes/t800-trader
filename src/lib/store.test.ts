@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_CONFIG, emptyState, freshBook, isIdleEmptyBook, seedFromLiveEquity } from "./store";
+import { DEFAULT_CONFIG, emptyState, freshBook, isIdleEmptyBook, normalizeConfig, seedFromLiveEquity } from "./store";
 
 describe("store", () => {
   it("reseeds an idle empty book once the live wallet is at least $5", () => {
@@ -42,5 +42,16 @@ describe("store", () => {
     const open = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
     open.positions = [{ id: "p" } as never];
     assert.equal(freshBook(open, 8), open);
+  });
+
+  it("fills policy fields an older book never saved", () => {
+    const next = normalizeConfig({ startingEquity: 6, maxPositions: 2, scanSeconds: 4 });
+    assert.equal(next.startingEquity, 6);
+    assert.equal(next.maxPositions, 2);
+    assert.equal(next.scanSeconds, 6);
+    assert.equal(next.oneTicketPerTick, true);
+    assert.equal(next.minConfidence, 58);
+    assert.equal(next.autoCash, true);
+    assert.equal(next.beR, 0.8);
   });
 });

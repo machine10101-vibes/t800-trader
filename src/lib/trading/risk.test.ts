@@ -163,7 +163,7 @@ describe("risk", () => {
       config: DEFAULT_CONFIG,
       portfolio: portfolio(),
     });
-    assert.equal(reason, "Already two DEX tickets");
+    assert.equal(reason, "Sector cap of 2 reached for DEX");
   });
 
   it("blocks shorts when the tape is defensive", () => {
@@ -221,7 +221,7 @@ describe("risk", () => {
         { action: "close", pnlUsd: -3, mint: "c", at: new Date().toISOString() } as never,
       ],
     });
-    assert.equal(reason, "Cooling after a three-loss streak");
+    assert.equal(reason, "Cooling after 3 straight losses");
   });
 
   it("sizes down after a two-loss streak", () => {
@@ -453,5 +453,68 @@ describe("risk", () => {
     });
     assert.ok((plan.nextStop ?? 0) >= 100);
     assert.equal(plan.scale, true);
+  });
+
+  it("follows a custom sector cap, confidence floor, and cash override", () => {
+    const tight = { ...DEFAULT_CONFIG, maxPerSector: 1, minConfidence: 80, lossStreakPause: 0 };
+    const signal = {
+      id: "s",
+      mint: "ccc",
+      symbol: "ORCA",
+      poolAddress: "p",
+      sector: "DEX",
+      side: "long" as const,
+      reason: "reclaim" as const,
+      confidence: 70,
+      price: 1,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 70,
+      createdAt: new Date().toISOString(),
+    };
+    assert.equal(
+      canOpen({ positions: [], signal, config: tight, portfolio: portfolio() }),
+      "Confidence below the quality floor",
+    );
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...signal, confidence: 82 },
+        config: { ...tight, maxPerSector: 1 },
+        portfolio: portfolio(),
+      }),
+      null,
+    );
+    assert.equal(cashConcentration(6, { autoCash: false, cashPct: 50 }), 0.5);
+    assert.equal(cashConcentration(6), 0.92);
+    const held = managePosition(
+      {
+        id: "p",
+        mint: "m",
+        symbol: "SOL",
+        poolAddress: "x",
+        sector: "L1",
+        side: "long",
+        qty: 10,
+        entryPrice: 100,
+        markPrice: 103,
+        stopPrice: 98,
+        targetPrice: 106,
+        openedAt: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+        reason: "breakout",
+        researchScore: 70,
+        highWater: 103,
+        lowWater: 100,
+        notional: 1030,
+        initialStop: 98,
+        scaled: false,
+      },
+      Date.now(),
+      { beR: 0.8, scaleAtR: 2 },
+    );
+    assert.equal(held.scale, undefined);
+    assert.ok((held.nextStop ?? 0) >= 100);
   });
 });

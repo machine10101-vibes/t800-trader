@@ -51,7 +51,7 @@ export async function tickBot(): Promise<AppState> {
       }
 
       for (const pos of [...next.positions]) {
-        const plan = managePosition(pos);
+        const plan = managePosition(pos, Date.now(), next.config);
         if (plan.exit) {
           next = closePosition(next, pos.id, pos.markPrice, plan.exit);
           closed += 1;
@@ -59,11 +59,13 @@ export async function tickBot(): Promise<AppState> {
         }
         if (plan.nextStop) next = updateStop(next, pos.id, plan.nextStop);
         if (plan.scale) {
-          next = scaleOut(next, pos.id, 0.5);
+          const fraction = Math.min(0.75, Math.max(0.25, (next.config.scaleFractionPct ?? 50) / 100));
+          next = scaleOut(next, pos.id, fraction);
         }
       }
       for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint);
+        if (next.config.scratchEnabled === false) continue;
         if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
         next = closePosition(next, pos.id, pos.markPrice, "time");
         closed += 1;
@@ -95,7 +97,7 @@ export async function tickBot(): Promise<AppState> {
 
         signals.sort((a, b) => b.confidence - a.confidence);
         for (const signal of signals) {
-          if (opened) {
+          if (opened && next.config.oneTicketPerTick !== false) {
             blocked.push(`${signal.symbol}: passed over — one new ticket per tick`);
             continue;
           }
@@ -126,7 +128,7 @@ export async function tickBot(): Promise<AppState> {
                 dayUsed: dayLossUsedPct(next.portfolio, next.config),
               })
             : { qty: 0, notional: 0 };
-          const cashCap = cashConcentration(next.portfolio.equityUsd);
+          const cashCap = cashConcentration(next.portfolio.equityUsd, next.config);
           const room = next.portfolio.cashUsd * Math.min(0.98, cashCap);
           const qty = signal.price > 0 ? Math.min(sized.qty, room / signal.price) : 0;
           if (!token) {

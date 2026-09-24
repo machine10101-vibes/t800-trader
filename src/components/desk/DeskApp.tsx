@@ -1,6 +1,7 @@
 "use client";
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
+import { SettingsPanel } from "@/components/desk/settings";
 import { adoptLiveEquity, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
 import { fetchOhlcv } from "@/lib/market/providers";
 import {
@@ -24,7 +25,7 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "radar", label: "Radar", kicker: "02" },
   { id: "bot", label: "Bot", kicker: "03" },
   { id: "book", label: "Book", kicker: "04" },
-  { id: "risk", label: "Risk", kicker: "05" },
+  { id: "risk", label: "Settings", kicker: "05" },
 ];
 
 export function DeskApp() {
@@ -432,7 +433,7 @@ export function DeskApp() {
               {tab === "book" ? (
                 <Book desk={desk} wallet={wallet} winRate={winRate} busy={busy} onClose={closePos} onFlatten={() => void control("flatten")} />
               ) : null}
-              {tab === "risk" ? <RiskView desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
+              {tab === "risk" ? <SettingsPanel desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
             </div>
           )}
           {desk ? (
@@ -1085,97 +1086,6 @@ function Book({
         </table>
       </div>
     </div>
-  );
-}
-
-function RiskView({
-  desk,
-  busy,
-  onSave,
-  onReset,
-}: {
-  desk: DeskPayload;
-  busy: boolean;
-  onSave: (c: Partial<BotConfig>) => void;
-  onReset: () => void;
-}) {
-  const [local, setLocal] = useState(desk.config);
-  useEffect(() => setLocal(desk.config), [desk.config]);
-
-  return (
-    <div className="space-y-4">
-      <div className="neon p-6">
-        <h2 className="text-2xl font-medium">Risk is the product</h2>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-          The book starts from the connected wallet&apos;s live SOL/USDC mark, not a demo $10,000. A $5 wallet is enough to
-          open. The bot refuses a fifth position, refuses a second ticket in the same mint, and goes flat-risk when the
-          daily loss cap is hit.
-        </p>
-        <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <Slider label="Risk per trade" suffix="%" min={0.3} max={2.5} step={0.1} value={local.maxRiskPerTradePct} onChange={(v) => setLocal({ ...local, maxRiskPerTradePct: v })} />
-          <Slider label="Daily loss limit" suffix="%" min={2} max={12} step={0.5} value={local.dailyLossLimitPct} onChange={(v) => setLocal({ ...local, dailyLossLimitPct: v })} />
-          <Slider label="Max positions" min={1} max={6} step={1} value={local.maxPositions} onChange={(v) => setLocal({ ...local, maxPositions: v })} />
-          <Slider label="Min liquidity" suffix="k" min={50} max={500} step={10} value={local.minLiquidityUsd / 1000} onChange={(v) => setLocal({ ...local, minLiquidityUsd: v * 1000 })} />
-        </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={local.allowShorts} onChange={(e) => setLocal({ ...local, allowShorts: e.target.checked })} />
-            Allow simulated shorts
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={local.allowMemes} onChange={(e) => setLocal({ ...local, allowMemes: e.target.checked })} />
-            Allow screened memes
-          </label>
-        </div>
-        <div className="mt-6 flex gap-2">
-          <button disabled={busy} onClick={() => onSave(local)} className="btn btn-ink">
-            Save policy
-          </button>
-          <button disabled={busy} onClick={onReset} className="btn btn-ghost">
-            Reset wallet book
-          </button>
-        </div>
-      </div>
-      <div className="neon p-6">
-        <Label>What could I be wrong about?</Label>
-        <ul className="space-y-2 text-sm leading-6 text-[var(--muted)]">
-          {desk.whatCouldBeWrong.map((w) => (
-            <li key={w}>— {w}</li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  suffix,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  suffix?: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-2 flex justify-between text-sm">
-        <span>{label}</span>
-        <span className="num text-[var(--magenta)]">
-          {value}
-          {suffix ?? ""}
-        </span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
-    </label>
   );
 }
 

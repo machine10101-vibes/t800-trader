@@ -1,5 +1,5 @@
 import { buildDesk } from "@/lib/desk";
-import { adoptLiveEquity, attachWallet, DEFAULT_CONFIG, detachWallet, getActiveWallet, mutateState } from "@/lib/store";
+import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -35,7 +35,7 @@ export async function closeTicket(positionId: string): Promise<DeskPayload> {
 export async function configureBot(config: Partial<BotConfig>): Promise<DeskPayload> {
   await mutateState((state) => ({
     ...state,
-    config: { ...DEFAULT_CONFIG, ...state.config, ...config },
+    config: normalizeConfig({ ...state.config, ...config }),
   }));
   return buildDesk();
 }

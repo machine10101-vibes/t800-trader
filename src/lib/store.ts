@@ -1,5 +1,5 @@
 import type { AppState, BotConfig } from "@/lib/types";
-import { MIN_TRADE_USD } from "@/lib/trading/risk";
+import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
   startingEquity: 0,
@@ -12,7 +12,60 @@ export const DEFAULT_CONFIG: BotConfig = {
   allowShorts: true,
   allowMemes: true,
   scanSeconds: 8,
+  ...POLICY,
 };
+
+function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  const clamped = Math.min(max, Math.max(min, n));
+  return round ? Math.round(clamped) : clamped;
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+/** Merge an older or partial book config onto the current policy defaults. */
+export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
+  const src: Partial<BotConfig> = { ...DEFAULT_CONFIG, ...(input ?? {}) };
+  return {
+    startingEquity: clampNum(src.startingEquity, 0, 0, 1_000_000_000),
+    maxPositions: clampNum(src.maxPositions, DEFAULT_CONFIG.maxPositions, 1, 8, true),
+    maxRiskPerTradePct: clampNum(src.maxRiskPerTradePct, DEFAULT_CONFIG.maxRiskPerTradePct, 0.3, 2.5),
+    dailyLossLimitPct: clampNum(src.dailyLossLimitPct, DEFAULT_CONFIG.dailyLossLimitPct, 2, 15),
+    minLiquidityUsd: clampNum(src.minLiquidityUsd, DEFAULT_CONFIG.minLiquidityUsd, 20_000, 2_000_000),
+    minVolume24hUsd: clampNum(src.minVolume24hUsd, DEFAULT_CONFIG.minVolume24hUsd, 10_000, 2_000_000),
+    minAgeHours: clampNum(src.minAgeHours, DEFAULT_CONFIG.minAgeHours, 0, 168, true),
+    allowShorts: asBool(src.allowShorts, DEFAULT_CONFIG.allowShorts),
+    allowMemes: asBool(src.allowMemes, DEFAULT_CONFIG.allowMemes),
+    scanSeconds: clampNum(src.scanSeconds, DEFAULT_CONFIG.scanSeconds, 6, 60, true),
+    oneTicketPerTick: asBool(src.oneTicketPerTick, POLICY.oneTicketPerTick),
+    microOneTicket: asBool(src.microOneTicket, POLICY.microOneTicket),
+    maxPerSector: clampNum(src.maxPerSector, POLICY.maxPerSector, 1, 4, true),
+    lossStreakPause: clampNum(src.lossStreakPause, POLICY.lossStreakPause, 0, 8, true),
+    cooldownMinutes: clampNum(src.cooldownMinutes, POLICY.cooldownMinutes, 0, 180, true),
+    minConfidence: clampNum(src.minConfidence, POLICY.minConfidence, 50, 85, true),
+    autoCash: asBool(src.autoCash, POLICY.autoCash),
+    cashPct: clampNum(src.cashPct, POLICY.cashPct, 20, 95, true),
+    dayBudgetPct: clampNum(src.dayBudgetPct, POLICY.dayBudgetPct, 50, 100, true),
+    defensiveBreakoutScore: clampNum(src.defensiveBreakoutScore, POLICY.defensiveBreakoutScore, 50, 90, true),
+    beR: clampNum(src.beR, POLICY.beR, 0.3, 2),
+    scaleAtR: clampNum(src.scaleAtR, POLICY.scaleAtR, 0.5, 3),
+    scaleFractionPct: clampNum(src.scaleFractionPct, POLICY.scaleFractionPct, 25, 75, true),
+    lockAtR: clampNum(src.lockAtR, POLICY.lockAtR, 1, 4),
+    lockProfitR: clampNum(src.lockProfitR, POLICY.lockProfitR, 0.05, 1.5),
+    timeCapMin: clampNum(src.timeCapMin, POLICY.timeCapMin, 30, 360, true),
+    memeTimeCapMin: clampNum(src.memeTimeCapMin, POLICY.memeTimeCapMin, 10, 180, true),
+    staleMin: clampNum(src.staleMin, POLICY.staleMin, 10, 240, true),
+    memeStaleMin: clampNum(src.memeStaleMin, POLICY.memeStaleMin, 8, 120, true),
+    scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
+  };
+}
+
+function hydrate(state: AppState): AppState {
+  return { ...state, config: normalizeConfig(state.config) };
+}
 
 let activeWallet: string | null = null;
 let memory: AppState | null = null;
@@ -26,10 +79,11 @@ function storageKey(wallet: string): string {
   return `t800-trader-state:${wallet}`;
 }
 
-export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
-  const equity = Math.max(0, config.startingEquity);
+export function emptyState(config: Partial<BotConfig> = DEFAULT_CONFIG): AppState {
+  const resolved = normalizeConfig(config);
+  const equity = Math.max(0, resolved.startingEquity);
   return {
-    config: { ...config, startingEquity: equity },
+    config: { ...resolved, startingEquity: equity },
     bot: {
       running: false,
       lastTickAt: null,
@@ -68,7 +122,7 @@ function readBrowserState(wallet: string): AppState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed?.config || !parsed?.portfolio) return null;
-    return parsed;
+    return hydrate(parsed);
   } catch {
     return null;
   }

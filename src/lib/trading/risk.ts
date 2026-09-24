@@ -7,12 +7,46 @@ export const MIN_TICKET_USD = 1;
 /** Books below this use micro sizing so a $5–$6 wallet can actually fill. */
 export const MICRO_BOOK_USD = 50;
 
+/** Defaults for every policy knob. Missing keys on an older book resolve to these. */
+export const POLICY = {
+  oneTicketPerTick: true,
+  microOneTicket: true,
+  maxPerSector: 2,
+  lossStreakPause: 3,
+  cooldownMinutes: 20,
+  minConfidence: 58,
+  autoCash: true,
+  cashPct: 35,
+  dayBudgetPct: 90,
+  defensiveBreakoutScore: 70,
+  beR: 0.8,
+  scaleAtR: 1,
+  scaleFractionPct: 50,
+  lockAtR: 1.5,
+  lockProfitR: 0.45,
+  timeCapMin: 120,
+  memeTimeCapMin: 40,
+  staleMin: 45,
+  memeStaleMin: 22,
+  scratchEnabled: true,
+} as const;
+
 export function isMicroBook(equity: number): boolean {
   return equity > 0 && equity < MICRO_BOOK_USD;
 }
 
-export function cashConcentration(equity: number): number {
+export function cashConcentration(equity: number, config?: Pick<BotConfig, "autoCash" | "cashPct">): number {
+  if (config && config.autoCash === false) return clampPct(config.cashPct, 20, 95) / 100;
   return isMicroBook(equity) ? 0.92 : 0.35;
+}
+
+function clampPct(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function policyNum(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 export function sizeCapPct(equity: number, stance: MarketRegime["stance"]): number {
@@ -81,8 +115,6 @@ export function sizePosition(args: {
   return { qty, notional };
 }
 
-const COOLDOWN_MS = 20 * 60_000;
-
 export function canOpen(args: {
   positions: Position[];
   signal: Signal;
@@ -93,32 +125,39 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (positions.length >= config.maxPositions) return "Max positions reached";
-  if (isMicroBook(portfolio.equityUsd) && positions.length >= 1) return "Micro book rides one ticket";
+  if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 1) {
+    return "Micro book rides one ticket";
+  }
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   if (portfolio.cashUsd < MIN_TRADE_USD) return "Insufficient cash";
   if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
-  if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < 70) {
-    return "Breakouts need a 70+ score when defensive";
+  const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
+  if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
+    return `Breakouts need a ${breakoutScore}+ score when defensive`;
   }
   const sector = signal.sector ?? "Unknown";
   const sameSector = positions.filter((p) => (p.sector ?? "Unknown") === sector).length;
-  if (sameSector >= 2) return `Already two ${sector} tickets`;
+  const sectorCap = Math.max(1, policyNum(config.maxPerSector, POLICY.maxPerSector));
+  if (sameSector >= sectorCap) return `Sector cap of ${sectorCap} reached for ${sector}`;
   if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
     return "Meme cluster capped off risk-on";
   }
   const lastStop = trades.find(
     (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
   );
-  if (lastStop && Date.now() - Date.parse(lastStop.at) < COOLDOWN_MS) {
+  const cooldownMs = Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)) * 60_000;
+  if (cooldownMs > 0 && lastStop && Date.now() - Date.parse(lastStop.at) < cooldownMs) {
     return "Cooldown after a stop/time-out on this mint";
   }
-  if (consecutiveLosses(trades) >= 3) return "Cooling after a three-loss streak";
-  if (dayLossUsedPct(portfolio, config) >= 0.9) return "Protect remaining day budget";
-  if (signal.confidence < (signal.sector === "Meme" || signal.sector === "Unknown" ? 62 : 58)) {
-    return "Confidence below the quality floor";
-  }
+  const streakCap = policyNum(config.lossStreakPause, POLICY.lossStreakPause);
+  if (streakCap > 0 && consecutiveLosses(trades) >= streakCap) return `Cooling after ${streakCap} straight losses`;
+  const budget = policyNum(config.dayBudgetPct, POLICY.dayBudgetPct) / 100;
+  if (dayLossUsedPct(portfolio, config) >= budget) return "Protect remaining day budget";
+  const floor = policyNum(config.minConfidence, POLICY.minConfidence);
+  const need = signal.sector === "Meme" || signal.sector === "Unknown" ? floor + 4 : floor;
+  if (signal.confidence < need) return "Confidence below the quality floor";
   return null;
 }
 
@@ -142,10 +181,15 @@ export function unrealizedPnl(position: Position): { usd: number; pct: number } 
   return { usd, pct };
 }
 
-export function exitReason(position: Position, nowMs = Date.now()): "stop" | "target" | "trail" | "time" | "risk-off" | null {
+export function exitReason(
+  position: Position,
+  nowMs = Date.now(),
+  timeCapMin?: number,
+): "stop" | "target" | "trail" | "time" | "risk-off" | null {
   const { usd } = unrealizedPnl(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
-  const timeCap = (position.sector ?? "Unknown") === "Meme" ? 40 : 120;
+  const fallback = (position.sector ?? "Unknown") === "Meme" ? POLICY.memeTimeCapMin : POLICY.timeCapMin;
+  const timeCap = policyNum(timeCapMin, fallback);
   if (position.side === "long") {
     if (position.markPrice <= position.stopPrice) return "stop";
     if (position.markPrice >= position.targetPrice) return "target";
@@ -195,28 +239,37 @@ export function rMultiple(position: Position): number {
 export function managePosition(
   position: Position,
   nowMs = Date.now(),
+  config?: Partial<BotConfig>,
 ): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
-  const hard = exitReason(position, nowMs);
+  const meme = (position.sector ?? "Unknown") === "Meme";
+  const timeCap = meme
+    ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)
+    : policyNum(config?.timeCapMin, POLICY.timeCapMin);
+  const staleMin = meme
+    ? policyNum(config?.memeStaleMin, POLICY.memeStaleMin)
+    : policyNum(config?.staleMin, POLICY.staleMin);
+  const hard = exitReason(position, nowMs, timeCap);
   if (hard && hard !== "time") return { exit: hard };
   const r = rMultiple(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
-  const staleMin = (position.sector ?? "Unknown") === "Meme" ? 22 : 45;
   if (ageMin >= staleMin && r < 0.15) return { exit: "time" };
   if (hard) return { exit: hard };
 
+  const beR = policyNum(config?.beR, POLICY.beR);
+  const scaleAt = policyNum(config?.scaleAtR, POLICY.scaleAtR);
+  const lockAt = policyNum(config?.lockAtR, POLICY.lockAtR);
+  const lockProfit = policyNum(config?.lockProfitR, POLICY.lockProfitR);
   const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
-  const lockR = r >= 1.5 ? 0.45 : 0.05;
-  const be =
-    position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
-  if (r >= 0.8) {
-    const tighter =
-      position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);
+  const lockR = r >= lockAt ? lockProfit : 0.05;
+  const be = position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
+  if (r >= beR) {
+    const tighter = position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);
     if (position.side === "long" ? tighter > position.stopPrice : tighter < position.stopPrice) {
-      if (r >= 1 && !position.scaled) return { nextStop: tighter, scale: true };
+      if (r >= scaleAt && !position.scaled) return { nextStop: tighter, scale: true };
       return { nextStop: tighter };
     }
   }
 
-  if (r >= 1 && !position.scaled) return { scale: true };
+  if (r >= scaleAt && !position.scaled) return { scale: true };
   return {};
 }

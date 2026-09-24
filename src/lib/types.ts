@@ -217,6 +217,26 @@ export interface BotConfig {
   allowShorts: boolean;
   allowMemes: boolean;
   scanSeconds: number;
+  oneTicketPerTick: boolean;
+  microOneTicket: boolean;
+  maxPerSector: number;
+  lossStreakPause: number;
+  cooldownMinutes: number;
+  minConfidence: number;
+  autoCash: boolean;
+  cashPct: number;
+  dayBudgetPct: number;
+  defensiveBreakoutScore: number;
+  beR: number;
+  scaleAtR: number;
+  scaleFractionPct: number;
+  lockAtR: number;
+  lockProfitR: number;
+  timeCapMin: number;
+  memeTimeCapMin: number;
+  staleMin: number;
+  memeStaleMin: number;
+  scratchEnabled: boolean;
 }
 
 export interface BotState {
