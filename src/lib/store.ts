@@ -16,7 +16,8 @@ export const DEFAULT_CONFIG: BotConfig = {
   scanSeconds: 8,
   ...POLICY,
   venues: [...DEFAULT_VENUES],
-  walletSwaps: false,
+  walletSwaps: true,
+  liveTradesRev: 1,
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -65,8 +66,22 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     memeStaleMin: clampNum(src.memeStaleMin, POLICY.memeStaleMin, 8, 120, true),
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
-    walletSwaps: asBool(src.walletSwaps, false),
+    ...liveSwapChoice(input, src),
   };
+}
+
+/**
+ * Older books were saved with swaps off because that used to be the default.
+ * The rev is read from the saved object only, so the new default does not count as a choice.
+ */
+function liveSwapChoice(
+  input: Partial<BotConfig> | null | undefined,
+  merged: Partial<BotConfig>,
+): { walletSwaps: boolean; liveTradesRev: number } {
+  const savedRev = input?.liveTradesRev;
+  const chosen = typeof savedRev === "number" && Number.isFinite(savedRev) && savedRev >= 1;
+  if (chosen) return { walletSwaps: asBool(merged.walletSwaps, true), liveTradesRev: 1 };
+  return { walletSwaps: true, liveTradesRev: 1 };
 }
 
 function hydrate(state: AppState): AppState {

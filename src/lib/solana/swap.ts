@@ -174,6 +174,7 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
     userPublicKey: session.address,
     wrapAndUnwrapSol: true,
     dynamicComputeUnitLimit: true,
+    prioritizationFeeLamports: "auto",
   });
   if (!built.swapTransaction) throw new Error(built.error || "Jupiter did not return a transaction");
   const simulated = built.simulationError as { error?: string } | string | null | undefined;

@@ -64,11 +64,11 @@ export function SettingsPanel({
 
       <Section
         title="Wallet"
-        hint="The book can keep a simulated blotter, or it can ask your wallet to sign each buy and sell."
+        hint="Live swaps are on. Each armed buy or sell asks the wallet to sign. Turn this off only if you want the blotter to stay simulated."
       >
         <Toggle
           label="Send swaps to this wallet"
-          hint="On routes the next ticket through Jupiter and asks Phantom or Solflare to sign. Off leaves every fill in this browser. Shorts are not sent on-chain. Rows you already see stay simulated."
+          hint="On routes the next long through Jupiter and asks Phantom or Solflare to sign. Off leaves every fill in this browser. Shorts are not sent on-chain. Rows without a signature stay simulated."
           checked={local.walletSwaps}
           onChange={(v) => set({ walletSwaps: v })}
         />

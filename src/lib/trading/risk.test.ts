@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, spendableUsd, walletRiskBook } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Signal } from "../types";
 
@@ -516,5 +516,36 @@ describe("risk", () => {
     );
     assert.equal(held.scale, undefined);
     assert.ok((held.nextStop ?? 0) >= 100);
+  });
+});
+
+describe("walletRiskBook", () => {
+  it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
+    assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 28) < 1e-6);
+    const paper = {
+      cashUsd: 0,
+      equityUsd: 40,
+      peakEquity: 40,
+      dayStartEquity: 80,
+      dayPnlUsd: -40,
+      realizedPnlUsd: -40,
+      unrealizedPnlUsd: 0,
+      winCount: 0,
+      lossCount: 4,
+      tradeCount: 4,
+      sessionDay: "2026-09-24",
+    };
+    const unsigned = {
+      id: "paper",
+      signature: undefined,
+      qty: 1,
+      markPrice: 40,
+    } as never;
+    const risk = walletRiskBook(paper, [unsigned], [{ signature: undefined } as never], { usdc: 12, sol: 0.05, solPriceUsd: 100 }, true);
+    assert.equal(risk.positions.length, 0);
+    assert.equal(risk.trades.length, 0);
+    assert.equal(risk.portfolio.cashUsd, 15);
+    assert.equal(risk.portfolio.dayPnlUsd, 0);
+    assert.equal(dayLossBreached(risk.portfolio, { ...DEFAULT_CONFIG, dailyLossLimitPct: 6 }), false);
   });
 });

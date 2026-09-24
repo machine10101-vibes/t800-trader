@@ -115,6 +115,52 @@ export function sizePosition(args: {
   return { qty, notional };
 }
 
+export interface WalletBudget {
+  usdc: number;
+  sol: number;
+  solPriceUsd: number;
+}
+
+/** SOL left behind so the wallet can still pay the network fee. Matches the swap planner. */
+const SOL_FEE_RESERVE = 0.02;
+
+export function spendableUsd(budget: WalletBudget): number {
+  const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
+  return Math.max(0, budget.usdc) + Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
+}
+
+/**
+ * Live mode spends the wallet, not the paper blotter.
+ * Unsigned rows stay on screen but do not take a slot or a cash check.
+ */
+export function walletRiskBook(
+  portfolio: Portfolio,
+  positions: Position[],
+  trades: Trade[],
+  budget: WalletBudget | null | undefined,
+  walletSwaps: boolean,
+): { portfolio: Portfolio; positions: Position[]; trades: Trade[] } {
+  if (!walletSwaps || !budget) return { portfolio, positions, trades };
+  const livePositions = positions.filter((p) => Boolean(p.signature));
+  const liveTrades = trades.filter((t) => Boolean(t.signature));
+  const cashUsd = spendableUsd(budget);
+  const signedValue = livePositions.reduce((acc, p) => acc + Math.max(0, p.qty * p.markPrice), 0);
+  const equityUsd = cashUsd + signedValue;
+  const hasChainFill = liveTrades.length > 0;
+  return {
+    positions: livePositions,
+    trades: liveTrades,
+    portfolio: {
+      ...portfolio,
+      cashUsd,
+      equityUsd,
+      peakEquity: hasChainFill ? Math.max(portfolio.peakEquity, equityUsd) : equityUsd,
+      dayStartEquity: hasChainFill ? portfolio.dayStartEquity : equityUsd,
+      dayPnlUsd: hasChainFill ? equityUsd - portfolio.dayStartEquity : 0,
+    },
+  };
+}
+
 export function canOpen(args: {
   positions: Position[];
   signal: Signal;

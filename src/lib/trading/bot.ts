@@ -17,6 +17,8 @@ import {
   shouldFlattenMeme,
   shouldScratch,
   sizePosition,
+  walletRiskBook,
+  type WalletBudget,
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { buildFlowSignals, buildSignals, snapshotTechnical } from "./signals";
@@ -61,7 +63,7 @@ async function walletExit(
   }
 }
 
-export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
+export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | null): Promise<AppState> {
   return mutateState(async (state) => {
     try {
       const market = await loadMarket();
@@ -135,7 +137,8 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
 
       const signals: Signal[] = [];
       let opened = 0;
-      if (next.bot.running && !dayLossBreached(next.portfolio, next.config)) {
+      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, budget, next.config.walletSwaps);
+      if (next.bot.running && !dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config);
         next = studyTape(next, research.candidates, market.regime.stance);
         const focus = research.candidates
@@ -163,6 +166,10 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
 
         signals.sort((a, b) => b.confidence - a.confidence);
         const shown: Signal[] = [];
+        let pauseOpens = Boolean(
+          next.config.walletSwaps && next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now(),
+        );
+        if (pauseOpens) blocked.push("Signature was declined — the next wallet prompt waits about a minute");
         for (const signal of signals) {
           const advice = advise(signal, next.memory, market.regime.stance);
           const learned: Signal = {
@@ -180,11 +187,11 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
             continue;
           }
           const gate = canOpen({
-            positions: next.positions,
+            positions: risk.positions,
             signal: learned,
             config: next.config,
-            portfolio: next.portfolio,
-            trades: next.trades,
+            portfolio: risk.portfolio,
+            trades: risk.trades,
             stance: market.regime.stance,
           });
           if (gate) {
@@ -192,10 +199,10 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
             continue;
           }
           const token = byMint.get(learned.mint);
-          const streak = consecutiveLosses(next.trades);
+          const streak = consecutiveLosses(risk.trades);
           const sized = token
             ? sizePosition({
-                equity: next.portfolio.equityUsd,
+                equity: risk.portfolio.equityUsd,
                 price: learned.price,
                 stopPct: learned.stopPct,
                 config: next.config,
@@ -203,11 +210,11 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
                 researchScore: learned.researchScore,
                 confidence: learned.confidence,
                 lossStreak: streak,
-                dayUsed: dayLossUsedPct(next.portfolio, next.config),
+                dayUsed: dayLossUsedPct(risk.portfolio, next.config),
               })
             : { qty: 0, notional: 0 };
-          const cashCap = cashConcentration(next.portfolio.equityUsd, next.config);
-          const room = next.portfolio.cashUsd * Math.min(0.98, cashCap);
+          const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
+          const room = risk.portfolio.cashUsd * Math.min(0.98, cashCap);
           const qty = learned.price > 0 ? Math.min(sized.qty * advice.sizeMul, room / learned.price) : 0;
           if (!token) {
             blocked.push(`${learned.symbol}: missing live mark`);
@@ -215,6 +222,8 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
             blocked.push(`${learned.symbol}: size ${sized.notional.toFixed(2)} too small`);
           } else if (qty * learned.price < MIN_TICKET_USD) {
             blocked.push(`${learned.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
+          } else if (pauseOpens) {
+            continue;
           } else if (next.config.walletSwaps && learned.side === "short") {
             blocked.push(`${learned.symbol}: shorts are not sent to the wallet`);
           } else if (next.config.walletSwaps && !executor) {
@@ -234,7 +243,15 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
                   venues: next.config.venues,
                 });
               } catch (error) {
-                blocked.push(`${learned.symbol}: ${error instanceof Error ? error.message : "wallet swap failed"}`);
+                const message = error instanceof Error ? error.message : "wallet swap failed";
+                blocked.push(`${learned.symbol}: ${message}`);
+                if (/reject|denied|cancel|closed|declin/i.test(message)) {
+                  pauseOpens = true;
+                  next = {
+                    ...next,
+                    bot: { ...next.bot, swapHoldUntil: new Date(Date.now() + 90_000).toISOString() },
+                  };
+                }
                 continue;
               }
             }
@@ -245,15 +262,19 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
           }
         }
         signals.splice(0, signals.length, ...shown);
-      } else if (next.bot.running && dayLossBreached(next.portfolio, next.config)) {
+      } else if (next.bot.running && dayLossBreached(risk.portfolio, next.config)) {
         blocked.push("Daily loss cap — new risk is closed");
       }
 
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
+      const mode = next.config.walletSwaps ? " · wallet swaps" : " · simulated";
+      const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
       const note = next.bot.running
-        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${next.config.walletSwaps ? " · wallet swaps" : " · simulated"}`
-        : `Standby · closed ${closed} · ${market.regime.stance}${next.config.walletSwaps ? " · wallet swaps" : " · simulated"}`;
+        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${held}`
+        : `Standby · closed ${closed} · ${market.regime.stance}${mode}${held}`;
+      const hold =
+        next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
       next.bot = {
         ...next.bot,
         lastTickAt: new Date().toISOString(),
@@ -263,6 +284,7 @@ export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
         lastOpened: opened,
         lastClosed: closed,
         blocked: blocked.slice(0, 8),
+        swapHoldUntil: hold,
       };
       next.lastSignals = signals.slice(0, 12);
       return next;
@@ -303,7 +325,9 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
         running: true,
         startedAt: state.bot.startedAt ?? new Date().toISOString(),
         lastError: null,
-        lastNote: "Armed — first tick incoming",
+        lastNote: state.config.walletSwaps
+          ? "Armed — the next ticket asks your wallet to sign"
+          : "Armed — first tick incoming",
         lastOpened: state.bot.lastOpened ?? 0,
         lastClosed: state.bot.lastClosed ?? 0,
         blocked: state.bot.blocked ?? [],

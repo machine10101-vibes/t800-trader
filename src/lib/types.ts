@@ -255,6 +255,11 @@ export interface BotConfig {
   venues: string[];
   /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
   walletSwaps: boolean;
+  /**
+   * Books saved before live swaps were the default have no rev and are switched on once.
+   * After that, an explicit off stays off.
+   */
+  liveTradesRev: number;
 }
 
 export interface ChainOrder {
@@ -288,6 +293,8 @@ export interface BotState {
   lastOpened: number;
   lastClosed: number;
   blocked: string[];
+  /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
+  swapHoldUntil?: string | null;
 }
 
 export interface Portfolio {

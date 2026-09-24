@@ -1,6 +1,7 @@
 import { armButton, buildDesk, shellDesk } from "@/lib/desk";
 import { executorFor } from "@/lib/solana/swap";
-import type { WalletSession } from "@/lib/solana/wallet";
+import { readBalances, type WalletSession } from "@/lib/solana/wallet";
+import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
@@ -37,13 +38,24 @@ async function sellSignedPositions(executor: ChainExecutor): Promise<void> {
   }
 }
 
+async function budgetFor(session?: WalletSession | null): Promise<WalletBudget | null> {
+  if (!session) return null;
+  try {
+    const live = await readBalances(session.address);
+    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? 0 };
+  } catch {
+    return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+  }
+}
+
 export async function controlBot(
   action: "start" | "stop" | "reset" | "tick" | "flatten",
   session?: WalletSession | null,
 ): Promise<DeskPayload> {
   const executor = session ? executorFor(session) : undefined;
   if (action === "tick") {
-    await tickBot(executor);
+    const state = await loadState();
+    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
     return buildDesk();
   }
   if ((action === "flatten" || action === "reset") && executor) {
@@ -56,7 +68,8 @@ export async function controlBot(
     return applyControl(state, action);
   });
   if (action === "start") {
-    await tickBot(executor);
+    const state = await loadState();
+    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
   }
   return buildDesk();
 }

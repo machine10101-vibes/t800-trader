@@ -57,7 +57,9 @@ describe("store", () => {
     assert.equal(next.venues.includes("pump"), true);
     assert.deepEqual(normalizeConfig({ venues: ["orca", "nope"] }).venues, ["orca"]);
     assert.deepEqual(normalizeConfig({ venues: [] }).venues, []);
-    assert.equal(next.walletSwaps, false);
-    assert.equal(normalizeConfig({ walletSwaps: true }).walletSwaps, true);
+    assert.equal(next.walletSwaps, true);
+    assert.equal(next.liveTradesRev, 1);
+    assert.equal(normalizeConfig({ walletSwaps: false }).walletSwaps, true);
+    assert.equal(normalizeConfig({ walletSwaps: false, liveTradesRev: 1 }).walletSwaps, false);
   });
 });

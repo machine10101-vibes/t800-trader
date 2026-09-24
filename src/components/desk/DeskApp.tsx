@@ -420,7 +420,7 @@ export function DeskApp() {
           </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
             {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
-            Fills stay simulated in this browser until you turn on wallet swaps. The account is yours, not a $10k dummy.
+            An armed bot asks Phantom or Solflare to sign each buy and sell. Rows already marked Simulated were never broadcast.
           </p>
         </div>
         </div>
@@ -488,7 +488,8 @@ export function DeskApp() {
           </button>
           {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
           <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
-            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks.
+            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC.{" "}
+            {desk?.config.walletSwaps ? "Next ticket asks this wallet to sign." : "Fills stay in this browser."}
           </p>
           <button onClick={() => void disconnect()} className="mt-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
@@ -885,7 +886,7 @@ function Overview({
           <Label>Execution log</Label>
           {desk.trades.length === 0 && desk.signals.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
-              No tickets yet. Simulated fills stay in this browser until wallet swaps are on. Fund at least $5 of priced SOL/USDC, then arm.
+              No tickets yet. Arm the bot and the next buy asks this wallet to sign. Fund at least $5 of priced SOL/USDC.
             </p>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
@@ -1159,8 +1160,8 @@ function Book({
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
-                ? "The next buy or sell asks Phantom or Solflare to sign a Jupiter swap. Rows marked Simulated were never broadcast, so they do not show up in the wallet."
-                : "These tickets are simulated in this browser. Your wallet was not charged, which is why Phantom and Solflare show no transactions. Turn on wallet swaps and the next ticket asks you to sign."}
+                ? "Armed scans send the next long through Jupiter and pop Phantom or Solflare for a signature. Unsigned rows were paper fills and will never show in the wallet. Approve the popup or the ticket is not sent."
+                : "Wallet swaps are off, so this book only simulates fills. Turn them on and the next armed ticket asks you to sign."}
             </p>
           </div>
           <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
