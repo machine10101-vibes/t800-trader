@@ -15,6 +15,7 @@ import {
   MIN_TICKET_USD,
   MIN_TRADE_USD,
   payableUsd,
+  walletMarkUsd,
   rollSession,
   shouldFlattenMeme,
   shouldScratch,
@@ -152,8 +153,12 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
         const research = await runResearch(next.config);
         next = studyTape(next, research.candidates, market.regime.stance);
         const spendable = budget ? payableUsd(budget) : 0;
-        if (next.config.walletSwaps && spendable < MIN_TRADE_USD) {
-          blocked.push("Trading balance is under $5 — the arm signature has to land before a swap is sent");
+        const marked = budget ? walletMarkUsd(budget) : 0;
+        const bookTooSmall = next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
+        if (bookTooSmall) {
+          blocked.push(
+            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much SOL or USDC before a swap is sent`,
+          );
         }
         const focus = research.candidates
           .filter((c) => !screenCandidate(c, next.config))
@@ -210,11 +215,12 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
             portfolio: risk.portfolio,
             trades: risk.trades,
             stance: market.regime.stance,
+            minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
           });
           if (gate) {
             const why =
               gate === "Insufficient cash" && next.config.walletSwaps
-                ? "need at least $5 in USDC or in SOL. One swap cannot spend both"
+                ? `need at least $${MIN_TICKET_USD} in USDC or in SOL after the fee reserve. One swap cannot spend both`
                 : gate;
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
@@ -244,6 +250,8 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
           } else if (qty * learned.price < MIN_TICKET_USD) {
             blocked.push(`${learned.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
           } else if (pauseOpens) {
+            continue;
+          } else if (bookTooSmall) {
             continue;
           } else if (next.config.walletSwaps && learned.side === "short") {
             blocked.push(`${learned.symbol}: shorts are not sent to the wallet`);

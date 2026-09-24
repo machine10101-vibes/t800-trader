@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { DEFAULT_CONFIG, emptyState, freshBook, isIdleEmptyBook, normalizeConfig, seedFromLiveEquity } from "./store";
 
 describe("store", () => {
-  it("reseeds an idle empty book once the live wallet is at least $5", () => {
+  it("reseeds an idle empty book once the live wallet is at least $3", () => {
     const idle = emptyState({ ...DEFAULT_CONFIG, startingEquity: 0 });
     assert.equal(isIdleEmptyBook(idle), true);
 
-    const stillDust = seedFromLiveEquity(idle, 4);
+    const stillDust = seedFromLiveEquity(idle, 2);
     assert.equal(stillDust.portfolio.cashUsd, 0);
 
     const funded = seedFromLiveEquity(idle, 6);
@@ -24,14 +24,14 @@ describe("store", () => {
     assert.equal(next, traded);
   });
 
-  it("adopts a live mark onto a flat book and leaves a traded or sub-$5 mark alone", () => {
+  it("adopts a live mark onto a flat book and leaves a traded or sub-$3 mark alone", () => {
     const flat = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
     const adopted = freshBook(flat, 6);
     assert.equal(adopted.portfolio.cashUsd, 6);
     assert.equal(adopted.portfolio.equityUsd, 6);
     assert.equal(adopted.config.startingEquity, 6);
 
-    const dusty = freshBook(flat, 4);
+    const dusty = freshBook(flat, 2);
     assert.equal(dusty, flat);
     assert.equal(dusty.portfolio.cashUsd, 100);
 

@@ -2,11 +2,12 @@ import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { dexesForVenues } from "@/lib/market/venues";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
+import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { broadcastTransaction, mintDecimals, readBalances, type WalletSession } from "./wallet";
 
 export const SLIPPAGE_BPS = 80;
-const FEE_SOL = 0.02;
+const FEE_SOL = SOL_FEE_RESERVE;
 const MIN_SOL = 0.005;
 const QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote";
 const SWAP_URL = "https://lite-api.jup.ag/swap/v1/swap";

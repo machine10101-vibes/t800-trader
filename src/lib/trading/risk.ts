@@ -1,10 +1,10 @@
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 
-/** Smallest wallet the desk will arm and open against. */
-export const MIN_TRADE_USD = 5;
+/** Smallest marked trading balance the desk will arm and open against. */
+export const MIN_TRADE_USD = 3;
 /** Smallest ticket the execution loop will send. */
 export const MIN_TICKET_USD = 1;
-/** Books below this use micro sizing so a $5–$6 wallet can actually fill. */
+/** Books below this use micro sizing so a small wallet can actually fill. */
 export const MICRO_BOOK_USD = 50;
 
 /** Defaults for every policy knob. Missing keys on an older book resolve to these. */
@@ -121,8 +121,11 @@ export interface WalletBudget {
   solPriceUsd: number;
 }
 
-/** SOL left behind so the wallet can still pay the network fee. Matches the swap planner. */
-const SOL_FEE_RESERVE = 0.02;
+/**
+ * SOL left on the trading key for the network fee and a token account.
+ * A 0.02 SOL arm (~$3–$4) must still have a spendable leg.
+ */
+export const SOL_FEE_RESERVE = 0.004;
 
 /** One Jupiter swap spends either USDC or SOL, never a mix of the two. */
 export function payableUsd(budget: WalletBudget): number {
@@ -179,6 +182,8 @@ export function canOpen(args: {
   portfolio: Portfolio;
   trades?: Trade[];
   stance?: MarketRegime["stance"];
+  /** Wallet swaps size from the spendable leg, which can sit under the marked $3 balance. */
+  minCashUsd?: number;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (positions.length >= config.maxPositions) return "Max positions reached";
@@ -188,7 +193,8 @@ export function canOpen(args: {
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
-  if (portfolio.cashUsd < MIN_TRADE_USD) return "Insufficient cash";
+  const minCash = args.minCashUsd ?? MIN_TRADE_USD;
+  if (portfolio.cashUsd < minCash) return "Insufficient cash";
   if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {

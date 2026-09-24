@@ -255,7 +255,7 @@ describe("risk", () => {
     assert.equal(n, 2);
   });
 
-  it("lets a $5 wallet open and sizes a $6 book above the ticket floor", () => {
+  it("lets a $3 wallet open and sizes a $6 book above the ticket floor", () => {
     const signal = {
       id: "s5",
       mint: "sol",
@@ -272,23 +272,23 @@ describe("risk", () => {
       researchScore: 70,
       createdAt: new Date().toISOString(),
     } as Signal;
-    const five = canOpen({
+    const three = canOpen({
       positions: [],
       signal,
       config: DEFAULT_CONFIG,
-      portfolio: portfolio({ cashUsd: 5, equityUsd: 5, peakEquity: 5, dayStartEquity: 5 }),
+      portfolio: portfolio({ cashUsd: 3, equityUsd: 3, peakEquity: 3, dayStartEquity: 3 }),
       stance: "risk-on",
     });
-    assert.equal(five, null);
+    assert.equal(three, null);
 
-    const four = canOpen({
+    const two = canOpen({
       positions: [],
       signal,
       config: DEFAULT_CONFIG,
-      portfolio: portfolio({ cashUsd: 4, equityUsd: 4, peakEquity: 4, dayStartEquity: 4 }),
+      portfolio: portfolio({ cashUsd: 2, equityUsd: 2, peakEquity: 2, dayStartEquity: 2 }),
       stance: "risk-on",
     });
-    assert.equal(four, "Insufficient cash");
+    assert.equal(two, "Insufficient cash");
 
     const sized = sizePosition({
       equity: 6,
@@ -521,7 +521,9 @@ describe("risk", () => {
 
 describe("walletRiskBook", () => {
   it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
-    assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 18) < 1e-6);
+    assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 19.6) < 1e-6);
+    const smallSol = spendableUsd({ usdc: 0, sol: 0.02, solPriceUsd: 190 });
+    assert.ok(smallSol >= 3, `0.02 SOL at $190 should still spend about $3, got ${smallSol}`);
     const paper = {
       cashUsd: 0,
       equityUsd: 40,

@@ -7,6 +7,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { USDC_MINT } from "@/lib/market/universe";
+import { MIN_TRADE_USD } from "@/lib/trading/risk";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -158,7 +159,7 @@ async function accountExists(address: PublicKey): Promise<boolean> {
 }
 
 function botCanTrade(held: { sol: number; usdc: number; equityUsd: number } | null): boolean {
-  return Boolean(held && held.sol >= BOT_MIN_SOL && (held.equityUsd >= 5 || held.usdc >= 1));
+  return Boolean(held && held.sol >= BOT_MIN_SOL && (held.equityUsd >= MIN_TRADE_USD || held.usdc >= 1));
 }
 
 async function confirmSignature(signature: string): Promise<void> {

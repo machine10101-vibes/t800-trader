@@ -189,7 +189,7 @@ export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppS
   return emptyState({ ...state.config, startingEquity: liveEquityUsd });
 }
 
-/** Flat book only. A sub-$5 live read leaves an already funded book alone. */
+/** Flat book only. A sub-$3 live read leaves an already funded book alone. */
 export function freshBook(state: AppState, liveEquityUsd: number): AppState {
   if (state.positions.length > 0 || state.trades.length > 0) return state;
   if (liveEquityUsd < MIN_TRADE_USD) return state;

@@ -482,7 +482,7 @@ export function DeskApp() {
           <h1 className="mt-3 text-4xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
             No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real
-            SOL and USDC and sizes the book from that. A $5 wallet is enough to open.
+            SOL and USDC and sizes the book from that. A $3 wallet is enough to open.
           </p>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
