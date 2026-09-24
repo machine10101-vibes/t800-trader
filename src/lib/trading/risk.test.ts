@@ -521,7 +521,7 @@ describe("risk", () => {
 
 describe("walletRiskBook", () => {
   it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
-    assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 28) < 1e-6);
+    assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 18) < 1e-6);
     const paper = {
       cashUsd: 0,
       equityUsd: 40,
@@ -544,7 +544,7 @@ describe("walletRiskBook", () => {
     const risk = walletRiskBook(paper, [unsigned], [{ signature: undefined } as never], { usdc: 12, sol: 0.05, solPriceUsd: 100 }, true);
     assert.equal(risk.positions.length, 0);
     assert.equal(risk.trades.length, 0);
-    assert.equal(risk.portfolio.cashUsd, 15);
+    assert.equal(risk.portfolio.cashUsd, 12);
     assert.equal(risk.portfolio.dayPnlUsd, 0);
     assert.equal(dayLossBreached(risk.portfolio, { ...DEFAULT_CONFIG, dailyLossLimitPct: 6 }), false);
   });

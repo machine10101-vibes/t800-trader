@@ -294,6 +294,23 @@ export function technicalFromFlows(token: TokenCandidate): TechnicalSnapshot {
   };
 }
 
+/**
+ * Candle structure wins when it has a setup. A quiet 5m chart must not hide a 15m tape that already agrees.
+ */
+export function entrySignals(
+  token: TokenCandidate,
+  tech: TechnicalSnapshot | null,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+): Signal[] {
+  if (tech) {
+    const fromCandles = buildSignals(token, tech, researchScore, allowShorts, ctx);
+    if (fromCandles.length) return fromCandles;
+  }
+  return buildFlowSignals(token, researchScore, allowShorts, ctx);
+}
+
 /** Trade the pool tape the desk already loaded. No candle request. */
 export function buildFlowSignals(
   token: TokenCandidate,

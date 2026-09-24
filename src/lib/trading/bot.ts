@@ -21,7 +21,7 @@ import {
   type WalletBudget,
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
-import { buildFlowSignals, buildSignals, snapshotTechnical } from "./signals";
+import { entrySignals, snapshotTechnical } from "./signals";
 
 function priceMap(state: AppState, extras: { mint: string; price: number }[]): Map<string, number> {
   const map = new Map<string, number>();
@@ -157,10 +157,13 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
             continue;
           }
           const candles = cachedOhlcv(token.poolAddress);
-          const found =
-            candles && candles.length >= 20
-              ? buildSignals(token, snapshotTechnical(candles), token.researchScore, next.config.allowShorts, tapeCtx)
-              : buildFlowSignals(token, token.researchScore, next.config.allowShorts, tapeCtx);
+          const found = entrySignals(
+            token,
+            candles && candles.length >= 20 ? snapshotTechnical(candles) : null,
+            token.researchScore,
+            next.config.allowShorts,
+            tapeCtx,
+          );
           signals.push(...found);
         }
 
@@ -195,7 +198,11 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
             stance: market.regime.stance,
           });
           if (gate) {
-            blocked.push(`${learned.symbol} ${learned.side}: ${gate}`);
+            const why =
+              gate === "Insufficient cash" && next.config.walletSwaps
+                ? "need at least $5 in USDC or in SOL. One swap cannot spend both"
+                : gate;
+            blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
           }
           const token = byMint.get(learned.mint);

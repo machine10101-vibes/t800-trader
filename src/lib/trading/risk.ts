@@ -124,9 +124,20 @@ export interface WalletBudget {
 /** SOL left behind so the wallet can still pay the network fee. Matches the swap planner. */
 const SOL_FEE_RESERVE = 0.02;
 
-export function spendableUsd(budget: WalletBudget): number {
+/** One Jupiter swap spends either USDC or SOL, never a mix of the two. */
+export function payableUsd(budget: WalletBudget): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
-  return Math.max(0, budget.usdc) + Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
+  const solLeg = Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
+  return Math.max(Math.max(0, budget.usdc), solLeg);
+}
+
+export function walletMarkUsd(budget: WalletBudget): number {
+  const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
+  return Math.max(0, budget.usdc) + Math.max(0, budget.sol) * px;
+}
+
+export function spendableUsd(budget: WalletBudget): number {
+  return payableUsd(budget);
 }
 
 /**
@@ -143,9 +154,9 @@ export function walletRiskBook(
   if (!walletSwaps || !budget) return { portfolio, positions, trades };
   const livePositions = positions.filter((p) => Boolean(p.signature));
   const liveTrades = trades.filter((t) => Boolean(t.signature));
-  const cashUsd = spendableUsd(budget);
+  const cashUsd = payableUsd(budget);
   const signedValue = livePositions.reduce((acc, p) => acc + Math.max(0, p.qty * p.markPrice), 0);
-  const equityUsd = cashUsd + signedValue;
+  const equityUsd = walletMarkUsd(budget) + signedValue;
   const hasChainFill = liveTrades.length > 0;
   return {
     positions: livePositions,

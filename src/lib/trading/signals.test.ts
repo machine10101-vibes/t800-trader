@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildFlowSignals, buildSignals, ema, rewardToRisk, rsi, snapshotTechnical } from "./signals";
+import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical } from "./signals";
 import { canOpen, cashConcentration, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
@@ -147,6 +147,28 @@ describe("indicators", () => {
       },
     } as TokenCandidate;
     const found = buildFlowSignals(token, 67, true, { stance: "defensive", fearGreed: 71, solChange: -1.8 });
+    const quietChart = entrySignals(
+      token,
+      {
+        rsi14: null,
+        ema9: null,
+        ema21: null,
+        vwap: null,
+        atrPct: null,
+        volumeZ: null,
+        lastClose: null,
+        extensionPct: null,
+        closeStrength: null,
+        priorHigh: null,
+        priorLow: null,
+        barsAboveEma9: 0,
+      },
+      67,
+      true,
+      { stance: "defensive", fearGreed: 71, solChange: -1.8 },
+    );
+    assert.equal(quietChart.length, 1);
+    assert.equal(quietChart[0]?.symbol, "JUP");
     assert.equal(found.length, 1);
     assert.equal(found[0]?.side, "long");
     assert.equal(found[0]?.reason, "reclaim");

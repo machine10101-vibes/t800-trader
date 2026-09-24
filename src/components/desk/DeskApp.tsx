@@ -225,19 +225,22 @@ export function DeskApp() {
   useEffect(() => {
     if (!wallet || !liveTape || !desk?.bot.running) return;
     const seconds = Math.max(6, desk.config.scanSeconds);
-    const id = setInterval(async () => {
+    let cancel = false;
+    const run = async () => {
       try {
         const next = await controlBot("tick", wallet);
+        if (cancel) return;
         applyDesk(next);
-        if (next.config.walletSwaps) {
-          const session = await refreshWallet(wallet).catch(() => null);
-          if (session) setWallet(session);
-        }
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Tick failed");
+        if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
       }
-    }, seconds * 1000);
-    return () => clearInterval(id);
+    };
+    void run();
+    const id = setInterval(() => void run(), seconds * 1000);
+    return () => {
+      cancel = true;
+      clearInterval(id);
+    };
   }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, liveTape, wallet]);
 
   useEffect(() => {
@@ -785,6 +788,7 @@ function Overview({
           >
             {armButton(desk.bot.running).label}
           </button>
+          {desk.bot.lastNote ? <p className="mt-3 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
         </section>
         <section className="neon p-3">
           <div className="flex items-center justify-between px-1">
