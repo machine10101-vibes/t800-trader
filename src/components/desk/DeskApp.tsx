@@ -34,6 +34,7 @@ import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
+import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
 type Tab = "overview" | "radar" | "bot" | "book" | "risk";
@@ -347,7 +348,8 @@ export function DeskApp() {
   }, [desk?.bot.running, wallet, refresh]);
 
   useEffect(() => {
-    const latest = desk?.trades[0];
+    const rows = desk?.config.walletSwaps ? desk.trades.filter((trade) => trade.signature) : desk?.trades;
+    const latest = rows?.[0];
     if (!latest) return;
     if (lastTradeId.current === null) {
       lastTradeId.current = latest.id;
@@ -360,7 +362,7 @@ export function DeskApp() {
     window.setTimeout(() => {
       setToasts((cur) => cur.filter((t) => t.id !== latest.id));
     }, 4200);
-  }, [desk?.trades]);
+  }, [desk?.config.walletSwaps, desk?.trades]);
 
   const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten") => {
     if (!wallet) {
@@ -453,6 +455,11 @@ export function DeskApp() {
 
   const winRate = useMemo(() => {
     if (!desk) return 0;
+    if (desk.config.walletSwaps) {
+      const closes = desk.trades.filter((trade) => trade.signature && trade.action === "close" && trade.pnlUsd !== null);
+      if (!closes.length) return 0;
+      return (closes.filter((trade) => (trade.pnlUsd ?? 0) > 0).length / closes.length) * 100;
+    }
     const t = desk.portfolio.winCount + desk.portfolio.lossCount;
     return t ? (desk.portfolio.winCount / t) * 100 : 0;
   }, [desk]);
@@ -480,7 +487,7 @@ export function DeskApp() {
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
             <GateChip label="Wallet book" hint="SOL + USDC only" />
-            <GateChip label="Paper fills" hint="Simulated at the tape" />
+            <GateChip label="Live swaps" hint="Jupiter from the trading key" />
           </div>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
           <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
@@ -495,7 +502,7 @@ export function DeskApp() {
           >
             <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--faint)]">Watch a book</div>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              Paste a Solana address. This page shows that wallet&apos;s live SOL and USDC, plus the paper trades stored in this browser.
+              Paste a Solana address. This page shows that wallet&apos;s live SOL and USDC, plus signed swaps stored in this browser.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <input
@@ -522,7 +529,7 @@ export function DeskApp() {
           </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
             {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
-            An armed bot asks Phantom or Solflare to sign each buy and sell. Rows already marked Simulated were never broadcast.
+            Arm signs once. That signature moves spare SOL and USDC onto a trading key in this browser, and that key sends each swap. Tickets list only those signed fills.
           </p>
         </div>
         </div>
@@ -794,6 +801,15 @@ function BootSkeleton({ address }: { address: string }) {
   );
 }
 
+function shownFills<T extends { signature?: string }>(rows: T[], walletSwaps: boolean): T[] {
+  return walletSwaps ? rows.filter((row) => Boolean(row.signature)) : rows;
+}
+
+function rowPnl(position: Position): number {
+  const pnlPct = ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * (position.side === "long" ? 1 : -1);
+  return position.qty * position.entryPrice * (pnlPct / 100);
+}
+
 function PositionRail({ positions }: { positions: Position[] }) {
   return (
     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -873,9 +889,17 @@ function Overview({
 }) {
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
+  const swaps = desk.config.walletSwaps;
+  const fills = shownFills(desk.trades, swaps);
+  const open = shownFills(desk.positions, swaps);
   const curve = desk.equityCurve.map((p) => p.equity);
   const marked = trading?.equityUsd || wallet.equityUsd;
-  const equitySeries = curve.length >= 1 ? curve : marked ? [marked] : [];
+  const equitySeries = swaps ? (marked ? [marked] : []) : curve.length >= 1 ? curve : marked ? [marked] : [];
+  const stats = swaps
+    ? bookStats(fills, { ...desk.portfolio, peakEquity: marked || desk.portfolio.equityUsd, equityUsd: marked || desk.portfolio.equityUsd }, [])
+    : desk.stats;
+  const realized = fills.filter((trade) => trade.action === "close").reduce((sum, trade) => sum + (trade.pnlUsd ?? 0), 0);
+  const unrealized = swaps ? open.reduce((sum, position) => sum + rowPnl(position), 0) : desk.portfolio.unrealizedPnlUsd;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
@@ -924,26 +948,26 @@ function Overview({
         <section className="neon p-5">
           <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]"># trades · live stream</div>
           <div className="mt-3 flex items-end justify-between">
-            <div className="num text-4xl">{desk.portfolio.tradeCount}</div>
+            <div className="num text-4xl">{swaps ? fills.length : desk.portfolio.tradeCount}</div>
             <Spark values={equitySeries} />
           </div>
           <div className="mt-3 text-xs text-[var(--muted)]">
-            {desk.portfolio.winCount}W / {desk.portfolio.lossCount}L · hit {winRate.toFixed(0)}%
+            {swaps ? `${stats.closedTrades} signed closes` : `${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} · hit {winRate.toFixed(0)}%
           </div>
         </section>
       </div>
 
-      {desk.positions.length ? <PositionRail positions={desk.positions} /> : null}
+      {open.length ? <PositionRail positions={open} /> : null}
 
       <section className="grid gap-3 md:grid-cols-4">
-        <Stat label="Day P&L" value={<Tone value={desk.portfolio.dayPnlUsd}>{usd(desk.portfolio.dayPnlUsd)}</Tone>} sub={`DD ${desk.stats.maxDrawdownPct.toFixed(1)}%`} />
-        <Stat label="Expectancy" value={usd(desk.stats.expectancyUsd)} sub={`${desk.stats.closedTrades} closed`} />
+        <Stat label={swaps ? "Realized" : "Day P&L"} value={<Tone value={swaps ? realized : desk.portfolio.dayPnlUsd}>{usd(swaps ? realized : desk.portfolio.dayPnlUsd)}</Tone>} sub={swaps ? `${stats.closedTrades} signed closes` : `DD ${desk.stats.maxDrawdownPct.toFixed(1)}%`} />
+        <Stat label="Expectancy" value={usd(stats.expectancyUsd)} sub={`${stats.closedTrades} closed`} />
         <Stat
           label="Profit factor"
-          value={desk.stats.profitFactor === null ? "—" : Number.isFinite(desk.stats.profitFactor) ? desk.stats.profitFactor.toFixed(2) : "∞"}
-          sub={`avg W ${usd(desk.stats.avgWinUsd)}`}
+          value={stats.profitFactor === null ? "—" : Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"}
+          sub={`avg W ${usd(stats.avgWinUsd)}`}
         />
-        <Stat label="Unrealized" value={<Tone value={desk.portfolio.unrealizedPnlUsd}>{usd(desk.portfolio.unrealizedPnlUsd)}</Tone>} sub={`${desk.positions.length} open`} />
+        <Stat label="Unrealized" value={<Tone value={unrealized}>{usd(unrealized)}</Tone>} sub={`${open.length} open`} />
       </section>
 
       <section className="neon p-3">
@@ -1010,22 +1034,27 @@ function Overview({
         </div>
         <div className="neon p-5">
           <Label>Execution log</Label>
-          {desk.trades.length === 0 && desk.signals.length === 0 ? (
+          {fills.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
-              No tickets yet. Arm the bot and approve the one wallet signature. That signature moves a trading balance, and the trading key sends the swaps. Fund at least $5 of priced SOL/USDC.
+              {swaps
+                ? "No signed swaps yet. An armed bot sends the next rising watchlist long from the trading key. The row appears here with a Solscan link once that swap confirms."
+                : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
             </p>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
-              {desk.trades.slice(0, 12).map((t) => (
+              {fills.slice(0, 12).map((t) => (
                 <div key={t.id}>
                   {new Date(t.at).toLocaleTimeString()} {t.action} {t.symbol} {t.side} {priceFmt(t.price)} {t.reason}
+                  {t.signature ? ` ${t.signature.slice(0, 8)}` : ""}
                 </div>
               ))}
-              {desk.signals.slice(0, 8).map((s) => (
-                <div key={s.id}>
-                  SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
-                </div>
-              ))}
+              {swaps
+                ? null
+                : desk.signals.slice(0, 8).map((s) => (
+                    <div key={s.id}>
+                      SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
+                    </div>
+                  ))}
             </div>
           )}
           <div className="mt-4 space-y-2">
@@ -1279,11 +1308,19 @@ function Book({
   onWalletSwaps: (on: boolean) => void;
   onWithdraw: () => void;
 }) {
+  const swaps = desk.config.walletSwaps;
+  const fills = shownFills(desk.trades, swaps);
+  const open = shownFills(desk.positions, swaps);
   const curve = desk.equityCurve.map((p) => p.equity);
   const marked = trading?.equityUsd || wallet.equityUsd;
-  const equitySeries = curve.length >= 1 ? curve : marked ? [marked] : [];
-  const swaps = desk.config.walletSwaps;
+  const equitySeries = swaps ? (marked ? [marked] : []) : curve.length >= 1 ? curve : marked ? [marked] : [];
+  const stats = swaps
+    ? bookStats(fills, { ...desk.portfolio, peakEquity: marked || desk.portfolio.equityUsd, equityUsd: marked || desk.portfolio.equityUsd }, [])
+    : desk.stats;
   const profit = trading ? tradingProfitUsd(trading.equityUsd, desk.bot.swapPrincipalUsd) : 0;
+  const signedCloses = fills.filter((trade) => trade.action === "close" && trade.pnlUsd !== null);
+  const wins = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) > 0).length : desk.portfolio.winCount;
+  const losses = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) <= 0).length : desk.portfolio.lossCount;
   return (
     <div className="space-y-4">
       <div className="neon p-5">
@@ -1292,7 +1329,7 @@ function Book({
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
-                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sends the leftover SOL and USDC back. Open tickets are sold first."
+                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back."
                 : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
             </p>
           </div>
@@ -1309,7 +1346,7 @@ function Book({
         </div>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
-        <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
+        <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
           label={trading ? "Trading balance" : "Wallet mark"}
           value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
@@ -1319,13 +1356,13 @@ function Book({
               : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`
           }
         />
-        <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} />
-        <Stat label="Expectancy" value={usd(desk.stats.expectancyUsd)} sub={`PF ${desk.stats.profitFactor === null ? "—" : Number.isFinite(desk.stats.profitFactor) ? desk.stats.profitFactor.toFixed(2) : "∞"}`} />
+        <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />
+        <Stat label="Expectancy" value={usd(stats.expectancyUsd)} sub={`PF ${stats.profitFactor === null ? "—" : Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"}`} />
       </div>
       <div className="neon overflow-x-auto">
         <div className="flex items-center justify-between px-4 pt-4">
           <Label>Open positions</Label>
-          <button disabled={busy || desk.positions.length === 0} onClick={onFlatten} className="btn btn-ghost py-1.5 text-xs">
+          <button disabled={busy || open.length === 0} onClick={onFlatten} className="btn btn-ghost py-1.5 text-xs">
             Flatten book
           </button>
         </div>
@@ -1345,14 +1382,14 @@ function Book({
             </tr>
           </thead>
           <tbody>
-            {desk.positions.length === 0 ? (
+            {open.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
-                  No open ticket.
+                  {swaps ? "No open swap. A rising watchlist long is sent from the trading key." : "No open ticket."}
                 </td>
               </tr>
             ) : (
-              desk.positions.map((p) => {
+              open.map((p) => {
                 const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
                 const pnlUsd = p.qty * p.entryPrice * (pnlPct / 100);
                 const r = rMultiple(p);
@@ -1405,14 +1442,16 @@ function Book({
             </tr>
           </thead>
           <tbody>
-            {desk.trades.length === 0 ? (
+            {fills.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
-                  No tickets.
+                  {swaps
+                    ? "No live tickets yet. A swap from the trading key shows up here with a Solscan link. A red 15m tape stays in cash."
+                    : "No tickets."}
                 </td>
               </tr>
             ) : (
-              desk.trades.slice(0, 40).map((t) => (
+              fills.slice(0, 40).map((t) => (
                 <tr key={t.id} className="border-t border-[var(--line)]">
                   <td className="num px-4 py-3 text-[var(--muted)]">{new Date(t.at).toLocaleTimeString()}</td>
                   <td>{t.symbol}</td>

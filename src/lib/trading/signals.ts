@@ -334,16 +334,17 @@ export function buildFlowSignals(
   if (token.sector === "Meme" && (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))) return [];
   if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
 
-  const stackGreen = m5 > 0 && m15 >= 0.35 && h1 > 0 && h1 < 8;
-  const tapeFloor = stackGreen ? 0.42 : defensive ? 0.51 : 0.5;
+  // A clearly rising watchlist name can print more sells than buys and still be the long.
+  const rising =
+    token.watchlist && m5 > 0 && m15 >= 0.4 && m15 < 8 && h1 > -0.5 && h1 < 8 && tape >= 0.3;
   const aligned =
     token.watchlist &&
-    m15 >= 0.1 &&
+    m15 >= 0.05 &&
     m15 < (defensive ? 5 : 6) &&
-    m5 > -0.2 &&
-    h1 > -1 &&
+    m5 > -0.5 &&
+    h1 > -1.5 &&
     h1 < (defensive ? 6 : 8) &&
-    tape >= tapeFloor;
+    tape >= (defensive ? 0.48 : 0.45);
   const impulse =
     !defensive &&
     token.sector !== "Meme" &&
@@ -352,7 +353,7 @@ export function buildFlowSignals(
     h1 > 0 &&
     h1 < 10 &&
     tape >= 0.53;
-  if (!aligned && !impulse) return [];
+  if (!aligned && !impulse && !rising) return [];
 
   const stopPct = clamp(1.25 + (defensive ? 0.15 : 0), 1.2, 2.6);
   const rr = withMinRR(stopPct, stopPct * 1.8);
@@ -367,7 +368,7 @@ export function buildFlowSignals(
     60,
     90,
   );
-  const reason: Signal["reason"] = impulse && m15 >= 1.2 ? "breakout" : "reclaim";
+  const reason: Signal["reason"] = (impulse || rising) && m15 >= 1.2 ? "breakout" : "reclaim";
   const side: Signal["side"] = "long";
   return [
     {

@@ -69,8 +69,8 @@ export function buildMonitor(address: string, book: AppState | null, balances: W
     ticks: book?.bot.ticks ?? 0,
     lastNote: book?.bot.lastNote ?? null,
     lastTickAt: book?.bot.lastTickAt ?? null,
-    positions: book?.positions ?? [],
-    trades: book?.trades ?? [],
+  positions: book ? (book.config.walletSwaps ? book.positions.filter((row) => row.signature) : book.positions) : [],
+  trades: book ? (book.config.walletSwaps ? book.trades.filter((row) => row.signature) : book.trades) : [],
     equityCurve: book?.equityCurve.map((point) => point.equity) ?? [],
     learningSummary: book ? learningReport(book.memory).summary : null,
   };

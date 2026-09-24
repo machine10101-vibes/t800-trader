@@ -46,7 +46,8 @@ async function walletExit(
   executor: ChainExecutor | undefined,
   blocked: string[],
 ): Promise<AppState> {
-  if (!state.config.walletSwaps || !pos.signature || pos.side !== "long") {
+  if (state.config.walletSwaps && !pos.signature) return state;
+  if (!state.config.walletSwaps || pos.side !== "long") {
     return closePosition(state, pos.id, pos.markPrice, reason);
   }
   if (!executor) {
@@ -129,7 +130,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
               }
             }
-          } else {
+          } else if (!next.config.walletSwaps) {
             next = scaleOut(next, pos.id, fraction);
           }
         }
@@ -275,6 +276,10 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
                 continue;
               }
             }
+            if (next.config.walletSwaps && !stamp?.signature) {
+              blocked.push(`${learned.symbol}: swap was not broadcast`);
+              continue;
+            }
             const before = next.positions.length;
             next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, stamp);
             if (next.positions.length > before) opened += 1;
@@ -292,7 +297,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
       const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
       const hunting =
         next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
-          ? " · scanning — the next green 15m long is sent automatically"
+          ? " · scanning — the next rising watchlist long is sent from the trading key"
           : "";
       const note = next.bot.running
         ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${hunting}${held}`

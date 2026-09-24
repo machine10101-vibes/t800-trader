@@ -256,7 +256,21 @@ describe("indicators", () => {
         h24: flow(1, 20, 41),
       },
     };
-    assert.equal(buildFlowSignals(sold, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
+    const risingSold = buildFlowSignals(sold, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
+    assert.equal(risingSold.length, 1);
+    assert.equal(risingSold[0]?.side, "long");
+    const thin = {
+      ...token,
+      flows: {
+        m5: flow(2.3, 10, 40),
+        m15: flow(2, 10, 40),
+        m30: flow(0.4, 10, 40),
+        h1: flow(0.7, 10, 40),
+        h6: flow(0.2, 10, 40),
+        h24: flow(1, 10, 40),
+      },
+    };
+    assert.equal(buildFlowSignals(thin, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

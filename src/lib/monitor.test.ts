@@ -34,6 +34,21 @@ describe("monitor", () => {
         reason: "target",
         at: "2026-09-24T00:00:00Z",
         note: "target",
+        signature: "5signed",
+      },
+      {
+        id: "paper",
+        mint: "m",
+        symbol: "JUP",
+        side: "long",
+        action: "open",
+        qty: 1,
+        price: 1,
+        pnlUsd: null,
+        pnlPct: null,
+        reason: "reclaim",
+        at: "2026-09-24T00:01:00Z",
+        note: "paper",
       },
     ];
     const view = buildMonitor(SOL, book, { address: SOL, sol: 0.1, usdc: 2, solPriceUsd: 100, equityUsd: 12 });
@@ -43,6 +58,7 @@ describe("monitor", () => {
     assert.equal(view.walletEquityUsd, 12);
     assert.equal(view.hitRate, (2 / 3) * 100);
     assert.equal(view.trades.length, 1);
+    assert.equal(view.trades[0]?.signature, "5signed");
     assert.match(view.learningSummary ?? "", /No graded/);
   });
 

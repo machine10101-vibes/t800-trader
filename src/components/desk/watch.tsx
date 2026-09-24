@@ -105,7 +105,7 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 {view.hasBook
                   ? view.lastNote ?? "The book is on this browser. It updates when the bot ticks in another tab."
-                  : "This browser has no paper book for that address. Live SOL and USDC still load. Arm the bot on this browser once and the blotter will show up here."}
+                  : "This browser has no book for that address. Live SOL and USDC still load. Arm the bot on this browser once and signed swaps show up here."}
               </p>
               {view.learningSummary ? <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{view.learningSummary}</p> : null}
             </section>
@@ -151,7 +151,7 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
             <section className="neon overflow-x-auto p-5">
               <Label>Trades</Label>
               {view.trades.length === 0 ? (
-                <p className="mt-2 text-sm text-[var(--muted)]">No fills stored for this address on this browser.</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">No signed swaps stored for this address on this browser.</p>
               ) : (
                 <table className="mt-3 w-full min-w-[640px] text-left text-sm">
                   <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
