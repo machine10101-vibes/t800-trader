@@ -1,5 +1,6 @@
 "use client";
 
+import { VENUE_OPTIONS, venueSummary } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -55,8 +56,33 @@ export function SettingsPanel({
           {local.allowShorts ? " · shorts on" : " · shorts off"}
           {local.allowMemes ? " · memes on" : " · memes off"}
           {local.oneTicketPerTick ? " · one ticket per scan" : " · several tickets per scan"}
+          {" · "}
+          {venueSummary(local.venues)}
         </p>
       </div>
+
+      <Section
+        title="Venue"
+        hint="New tickets only open on pools from the platforms you leave on. An open ticket stays until it exits, even if you turn its venue off."
+      >
+        {VENUE_OPTIONS.map((venue) => (
+          <Toggle
+            key={venue.id}
+            label={venue.label}
+            hint={venue.hint}
+            checked={local.venues.includes(venue.id)}
+            onChange={(on) => {
+              const venues = on ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
+              set({ venues });
+            }}
+          />
+        ))}
+        {local.venues.length === 0 ? (
+          <p className="text-sm text-[var(--crimson)] md:col-span-2">
+            No venue is on. The next scan will not open a ticket.
+          </p>
+        ) : null}
+      </Section>
 
       <Section title="Cadence" hint="How often the bot looks, and how many new tickets a single scan may add.">
         <Field

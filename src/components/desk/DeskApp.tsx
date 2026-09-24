@@ -7,6 +7,7 @@ import { adoptLiveEquity, attachWallet, closeTicket, configureBot, controlBot, d
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
+import { venueForDex, venueLabel } from "@/lib/market/venues";
 import {
   connectWallet,
   detectedWalletName,
@@ -28,7 +29,7 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "radar", label: "Radar", kicker: "02" },
   { id: "bot", label: "Bot", kicker: "03" },
   { id: "book", label: "Book", kicker: "04" },
-  { id: "risk", label: "Settings", kicker: "05" },
+  { id: "risk", label: "Options", kicker: "05" },
 ];
 
 export function DeskApp() {
@@ -938,7 +939,12 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
                   className="cursor-pointer border-t border-[var(--line)] hover:bg-[rgba(255,74,216,0.04)]"
                 >
                   <td className="px-4 py-3 font-medium">{r.asset}</td>
-                  <td className="num">{r.ticker}</td>
+                  <td className="num">
+                    {r.ticker}
+                    <span className="block text-[10px] font-sans text-[var(--faint)]">
+                      {venueLabel(venueForDex(r.candidate.dex))}
+                    </span>
+                  </td>
                   <td className="num">
                     {priceFmt(r.price)}
                     {r.candidate.priceAgreement === "split" ? (

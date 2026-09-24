@@ -82,6 +82,28 @@ describe("screenCandidate", () => {
     assert.ok(reason?.includes("Wrapped"));
   });
 
+  it("rejects a pool on a venue the book turned off", () => {
+    const reason = screenCandidate(token({ dex: "pumpswap", watchlist: false }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium", "orca"],
+    });
+    assert.equal(reason, "Venue Pump.fun is off");
+  });
+
+  it("keeps a Raydium CLMM pool when Raydium is on", () => {
+    const reason = screenCandidate(token({ dex: "raydium-clmm" }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium"],
+    });
+    assert.equal(reason, null);
+  });
+
   it("passes liquid watchlist names", () => {
     const reason = screenCandidate(token(), {
       minLiquidityUsd: 120_000,

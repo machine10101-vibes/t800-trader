@@ -1,4 +1,5 @@
 import { loadMarket } from "@/lib/market/providers";
+import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
   Catalyst,
@@ -106,7 +107,7 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     : `New or mid-cap Solana names are usually priced as lottery tickets. ${c.symbol} only stays on the desk if reserves (${usd(c.liquidityUsd)}) and 24h volume (${usd(c.volume24hUsd)}) are real. That still does not mean the float is clean.`;
 
   const fundamental = [
-    `Venue ${c.dex}, quoted vs ${c.quoteSymbol}.`,
+    `Pool on ${venueLabel(venueForDex(c.dex))} (${c.dex}), quoted vs ${c.quoteSymbol}.`,
     c.watchlist ? "Mapped to a known Solana protocol on the internal watchlist." : "Not on the conservative watchlist — treat as tape-first.",
     `24h unique takers ${ (c.flows.h24.buyers + c.flows.h24.sellers).toLocaleString() }.`,
     mc ? `Reported market cap ${usd(mc)}.` : "Market cap not published by GeckoTerminal for this pool.",
@@ -215,6 +216,7 @@ function techLine(c: ScoredCandidate): string {
 let researchCache:
   | {
       at: number;
+      key: string;
       value: {
         regime: MarketRegime;
         research: ResearchThesis[];
@@ -241,7 +243,8 @@ export async function runResearch(
   eliminated: number;
   candidates: ScoredCandidate[];
 }> {
-  if (!force && researchCache && Date.now() - researchCache.at < RESEARCH_CACHE_MS) {
+  const key = screenKey(config);
+  if (!force && researchCache && researchCache.key === key && Date.now() - researchCache.at < RESEARCH_CACHE_MS) {
     return researchCache.value;
   }
   const market = await loadMarket();
@@ -250,6 +253,7 @@ export async function runResearch(
     minVolume24hUsd: config.minVolume24hUsd,
     minAgeHours: config.minAgeHours,
     allowMemes: config.allowMemes,
+    venues: config.venues,
   };
 
   const passed: TokenCandidate[] = [];
@@ -261,9 +265,10 @@ export async function runResearch(
     }
     passed.push(c);
   }
+  const unique = collapseMints(passed);
 
-  const watchPassed = passed.filter((c) => c.watchlist);
-  const otherPassed = passed
+  const watchPassed = unique.filter((c) => c.watchlist);
+  const otherPassed = unique
     .filter((c) => !c.watchlist)
     .map((c) => ({ c, heat: c.volume24hUsd + c.liquidityUsd * 2 }))
     .sort((a, b) => b.heat - a.heat)
@@ -282,8 +287,28 @@ export async function runResearch(
     eliminated,
     candidates: scored,
   };
-  researchCache = { at: Date.now(), value };
+  researchCache = { at: Date.now(), key, value };
   return value;
+}
+
+function screenKey(config: BotConfig): string {
+  return [
+    config.minLiquidityUsd,
+    config.minVolume24hUsd,
+    config.minAgeHours,
+    config.allowMemes ? 1 : 0,
+    venueSummary(config.venues ?? []),
+    [...(config.venues ?? [])].slice().sort().join(","),
+  ].join("|");
+}
+
+function collapseMints(rows: TokenCandidate[]): TokenCandidate[] {
+  const best = new Map<string, TokenCandidate>();
+  for (const row of rows) {
+    const prev = best.get(row.mint);
+    if (!prev || row.liquidityUsd > prev.liquidityUsd) best.set(row.mint, row);
+  }
+  return [...best.values()];
 }
 
 export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): string[] {

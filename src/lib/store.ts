@@ -1,3 +1,4 @@
+import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
@@ -14,6 +15,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   allowMemes: true,
   scanSeconds: 8,
   ...POLICY,
+  venues: [...DEFAULT_VENUES],
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -61,6 +63,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     staleMin: clampNum(src.staleMin, POLICY.staleMin, 10, 240, true),
     memeStaleMin: clampNum(src.memeStaleMin, POLICY.memeStaleMin, 8, 120, true),
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
+    venues: normalizeVenues(input?.venues),
   };
 }
 

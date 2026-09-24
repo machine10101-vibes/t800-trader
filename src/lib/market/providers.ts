@@ -2,6 +2,7 @@ import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from
 import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
+import { venueForDex } from "./venues";
 import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
@@ -161,8 +162,9 @@ async function watchlistPools(): Promise<TokenCandidate[]> {
   const pools = results.flat();
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
-    const prev = best.get(p.mint);
-    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(p.mint, p);
+    const key = `${p.mint}:${venueForDex(p.dex)}`;
+    const prev = best.get(key);
+    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(key, p);
   }
   return [...best.values()];
 }
@@ -171,9 +173,10 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
   const map = new Map<string, TokenCandidate>();
   for (const group of groups) {
     for (const c of group) {
-      const prev = map.get(c.mint);
+      const key = `${c.mint}:${venueForDex(c.dex)}`;
+      const prev = map.get(key);
       if (!prev) {
-        map.set(c.mint, c);
+        map.set(key, c);
         continue;
       }
       const richer = c.liquidityUsd > prev.liquidityUsd ? c : prev;
@@ -184,7 +187,7 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
         richer.name = prev.name;
         richer.symbol = prev.symbol;
       }
-      map.set(c.mint, richer);
+      map.set(key, richer);
     }
   }
   return [...map.values()];

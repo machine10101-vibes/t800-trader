@@ -246,6 +246,8 @@ export interface BotConfig {
   staleMin: number;
   memeStaleMin: number;
   scratchEnabled: boolean;
+  /** Platform ids from VENUE_OPTIONS. New tickets only open on these pools. */
+  venues: string[];
 }
 
 export interface BotState {

@@ -1,5 +1,6 @@
 import type { ScoredCandidate, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { isForeignOrWrapped } from "@/lib/market/universe";
+import { venueAllowed, venueForDex, venueLabel } from "@/lib/market/venues";
 import { clamp } from "@/lib/utils";
 
 export interface ScreenConfig {
@@ -7,6 +8,7 @@ export interface ScreenConfig {
   minVolume24hUsd: number;
   minAgeHours: number;
   allowMemes: boolean;
+  venues?: string[];
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
@@ -19,6 +21,10 @@ export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | 
   }
   if (!cfg.allowMemes && c.sector === "Meme" && !c.watchlist) return "Meme sector excluded by risk policy";
   if (c.priceUsd <= 0) return "Invalid price";
+  if (cfg.venues && !cfg.venues.length) return "No trading venue selected";
+  if (cfg.venues && !venueAllowed(c.dex, cfg.venues)) {
+    return `Venue ${venueLabel(venueForDex(c.dex))} is off`;
+  }
   if (isForeignOrWrapped(c.symbol, c.name)) {
     return "Wrapped or non-Solana-native asset";
   }

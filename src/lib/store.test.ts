@@ -53,5 +53,9 @@ describe("store", () => {
     assert.equal(next.minConfidence, 58);
     assert.equal(next.autoCash, true);
     assert.equal(next.beR, 0.8);
+    assert.equal(next.venues.includes("raydium"), true);
+    assert.equal(next.venues.includes("pump"), true);
+    assert.deepEqual(normalizeConfig({ venues: ["orca", "nope"] }).venues, ["orca"]);
+    assert.deepEqual(normalizeConfig({ venues: [] }).venues, []);
   });
 });
