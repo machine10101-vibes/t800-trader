@@ -1,7 +1,7 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
-import type { AppState, MarketRegime, Signal } from "@/lib/types";
+import type { AppState, ChainExecutor, MarketRegime, Position, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 import { emptyState, mutateState } from "@/lib/store";
 import { advise, studyTape } from "./learn";
@@ -28,7 +28,40 @@ function priceMap(state: AppState, extras: { mint: string; price: number }[]): M
   return map;
 }
 
-export async function tickBot(): Promise<AppState> {
+async function walletExit(
+  state: AppState,
+  pos: Position,
+  reason: TradeReason,
+  executor: ChainExecutor | undefined,
+  blocked: string[],
+): Promise<AppState> {
+  if (!state.config.walletSwaps || !pos.signature || pos.side !== "long") {
+    return closePosition(state, pos.id, pos.markPrice, reason);
+  }
+  if (!executor) {
+    blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the sell`);
+    return state;
+  }
+  try {
+    const fill = await executor({
+      kind: "close",
+      side: pos.side,
+      mint: pos.mint,
+      symbol: pos.symbol,
+      notionalUsd: pos.qty * pos.markPrice,
+      qty: pos.qty,
+      price: pos.markPrice,
+      tokenDecimals: pos.tokenDecimals,
+      venues: state.config.venues,
+    });
+    return closePosition(state, pos.id, fill.price, reason, fill.signature);
+  } catch (error) {
+    blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet sell failed"}`);
+    return state;
+  }
+}
+
+export async function tickBot(executor?: ChainExecutor): Promise<AppState> {
   return mutateState(async (state) => {
     try {
       const market = await loadMarket();
@@ -46,8 +79,9 @@ export async function tickBot(): Promise<AppState> {
       if (market.regime.stance === "defensive") {
         for (const pos of [...next.positions]) {
           if (shouldFlattenMeme(pos, market.regime.stance)) {
-            next = closePosition(next, pos.id, pos.markPrice, "risk-off");
-            closed += 1;
+            const before = next.positions.length;
+            next = await walletExit(next, pos, "risk-off", executor, blocked);
+            if (next.positions.length < before) closed += 1;
           }
         }
       }
@@ -55,22 +89,47 @@ export async function tickBot(): Promise<AppState> {
       for (const pos of [...next.positions]) {
         const plan = managePosition(pos, Date.now(), next.config);
         if (plan.exit) {
-          next = closePosition(next, pos.id, pos.markPrice, plan.exit);
-          closed += 1;
+          const before = next.positions.length;
+          next = await walletExit(next, pos, plan.exit, executor, blocked);
+          if (next.positions.length < before) closed += 1;
           continue;
         }
         if (plan.nextStop) next = updateStop(next, pos.id, plan.nextStop);
         if (plan.scale) {
           const fraction = Math.min(0.75, Math.max(0.25, (next.config.scaleFractionPct ?? 50) / 100));
-          next = scaleOut(next, pos.id, fraction);
+          if (next.config.walletSwaps && pos.signature && pos.side === "long") {
+            if (!executor) {
+              blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);
+            } else {
+              try {
+                const fill = await executor({
+                  kind: "scale",
+                  side: pos.side,
+                  mint: pos.mint,
+                  symbol: pos.symbol,
+                  notionalUsd: pos.qty * fraction * pos.markPrice,
+                  qty: pos.qty * fraction,
+                  price: pos.markPrice,
+                  tokenDecimals: pos.tokenDecimals,
+                  venues: next.config.venues,
+                });
+                next = scaleOut(next, pos.id, fraction, fill.signature, fill.price);
+              } catch (error) {
+                blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
+              }
+            }
+          } else {
+            next = scaleOut(next, pos.id, fraction);
+          }
         }
       }
       for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint);
         if (next.config.scratchEnabled === false) continue;
         if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
-        next = closePosition(next, pos.id, pos.markPrice, "time");
-        closed += 1;
+        const before = next.positions.length;
+        next = await walletExit(next, pos, "time", executor, blocked);
+        if (next.positions.length < before) closed += 1;
       }
       next = markBook(next, priceMap(next, marks));
 
@@ -156,9 +215,31 @@ export async function tickBot(): Promise<AppState> {
             blocked.push(`${learned.symbol}: size ${sized.notional.toFixed(2)} too small`);
           } else if (qty * learned.price < MIN_TICKET_USD) {
             blocked.push(`${learned.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
+          } else if (next.config.walletSwaps && learned.side === "short") {
+            blocked.push(`${learned.symbol}: shorts are not sent to the wallet`);
+          } else if (next.config.walletSwaps && !executor) {
+            blocked.push(`${learned.symbol}: this page cannot ask the wallet to sign`);
           } else {
+            let stamp: Awaited<ReturnType<ChainExecutor>> | undefined;
+            if (next.config.walletSwaps && executor) {
+              try {
+                stamp = await executor({
+                  kind: "open",
+                  side: learned.side,
+                  mint: learned.mint,
+                  symbol: learned.symbol,
+                  notionalUsd: qty * learned.price,
+                  qty,
+                  price: learned.price,
+                  venues: next.config.venues,
+                });
+              } catch (error) {
+                blocked.push(`${learned.symbol}: ${error instanceof Error ? error.message : "wallet swap failed"}`);
+                continue;
+              }
+            }
             const before = next.positions.length;
-            next = openPosition(next, learned, qty, market.regime.stance);
+            next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, stamp);
             if (next.positions.length > before) opened += 1;
             else blocked.push(`${learned.symbol}: cash could not fill the ticket`);
           }
@@ -171,8 +252,8 @@ export async function tickBot(): Promise<AppState> {
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
       const note = next.bot.running
-        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}`
-        : `Standby · closed ${closed} · ${market.regime.stance}`;
+        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${next.config.walletSwaps ? " · wallet swaps" : " · simulated"}`
+        : `Standby · closed ${closed} · ${market.regime.stance}${next.config.walletSwaps ? " · wallet swaps" : " · simulated"}`;
       next.bot = {
         ...next.bot,
         lastTickAt: new Date().toISOString(),

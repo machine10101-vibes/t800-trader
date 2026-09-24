@@ -161,6 +161,7 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
                       <th>Symbol</th>
                       <th>Reason</th>
                       <th>P&L</th>
+                      <th>Wallet</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -170,6 +171,15 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
                         <td>{trade.action}</td>
                         <td className="font-medium">{trade.symbol}</td>
                         <td className="text-[var(--muted)]">{trade.reason}</td>
+                        <td>
+                          {trade.signature ? (
+                            <a className="num text-[var(--mint)]" href={`https://solscan.io/tx/${trade.signature}`} target="_blank" rel="noreferrer">
+                              tx
+                            </a>
+                          ) : (
+                            <span className="text-[var(--faint)]">Simulated</span>
+                          )}
+                        </td>
                         <td>{trade.pnlUsd === null ? "—" : <Tone value={trade.pnlUsd}>{usd(trade.pnlUsd)}</Tone>}</td>
                       </tr>
                     ))}

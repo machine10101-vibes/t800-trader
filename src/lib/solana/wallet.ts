@@ -1,6 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import { liveSolPrice } from "@/lib/market/marks";
-import { USDC_MINT } from "@/lib/market/universe";
+import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 
 const RPCS = [
   "https://solana.publicnode.com",
@@ -26,6 +26,8 @@ export interface InjectedProvider {
   on?: (event: string, fn: (...args: unknown[]) => void) => void;
   off?: (event: string, fn: (...args: unknown[]) => void) => void;
   removeListener?: (event: string, fn: (...args: unknown[]) => void) => void;
+  signAndSendTransaction?: (tx: unknown) => Promise<{ signature: string } | string>;
+  signTransaction?: (tx: unknown) => Promise<{ serialize(): Uint8Array }>;
 }
 
 function injected(): InjectedProvider | null {
@@ -98,6 +100,19 @@ async function readUsdc(owner: PublicKey): Promise<number> {
   if (!acc.value) return 0;
   const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
   return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+}
+
+export async function mintDecimals(mint: string): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+  if (mint === USDC_MINT) return 6;
+  const acc = await rpc<{
+    value?: { data?: { parsed?: { type?: string; info?: { decimals?: number } } } } | null;
+  }>("getAccountInfo", [mint, { encoding: "jsonParsed" }]);
+  const decimals = acc.value?.data?.parsed?.info?.decimals;
+  if (typeof decimals !== "number" || !Number.isFinite(decimals)) {
+    throw new Error("Could not read token decimals for this mint");
+  }
+  return decimals;
 }
 
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {

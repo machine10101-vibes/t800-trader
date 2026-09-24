@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   scanSeconds: 8,
   ...POLICY,
   venues: [...DEFAULT_VENUES],
+  walletSwaps: false,
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -64,6 +65,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     memeStaleMin: clampNum(src.memeStaleMin, POLICY.memeStaleMin, 8, 120, true),
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
+    walletSwaps: asBool(src.walletSwaps, false),
   };
 }
 

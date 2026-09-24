@@ -222,7 +222,12 @@ export function DeskApp() {
     const seconds = Math.max(6, desk.config.scanSeconds);
     const id = setInterval(async () => {
       try {
-        applyDesk(await controlBot("tick"));
+        const next = await controlBot("tick", wallet);
+        applyDesk(next);
+        if (next.config.walletSwaps) {
+          const session = await refreshWallet(wallet).catch(() => null);
+          if (session) setWallet(session);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Tick failed");
       }
@@ -274,7 +279,7 @@ export function DeskApp() {
     }
     if (latest.id === lastTradeId.current) return;
     lastTradeId.current = latest.id;
-    const text = `${latest.action.toUpperCase()} ${latest.symbol} ${latest.reason}${latest.pnlUsd !== null ? ` ${usd(latest.pnlUsd)}` : ""}`;
+    const text = `${latest.signature ? "WALLET" : "SIM"} ${latest.action.toUpperCase()} ${latest.symbol} ${latest.reason}${latest.pnlUsd !== null ? ` ${usd(latest.pnlUsd)}` : ""}`;
     setToasts((cur) => [...cur, { id: latest.id, text }].slice(-4));
     window.setTimeout(() => {
       setToasts((cur) => cur.filter((t) => t.id !== latest.id));
@@ -296,7 +301,7 @@ export function DeskApp() {
           return;
         }
         if (action === "start") await attachWallet(session.address, session.equityUsd);
-        applyDesk(await controlBot(action));
+        applyDesk(await controlBot(action, session));
         if (action === "reset") {
           await adoptLiveEquity(session.equityUsd);
           const next = await loadDesk();
@@ -307,7 +312,7 @@ export function DeskApp() {
         }
         return;
       }
-      applyDesk(await controlBot(action));
+      applyDesk(await controlBot(action, wallet));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
     } finally {
@@ -331,7 +336,7 @@ export function DeskApp() {
     if (!wallet) return;
     setBusy(true);
     try {
-      applyDesk(await closeTicket(positionId));
+      applyDesk(await closeTicket(positionId, wallet));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Close failed");
     } finally {
@@ -410,7 +415,7 @@ export function DeskApp() {
           </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
             {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
-            Fills stay simulated at live marks so the account is yours, not a $10k dummy.
+            Fills stay simulated in this browser until you turn on wallet swaps. The account is yours, not a $10k dummy.
           </p>
         </div>
         </div>
@@ -511,7 +516,15 @@ export function DeskApp() {
               {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
               {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
               {tab === "book" ? (
-                <Book desk={desk} wallet={wallet} winRate={winRate} busy={busy} onClose={closePos} onFlatten={() => void control("flatten")} />
+                <Book
+                  desk={desk}
+                  wallet={wallet}
+                  winRate={winRate}
+                  busy={busy}
+                  onClose={closePos}
+                  onFlatten={() => void control("flatten")}
+                  onWalletSwaps={(on) => void saveConfig({ walletSwaps: on })}
+                />
               ) : null}
               {tab === "risk" ? <SettingsPanel desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
             </div>
@@ -859,7 +872,9 @@ function Overview({
         <div className="neon p-5">
           <Label>Execution log</Label>
           {desk.trades.length === 0 && desk.signals.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No live tickets yet. Fund at least $5 of priced SOL/USDC, then arm.</p>
+            <p className="text-sm text-[var(--muted)]">
+              No tickets yet. Simulated fills stay in this browser until wallet swaps are on. Fund at least $5 of priced SOL/USDC, then arm.
+            </p>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
               {desk.trades.slice(0, 12).map((t) => (
@@ -1111,6 +1126,7 @@ function Book({
   busy,
   onClose,
   onFlatten,
+  onWalletSwaps,
 }: {
   desk: DeskPayload;
   wallet: WalletSession;
@@ -1118,11 +1134,28 @@ function Book({
   busy: boolean;
   onClose: (id: string) => void;
   onFlatten: () => void;
+  onWalletSwaps: (on: boolean) => void;
 }) {
   const curve = desk.equityCurve.map((p) => p.equity);
   const equitySeries = curve.length >= 1 ? curve : wallet.equityUsd ? [wallet.equityUsd] : [];
+  const swaps = desk.config.walletSwaps;
   return (
     <div className="space-y-4">
+      <div className="neon p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              {swaps
+                ? "The next buy or sell asks Phantom or Solflare to sign a Jupiter swap. Rows marked Simulated were never broadcast, so they do not show up in the wallet."
+                : "These tickets are simulated in this browser. Your wallet was not charged, which is why Phantom and Solflare show no transactions. Turn on wallet swaps and the next ticket asks you to sign."}
+            </p>
+          </div>
+          <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
+            {swaps ? "Stop wallet swaps" : "Send swaps to my wallet"}
+          </button>
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat label="Wallet mark" value={usd(wallet.equityUsd)} sub={`${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`} />
@@ -1155,7 +1188,7 @@ function Book({
             {desk.positions.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
-                  Flat. No live position.
+                  No open ticket.
                 </td>
               </tr>
             ) : (
@@ -1167,6 +1200,7 @@ function Book({
                   <tr key={p.id} className="border-t border-[var(--line)]">
                     <td className="px-4 py-3 font-medium">
                       {p.symbol} <span className="text-[11px] text-[var(--faint)]">{p.sector ?? ""}</span>
+                      <div className="text-[10px]">{txLink(p.signature)}</div>
                     </td>
                     <td>{p.side}</td>
                     <td className="num">{priceFmt(p.entryPrice)}</td>
@@ -1207,12 +1241,13 @@ function Book({
               <th>Price</th>
               <th>P&L</th>
               <th>Why</th>
+              <th>Wallet</th>
             </tr>
           </thead>
           <tbody>
             {desk.trades.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={7}>
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
                   No tickets.
                 </td>
               </tr>
@@ -1226,6 +1261,7 @@ function Book({
                   <td className="num">{priceFmt(t.price)}</td>
                   <td>{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</td>
                   <td className="text-[var(--muted)]">{t.reason}</td>
+                  <td>{txLink(t.signature)}</td>
                 </tr>
               ))
             )}
@@ -1233,6 +1269,16 @@ function Book({
         </table>
       </div>
     </div>
+  );
+}
+
+function txLink(signature?: string) {
+  if (!signature) return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Simulated</span>;
+  const short = signature.length > 10 ? `${signature.slice(0, 4)}…${signature.slice(-4)}` : signature;
+  return (
+    <a className="num text-[11px] text-[var(--mint)]" href={`https://solscan.io/tx/${signature}`} target="_blank" rel="noreferrer">
+      {short}
+    </a>
   );
 }
 

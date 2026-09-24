@@ -34,6 +34,23 @@ describe("paper", () => {
     assert.ok(next.portfolio.cashUsd >= 0);
   });
 
+  it("records a wallet signature on a signed fill", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
+    const next = openPosition(state, signal({ price: 100 }), 1, "risk-on", {
+      signature: "sig",
+      qty: 0.4,
+      price: 101,
+      tokenDecimals: 6,
+    });
+    assert.equal(next.positions[0]?.signature, "sig");
+    assert.equal(next.positions[0]?.qty, 0.4);
+    assert.equal(next.positions[0]?.entryPrice, 101);
+    assert.equal(next.trades[0]?.signature, "sig");
+    const closed = closePosition(next, next.positions[0]!.id, 110, "target", "sig2");
+    assert.equal(closed.trades[0]?.signature, "sig2");
+    assert.equal(closed.trades[0]?.price, 110);
+  });
+
   it("marks a short winner as profit and returns it to cash", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ side: "short", price: 100 }), 1);

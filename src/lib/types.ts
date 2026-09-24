@@ -198,6 +198,9 @@ export interface Position {
   notional: number;
   initialStop: number;
   scaled: boolean;
+  /** Set when a wallet signed the open. Missing means the ticket never left this browser. */
+  signature?: string;
+  tokenDecimals?: number;
 }
 
 export interface Trade {
@@ -213,6 +216,8 @@ export interface Trade {
   reason: TradeReason;
   at: string;
   note: string;
+  /** Solana signature for a wallet swap. Missing means the row is simulated. */
+  signature?: string;
 }
 
 export interface BotConfig {
@@ -248,7 +253,30 @@ export interface BotConfig {
   scratchEnabled: boolean;
   /** Platform ids from VENUE_OPTIONS. New tickets only open on these pools. */
   venues: string[];
+  /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
+  walletSwaps: boolean;
 }
+
+export interface ChainOrder {
+  kind: "open" | "close" | "scale";
+  side: Side;
+  mint: string;
+  symbol: string;
+  notionalUsd: number;
+  qty: number;
+  price: number;
+  tokenDecimals?: number;
+  venues?: string[];
+}
+
+export interface ChainFill {
+  signature: string;
+  qty: number;
+  price: number;
+  tokenDecimals: number;
+}
+
+export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;
 
 export interface BotState {
   running: boolean;

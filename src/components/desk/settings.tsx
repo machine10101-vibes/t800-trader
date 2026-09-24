@@ -58,8 +58,21 @@ export function SettingsPanel({
           {local.oneTicketPerTick ? " · one ticket per scan" : " · several tickets per scan"}
           {" · "}
           {venueSummary(local.venues)}
+          {local.walletSwaps ? " · wallet swaps" : " · simulated fills"}
         </p>
       </div>
+
+      <Section
+        title="Wallet"
+        hint="The book can keep a simulated blotter, or it can ask your wallet to sign each buy and sell."
+      >
+        <Toggle
+          label="Send swaps to this wallet"
+          hint="On routes the next ticket through Jupiter and asks Phantom or Solflare to sign. Off leaves every fill in this browser. Shorts are not sent on-chain. Rows you already see stay simulated."
+          checked={local.walletSwaps}
+          onChange={(v) => set({ walletSwaps: v })}
+        />
+      </Section>
 
       <Section
         title="Venue"

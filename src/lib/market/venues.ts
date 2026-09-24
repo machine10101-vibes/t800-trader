@@ -82,3 +82,20 @@ export function venueAllowed(dex: string, venues: string[] | undefined): boolean
   if (!venues.length) return false;
   return venues.includes(venueForDex(dex));
 }
+
+const JUPITER_DEXES: Record<string, string[]> = {
+  raydium: ["Raydium", "Raydium CLMM", "Raydium CP", "Raydium Launchlab"],
+  orca: ["Whirlpool", "Orca V1", "Orca V2"],
+  meteora: ["Meteora", "Meteora DLMM", "Meteora DAMM v2", "Dynamic Bonding Curve"],
+  jupiter: ["JupiterRfqV2"],
+  pump: ["Pump.fun", "Pump.fun Amm"],
+  other: ["Phoenix", "OpenBook V2", "Manifest", "FluxBeam", "Invariant"],
+};
+
+/** Null means Jupiter may use any pool. A list restricts the signed swap to those venues. */
+export function dexesForVenues(venues: string[] | undefined): string[] | null {
+  if (!venues?.length) return null;
+  if (VENUE_OPTIONS.every((venue) => venues.includes(venue.id))) return null;
+  const labels = venues.flatMap((id) => JUPITER_DEXES[id] ?? []);
+  return labels.length ? labels : null;
+}

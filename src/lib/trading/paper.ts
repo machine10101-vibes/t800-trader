@@ -1,4 +1,4 @@
-import type { AppState, MarketRegime, Position, Signal, Trade } from "@/lib/types";
+import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
 import { rememberClose } from "./learn";
 import { MIN_TICKET_USD, markPosition, rMultiple, unrealizedPnl } from "./risk";
@@ -36,12 +36,18 @@ function syncBook(state: AppState): AppState {
   };
 }
 
-export function openPosition(state: AppState, signal: Signal, qty: number, stance?: MarketRegime["stance"]): AppState {
-  const price = fillPrice(signal.price, signal.side, "open");
+export function openPosition(
+  state: AppState,
+  signal: Signal,
+  qty: number,
+  stance?: MarketRegime["stance"],
+  stamp?: ChainFill,
+): AppState {
+  const price = stamp?.price ?? fillPrice(signal.price, signal.side, "open");
   const room = state.portfolio.cashUsd * 0.98;
-  let filledQty = qty;
+  let filledQty = stamp?.qty ?? qty;
   let notional = filledQty * price;
-  if (notional > room) {
+  if (!stamp && notional > room) {
     if (room < MIN_TICKET_USD) return state;
     filledQty = room / price;
     notional = filledQty * price;
@@ -76,6 +82,8 @@ export function openPosition(state: AppState, signal: Signal, qty: number, stanc
     notional,
     initialStop: stop,
     scaled: false,
+    signature: stamp?.signature,
+    tokenDecimals: stamp?.tokenDecimals,
   };
 
   const trade: Trade = {
@@ -90,7 +98,8 @@ export function openPosition(state: AppState, signal: Signal, qty: number, stanc
     pnlPct: null,
     reason: signal.reason,
     at: new Date().toISOString(),
-    note: signal.thesis,
+    note: stamp ? `${signal.thesis} Wallet tx ${stamp.signature}.` : signal.thesis,
+    signature: stamp?.signature,
   };
 
   return syncBook({
@@ -105,10 +114,16 @@ export function openPosition(state: AppState, signal: Signal, qty: number, stanc
   });
 }
 
-export function closePosition(state: AppState, positionId: string, priceHint: number, reason: Trade["reason"]): AppState {
+export function closePosition(
+  state: AppState,
+  positionId: string,
+  priceHint: number,
+  reason: Trade["reason"],
+  signature?: string,
+): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
-  const price = fillPrice(priceHint, pos.side, "close");
+  const price = signature ? priceHint : fillPrice(priceHint, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
   const proceeds = exitProceeds(pos, price, pnl.usd);
@@ -124,7 +139,8 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
     pnlPct: pnl.pct,
     reason,
     at: new Date().toISOString(),
-    note: `${reason} exit from ${pos.reason} entry`,
+    note: signature ? `${reason} exit from ${pos.reason} entry. Wallet tx ${signature}.` : `${reason} exit from ${pos.reason} entry`,
+    signature,
   };
 
   const realized = state.portfolio.realizedPnlUsd + pnl.usd;
@@ -175,12 +191,18 @@ export function updateStop(state: AppState, positionId: string, stopPrice: numbe
   };
 }
 
-export function scaleOut(state: AppState, positionId: string, fraction = 0.5): AppState {
+export function scaleOut(
+  state: AppState,
+  positionId: string,
+  fraction = 0.5,
+  signature?: string,
+  fillPriceOverride?: number,
+): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos || pos.scaled || fraction <= 0 || fraction >= 1) return state;
   const qty = pos.qty * fraction;
   if (qty <= 0) return state;
-  const price = fillPrice(pos.markPrice, pos.side, "close");
+  const price = fillPriceOverride ?? (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close"));
   const marked = markPosition({ ...pos, markPrice: price, qty }, price);
   const pnl = unrealizedPnl(marked);
   const proceeds = exitProceeds({ ...pos, qty }, price, pnl.usd);
@@ -197,7 +219,8 @@ export function scaleOut(state: AppState, positionId: string, fraction = 0.5): A
     pnlPct: pnl.pct,
     reason: "target",
     at: new Date().toISOString(),
-    note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run`,
+    note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run${signature ? `. Wallet tx ${signature}.` : ""}`,
+    signature,
   };
   const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: "target" });
   return syncBook({
