@@ -1,4 +1,4 @@
-import { fetchJson, nullableNum } from "@/lib/utils";
+import { fetchJson, firstSuccess, nullableNum } from "@/lib/utils";
 import { SOL_MINT } from "./universe";
 
 export interface Mark {
@@ -16,7 +16,7 @@ async function fromCoinGecko(): Promise<{ btc: Mark; eth: Mark; sol: Mark } | nu
   try {
     const json = await fetchJson<CgSimple>(
       "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true",
-      { timeoutMs: 8_000, retries: 2 },
+      { timeoutMs: 4_000, retries: 1 },
     );
     const pick = (id: string): Mark => ({
       price: nullableNum(json[id]?.usd),
@@ -36,7 +36,7 @@ async function fromCoinCap(id: string): Promise<Mark> {
   try {
     const json = await fetchJson<{ data?: { priceUsd?: string; changePercent24Hr?: string } }>(
       `https://api.coincap.io/v2/assets/${id}`,
-      { timeoutMs: 8_000, retries: 2 },
+      { timeoutMs: 4_000, retries: 1 },
     );
     return {
       price: nullableNum(json.data?.priceUsd),
@@ -52,8 +52,8 @@ async function solFromGeckoTerminal(): Promise<Mark> {
     const json = await fetchJson<{
       data?: { attributes?: { token_prices?: Record<string, string> } };
     }>(`https://api.geckoterminal.com/api/v2/simple/networks/solana/token_price/${SOL_MINT}`, {
-      timeoutMs: 8_000,
-      retries: 2,
+      timeoutMs: 4_000,
+      retries: 1,
     });
     return { price: nullableNum(json.data?.attributes?.token_prices?.[SOL_MINT]), change24h: null };
   } catch {
@@ -65,7 +65,7 @@ async function solFromDexScreener(): Promise<Mark> {
   try {
     const json = await fetchJson<{
       pairs?: { priceUsd?: string; priceChange?: { h24?: number } }[];
-    }>(`https://api.dexscreener.com/latest/dex/tokens/${SOL_MINT}`, { timeoutMs: 8_000, retries: 2 });
+    }>(`https://api.dexscreener.com/latest/dex/tokens/${SOL_MINT}`, { timeoutMs: 2_500, retries: 1 });
     const pair = json.pairs?.find((p) => nullableNum(p.priceUsd)) ?? json.pairs?.[0];
     return {
       price: nullableNum(pair?.priceUsd),
@@ -84,24 +84,56 @@ function prefer(primary: Mark, fallback: Mark): Mark {
 }
 
 export async function liveMajors(): Promise<{ btc: Mark; eth: Mark; sol: Mark }> {
-  const cg = await fromCoinGecko();
-  if (cg?.btc.price && cg.eth.price && cg.sol.price) return cg;
-
-  const [btc, eth, solGt, solDx] = await Promise.all([
-    cg?.btc.price ? Promise.resolve(cg.btc) : fromCoinCap("bitcoin"),
-    cg?.eth.price ? Promise.resolve(cg.eth) : fromCoinCap("ethereum"),
-    cg?.sol.price ? Promise.resolve(cg.sol) : solFromGeckoTerminal(),
-    cg?.sol.price ? Promise.resolve(EMPTY) : solFromDexScreener(),
+  const [cg, btcCap, ethCap, solCap, solDx] = await Promise.all([
+    fromCoinGecko(),
+    fromCoinCap("bitcoin"),
+    fromCoinCap("ethereum"),
+    fromCoinCap("solana"),
+    solFromDexScreener(),
   ]);
-  const solCap = cg?.sol.price ? cg.sol : await fromCoinCap("solana");
+  let sol = prefer(prefer(cg?.sol ?? EMPTY, solCap), solDx);
+  if (!sol.price) sol = prefer(sol, await solFromGeckoTerminal());
   return {
-    btc: prefer(cg?.btc ?? EMPTY, btc),
-    eth: prefer(cg?.eth ?? EMPTY, eth),
-    sol: prefer(prefer(cg?.sol ?? EMPTY, solCap), prefer(solGt, solDx)),
+    btc: prefer(cg?.btc ?? EMPTY, btcCap),
+    eth: prefer(cg?.eth ?? EMPTY, ethCap),
+    sol,
   };
 }
 
+const SOL_PRICE_TTL_MS = 20_000;
+let solPriceCache: { at: number; price: number } | null = null;
+
+async function solUsd(url: string, pick: (json: unknown) => number | null): Promise<number | null> {
+  try {
+    const json = await fetchJson<unknown>(url, { timeoutMs: 2_500, retries: 1 });
+    const price = pick(json);
+    return price && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Wallet equity only needs SOL. Take the first live print instead of waiting on BTC, ETH, and retries. */
 export async function liveSolPrice(): Promise<number | null> {
-  const { sol } = await liveMajors();
-  return sol.price;
+  if (solPriceCache && Date.now() - solPriceCache.at < SOL_PRICE_TTL_MS) return solPriceCache.price;
+  const price = await firstSuccess(
+    [
+      solUsd(`https://lite-api.jup.ag/price/v3?ids=${SOL_MINT}`, (json) => {
+        const row = json as Record<string, { usdPrice?: number }>;
+        return nullableNum(row[SOL_MINT]?.usdPrice);
+      }),
+      solFromDexScreener().then((mark) => mark.price),
+      solUsd(`https://coins.llama.fi/prices/current/solana:${SOL_MINT}`, (json) => {
+        const row = json as { coins?: Record<string, { price?: number }> };
+        return nullableNum(row.coins?.[`solana:${SOL_MINT}`]?.price);
+      }),
+      solUsd(
+        "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+        (json) => nullableNum((json as CgSimple).solana?.usd),
+      ),
+    ],
+    (value) => typeof value === "number" && value > 0,
+  );
+  if (price && price > 0) solPriceCache = { at: Date.now(), price };
+  return price;
 }

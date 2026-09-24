@@ -140,7 +140,7 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string)
 
 async function gtPools(path: string, source: string): Promise<TokenCandidate[]> {
   const url = `https://api.geckoterminal.com/api/v2/${path}${path.includes("?") ? "&" : "?"}include=base_token,quote_token`;
-  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 12_000 });
+  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 8_000, retries: 1 });
   const tokens = tokenMap(json.included);
   return json.data.map((p) => toCandidate(p, tokens, source)).filter((x): x is TokenCandidate => Boolean(x));
 }
@@ -287,16 +287,20 @@ export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): 
   return [];
 }
 
+const REGIME_FEED = { timeoutMs: 6_000, retries: 1 };
+
 async function fetchRegime(): Promise<MarketRegime> {
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
     fetchJson<CgSimple>(
       "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true",
+      REGIME_FEED,
     ),
-    fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global"),
-    fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1"),
-    fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains"),
+    fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global", REGIME_FEED),
+    fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1", REGIME_FEED),
+    fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains", REGIME_FEED),
     fetchJson<{ total24h?: number; change_1d?: number }>(
       "https://api.llama.fi/overview/dexs/solana?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true",
+      REGIME_FEED,
     ),
   ]);
 
@@ -413,15 +417,21 @@ export async function loadMarket(force = false): Promise<{
     return { candidates: cache.candidates, regime: cache.regime, scanned: cache.candidates.length };
   }
 
-  const [regime, trending, newPools, topVol] = await Promise.all([
+  const [regime, pools] = await Promise.all([
     fetchRegime(),
-    gtPools("networks/solana/trending_pools?page=1", "geckoterminal:trending").catch(() => [] as TokenCandidate[]),
-    gtPools("networks/solana/new_pools?page=1", "geckoterminal:new").catch(() => [] as TokenCandidate[]),
-    gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
-      () => [] as TokenCandidate[],
-    ),
+    (async () => {
+      const [trending, newPools, topVol] = await Promise.all([
+        gtPools("networks/solana/trending_pools?page=1", "geckoterminal:trending").catch(() => [] as TokenCandidate[]),
+        gtPools("networks/solana/new_pools?page=1", "geckoterminal:new").catch(() => [] as TokenCandidate[]),
+        gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
+          () => [] as TokenCandidate[],
+        ),
+      ]);
+      const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
+      return { trending, newPools, topVol, watch };
+    })(),
   ]);
-  const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
+  const { trending, newPools, topVol, watch } = pools;
 
   const merged = mergeCandidates([watch, trending, topVol, newPools]);
   let candidates = merged;

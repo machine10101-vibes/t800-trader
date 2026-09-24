@@ -57,27 +57,50 @@ interface RpcResult<T> {
   error?: { message?: string };
 }
 
-async function rpc<T>(method: string, params: unknown[]): Promise<T> {
-  let last: unknown;
-  for (const url of RPCS) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        cache: "no-store",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      });
-      const json = (await res.json()) as RpcResult<T>;
-      if (!res.ok || json.error) {
-        throw new Error(json.error?.message || `${res.status} ${res.statusText} from ${url}`);
-      }
-      if (json.result === undefined) throw new Error(`Empty RPC result from ${url}`);
-      return json.result;
-    } catch (error) {
-      last = error;
-    }
+const RPC_TIMEOUT_MS = 4_000;
+
+async function rpcOnce<T>(url: string, method: string, params: unknown[], signal: AbortSignal): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    signal,
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const json = (await res.json()) as RpcResult<T>;
+  if (!res.ok || json.error) {
+    throw new Error(json.error?.message || `${res.status} ${res.statusText} from ${url}`);
   }
-  throw last instanceof Error ? last : new Error("Solana RPC could not read this wallet");
+  if (json.result === undefined) throw new Error(`Empty RPC result from ${url}`);
+  return json.result;
+}
+
+/** First healthy endpoint wins. A hung public RPC no longer blocks the next one. */
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), RPC_TIMEOUT_MS);
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      let pending = RPCS.length;
+      let last: unknown;
+      for (const url of RPCS) {
+        rpcOnce<T>(url, method, params, ctrl.signal)
+          .then((result) => {
+            ctrl.abort();
+            resolve(result);
+          })
+          .catch((error) => {
+            last = error;
+            pending -= 1;
+            if (pending === 0) {
+              reject(last instanceof Error ? last : new Error("Solana RPC could not read this wallet"));
+            }
+          });
+      }
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");

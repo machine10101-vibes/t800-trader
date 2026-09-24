@@ -3,7 +3,60 @@ import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engi
 import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
 import { bookStats } from "@/lib/trading/stats";
-import type { DeskPayload } from "@/lib/types";
+import type { AppState, DeskPayload, MarketRegime } from "@/lib/types";
+
+function loadingRegime(): MarketRegime {
+  const flat = { price: 0, change24h: 0, marketCap: 0, volume24h: 0 };
+  return {
+    asOf: new Date().toISOString(),
+    btc: flat,
+    eth: { ...flat },
+    sol: { ...flat },
+    btcDominance: null,
+    ethDominance: null,
+    totalMarketCap: null,
+    marketCapChange24h: null,
+    fearGreed: null,
+    solanaTvl: null,
+    solanaDexVolume24h: null,
+    solanaDexVolumeChange1d: null,
+    stance: "mixed",
+    stanceWhy: "Live tape is still loading.",
+    crowded: [],
+    overlooked: [],
+    overview: "This wallet's book is ready. Live pools are still loading.",
+    narratives: [],
+    yields: [],
+  };
+}
+
+/** Overview and the sidebar share this. A saved armed book must not keep offering Arm. */
+export function armButton(running: boolean): { action: "start" | "stop"; label: string } {
+  return running ? { action: "stop", label: "Disarm the bot" } : { action: "start", label: "Arm the bot" };
+}
+
+/** Real saved book, with research left empty until the tape returns. Does not invent prices or equity. */
+export function shellDesk(state: AppState): DeskPayload {
+  return {
+    regime: loadingRegime(),
+    research: [],
+    universeSize: 0,
+    eliminated: 0,
+    candidatesScanned: 0,
+    portfolio: state.portfolio,
+    positions: state.positions,
+    trades: state.trades,
+    signals: state.lastSignals,
+    bot: state.bot,
+    config: state.config,
+    equityCurve: state.equityCurve,
+    whatCouldBeWrong: [],
+    tapeDots: [],
+    stats: bookStats(state.trades, state.portfolio, state.equityCurve),
+    learning: learningReport(state.memory),
+    generatedAt: new Date().toISOString(),
+  };
+}
 
 export async function buildDesk(force = false): Promise<DeskPayload> {
   if (force) {

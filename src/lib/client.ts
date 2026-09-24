@@ -1,4 +1,4 @@
-import { buildDesk } from "@/lib/desk";
+import { armButton, buildDesk, shellDesk } from "@/lib/desk";
 import { executorFor } from "@/lib/solana/swap";
 import type { WalletSession } from "@/lib/solana/wallet";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
@@ -6,7 +6,7 @@ import { applyControl, tickBot } from "@/lib/trading/bot";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 
-export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet };
+export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk };
 
 export async function loadDesk(force = false): Promise<DeskPayload> {
   return buildDesk(force);

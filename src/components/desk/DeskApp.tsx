@@ -3,7 +3,7 @@
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { adoptLiveEquity, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
+import { adoptLiveEquity, armButton, attachWallet, closeTicket, configureBot, controlBot, detachWallet, loadDesk, shellDesk } from "@/lib/client";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
@@ -41,6 +41,7 @@ export function DeskApp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(false);
+  const [liveTape, setLiveTape] = useState(false);
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -74,10 +75,11 @@ export function DeskApp() {
     window.history.replaceState(null, "", url);
   }, []);
 
-  const applyDesk = useCallback((next: DeskPayload) => {
+  const applyDesk = useCallback((next: DeskPayload, opts?: { live?: boolean }) => {
     setDesk(next);
     setError(null);
     setUpdatedAt(next.generatedAt);
+    if (opts?.live !== false) setLiveTape(true);
     setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
     setFocusMint((cur) => {
       if (cur && next.research.some((r) => r.candidate.mint === cur)) return cur;
@@ -101,15 +103,16 @@ export function DeskApp() {
     setWalletError(null);
     try {
       const session = await connectWallet(trusted);
-      await attachWallet(session.address, session.equityUsd);
+      const book = await attachWallet(session.address, session.equityUsd);
+      applyDesk(shellDesk(book), { live: false });
       setWallet(session);
-      setBooting(true);
+      setBooting(false);
     } catch (e) {
       if (!trusted) setWalletError(e instanceof Error ? e.message : "Wallet connect failed");
     } finally {
       setWalletBusy(false);
     }
-  }, []);
+  }, [applyDesk]);
 
   const disconnect = useCallback(async () => {
     await disconnectWallet(wallet?.provider);
@@ -120,6 +123,7 @@ export function DeskApp() {
     setCandles([]);
     setError(null);
     setBooting(false);
+    setLiveTape(false);
   }, [wallet]);
 
   useEffect(() => {
@@ -139,6 +143,7 @@ export function DeskApp() {
         detachWallet();
         setWallet(null);
         setDesk(null);
+        setLiveTape(false);
       },
       onAccountChanged: (address) => {
         if (!address) {
@@ -148,14 +153,14 @@ export function DeskApp() {
         void (async () => {
           detachWallet();
           const session = await refreshWallet({ ...wallet, address });
-          await attachWallet(session.address, session.equityUsd);
+          const book = await attachWallet(session.address, session.equityUsd);
+          applyDesk(shellDesk(book), { live: false });
           setWallet(session);
-          setBooting(true);
-          setDesk(null);
+          setBooting(false);
         })();
       },
     });
-  }, [disconnect, wallet]);
+  }, [applyDesk, disconnect, wallet]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -218,7 +223,7 @@ export function DeskApp() {
   }, [focusPool]);
 
   useEffect(() => {
-    if (!wallet || !desk?.bot.running) return;
+    if (!wallet || !liveTape || !desk?.bot.running) return;
     const seconds = Math.max(6, desk.config.scanSeconds);
     const id = setInterval(async () => {
       try {
@@ -233,7 +238,7 @@ export function DeskApp() {
       }
     }, seconds * 1000);
     return () => clearInterval(id);
-  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, wallet]);
+  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, liveTape, wallet]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -510,7 +515,8 @@ export function DeskApp() {
                   focusMint={focusMint}
                   onFocus={setFocusMint}
                   onOpen={setThesis}
-                  onArm={() => void control("start")}
+                  onArm={() => void control(armButton(desk.bot.running).action)}
+                  busy={busy}
                 />
               ) : null}
               {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
@@ -728,6 +734,7 @@ function Overview({
   onFocus,
   onOpen,
   onArm,
+  busy,
 }: {
   desk: DeskPayload;
   wallet: WalletSession;
@@ -737,6 +744,7 @@ function Overview({
   onFocus: (mint: string) => void;
   onOpen: (t: ResearchThesis) => void;
   onArm: () => void;
+  busy: boolean;
 }) {
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
@@ -769,8 +777,12 @@ function Overview({
               ))}
             </div>
           ) : null}
-          <button onClick={onArm} className="btn btn-magenta mt-5 w-full">
-            Arm the bot
+          <button
+            disabled={busy}
+            onClick={onArm}
+            className={`btn mt-5 w-full ${desk.bot.running ? "bg-[rgba(255,59,143,0.14)] text-[var(--crimson)]" : "btn-magenta"}`}
+          >
+            {armButton(desk.bot.running).label}
           </button>
         </section>
         <section className="neon p-3">

@@ -152,3 +152,28 @@ export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: 
 export function settled<T>(results: PromiseSettledResult<T>[]): T[] {
   return results.filter((r): r is PromiseFulfilledResult<T> => r.status === "fulfilled").map((r) => r.value);
 }
+
+/** Resolve with the first accepted result. A miss or rejection waits for the rest. */
+export function firstSuccess<T>(tasks: Promise<T>[], accept: (value: T) => boolean): Promise<T | null> {
+  if (!tasks.length) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let pending = tasks.length;
+    let settled = false;
+    const finish = (value: T | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    for (const task of tasks) {
+      task
+        .then((value) => {
+          if (accept(value)) finish(value);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          pending -= 1;
+          if (pending === 0) finish(null);
+        });
+    }
+  });
+}
