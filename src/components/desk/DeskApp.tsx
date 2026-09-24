@@ -899,6 +899,34 @@ function BotView({
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
           <Stat label="Daily loss cap" value={`${desk.config.dailyLossLimitPct}%`} />
         </div>
+        <div className="mt-5 rounded-2xl border border-[var(--line)] p-4">
+          <Label>What the book has learned</Label>
+          <p className="text-sm leading-6 text-[var(--muted)]">{desk.learning.summary}</p>
+          {desk.learning.edges.length ? (
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              {desk.learning.edges.map((edge) => (
+                <div key={edge.key} className="rounded-2xl border border-[var(--line)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm">{edge.label}</span>
+                    <Pill tone={edge.bias === "favor" ? "mint" : edge.bias === "fade" ? "crimson" : "amber"}>{edge.bias}</Pill>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--faint)]">
+                    {edge.samples} samples · {(edge.hitRate * 100).toFixed(0)}% · {edge.avgR >= 0 ? "+" : ""}
+                    {edge.avgR.toFixed(2)}
+                    {edge.unit}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {desk.learning.recent.length ? (
+            <ul className="mt-3 space-y-1 text-sm text-[var(--muted)]">
+              {desk.learning.recent.map((lesson) => (
+                <li key={lesson.id}>— {lesson.note}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
         {(desk.bot.blocked ?? []).length ? (
           <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
             <Label>Blocked this tick</Label>

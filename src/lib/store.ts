@@ -1,4 +1,5 @@
 import type { AppState, BotConfig } from "@/lib/types";
+import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -64,7 +65,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
 }
 
 function hydrate(state: AppState): AppState {
-  return { ...state, config: normalizeConfig(state.config) };
+  return { ...state, config: normalizeConfig(state.config), memory: ensureMemory(state.memory) };
 }
 
 let activeWallet: string | null = null;
@@ -112,6 +113,7 @@ export function emptyState(config: Partial<BotConfig> = DEFAULT_CONFIG): AppStat
     trades: [],
     equityCurve: equity > 0 ? [{ t: new Date().toISOString(), equity }] : [],
     lastSignals: [],
+    memory: emptyMemory(),
   };
 }
 

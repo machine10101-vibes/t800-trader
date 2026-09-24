@@ -1,6 +1,7 @@
-import type { AppState, Position, Signal, Trade } from "@/lib/types";
+import type { AppState, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
-import { MIN_TICKET_USD, markPosition, unrealizedPnl } from "./risk";
+import { rememberClose } from "./learn";
+import { MIN_TICKET_USD, markPosition, rMultiple, unrealizedPnl } from "./risk";
 
 const SLIP_BPS = 8;
 
@@ -35,7 +36,7 @@ function syncBook(state: AppState): AppState {
   };
 }
 
-export function openPosition(state: AppState, signal: Signal, qty: number): AppState {
+export function openPosition(state: AppState, signal: Signal, qty: number, stance?: MarketRegime["stance"]): AppState {
   const price = fillPrice(signal.price, signal.side, "open");
   const room = state.portfolio.cashUsd * 0.98;
   let filledQty = qty;
@@ -68,6 +69,8 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     lastUpdate: new Date().toISOString(),
     reason: signal.reason,
     researchScore: signal.researchScore,
+    entryConfidence: signal.confidence,
+    entryStance: stance,
     highWater: price,
     lowWater: price,
     notional,
@@ -127,9 +130,10 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
   const realized = state.portfolio.realizedPnlUsd + pnl.usd;
   const winCount = state.portfolio.winCount + (pnl.usd >= 0 ? 1 : 0);
   const lossCount = state.portfolio.lossCount + (pnl.usd < 0 ? 1 : 0);
+  const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: reason });
 
   return syncBook({
-    ...state,
+    ...learned,
     portfolio: {
       ...state.portfolio,
       cashUsd: state.portfolio.cashUsd + proceeds,
@@ -195,8 +199,9 @@ export function scaleOut(state: AppState, positionId: string, fraction = 0.5): A
     at: new Date().toISOString(),
     note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run`,
   };
+  const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: "target" });
   return syncBook({
-    ...state,
+    ...learned,
     portfolio: {
       ...state.portfolio,
       cashUsd: state.portfolio.cashUsd + proceeds,

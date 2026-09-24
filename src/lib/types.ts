@@ -184,6 +184,8 @@ export interface Position {
   lastUpdate: string;
   reason: TradeReason;
   researchScore: number | null;
+  entryConfidence?: number;
+  entryStance?: MarketRegime["stance"];
   highWater: number;
   lowWater: number;
   notional: number;
@@ -270,6 +272,54 @@ export interface EquityPoint {
   equity: number;
 }
 
+export interface Lesson {
+  id: string;
+  at: string;
+  kind: "trade" | "read";
+  key: string;
+  symbol: string;
+  sector: string;
+  hit: boolean;
+  /** R multiple for a trade, percent move for a tape read. */
+  r: number;
+  note: string;
+}
+
+export interface PendingRead {
+  id: string;
+  at: string;
+  mint: string;
+  symbol: string;
+  sector: string;
+  price: number;
+  score: number;
+  mode: "follow" | "defend";
+  bucket: string;
+}
+
+export interface PlayMemory {
+  lessons: Lesson[];
+  pendingReads: PendingRead[];
+}
+
+export interface LearningEdge {
+  key: string;
+  label: string;
+  samples: number;
+  hitRate: number;
+  avgR: number;
+  unit: "R" | "%";
+  bias: "favor" | "fade" | "watch";
+}
+
+export interface LearningReport {
+  tradeSamples: number;
+  readSamples: number;
+  edges: LearningEdge[];
+  recent: Lesson[];
+  summary: string;
+}
+
 export interface AppState {
   config: BotConfig;
   bot: BotState;
@@ -278,6 +328,7 @@ export interface AppState {
   trades: Trade[];
   equityCurve: EquityPoint[];
   lastSignals: Signal[];
+  memory: PlayMemory;
 }
 
 export interface TapeDot {
@@ -314,5 +365,6 @@ export interface DeskPayload {
   whatCouldBeWrong: string[];
   tapeDots: TapeDot[];
   stats: BookStats;
+  learning: LearningReport;
   generatedAt: string;
 }
