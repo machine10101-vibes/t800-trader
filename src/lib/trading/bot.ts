@@ -1,4 +1,5 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
+import { isActiveBook } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
@@ -161,7 +162,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
           );
         }
         const focus = research.candidates
-          .filter((c) => !screenCandidate(c, next.config))
+          .filter((c) => isActiveBook(c.mint) && !screenCandidate(c, next.config))
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
 
@@ -305,7 +306,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
       const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
       const hunting =
         next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
-          ? " · scanning — the next rising watchlist long is sent from the trading key"
+          ? " · scanning — the next rising SOL or Zebec long is sent from the trading key"
           : "";
       const note = next.bot.running
         ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${hunting}${held}`

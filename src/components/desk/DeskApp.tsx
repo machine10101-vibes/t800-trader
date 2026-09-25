@@ -965,10 +965,10 @@ function Overview({
       <section className="neon p-3">
         <div className="mb-3 flex items-center justify-between px-1">
           <Label>5-minute tapes</Label>
-          <span className="text-[11px] text-[var(--faint)]">{desk.tapes.length ? `${desk.tapes.length} watchlist names` : "Waiting on pools"}</span>
+          <span className="text-[11px] text-[var(--faint)]">{desk.tapes.length ? "SOL · Zebec" : "Waiting on pools"}</span>
         </div>
         {desk.tapes.length === 0 ? (
-          <p className="px-1 pb-2 text-sm text-[var(--muted)]">The watchlist 5-minute charts load with the tape.</p>
+          <p className="px-1 pb-2 text-sm text-[var(--muted)]">SOL and Zebec 5-minute charts load with the tape.</p>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {desk.tapes.map((tape) => (
@@ -1072,7 +1072,7 @@ function Overview({
           {fills.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
               {swaps
-                ? "No signed swaps yet. An armed bot sends the next rising watchlist long from the trading key. The row appears here with a Solscan link once that swap confirms."
+                ? "No signed swaps yet. An armed bot sends the next rising SOL or Zebec long from the trading key. The row appears here with a Solscan link once that swap confirms."
                 : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
             </p>
           ) : (
@@ -1121,7 +1121,7 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
       <div>
         <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-          Live Solana pools only. Empty rows mean the feeds missed this cycle — nothing is invented.
+          SOL and Zebec only. Empty rows mean the feeds missed this cycle — nothing is invented.
         </p>
       </div>
       <div className="neon desk-scroll overflow-x-auto p-1">
@@ -1497,7 +1497,7 @@ function Book({
             {open.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
-                  {swaps ? "No open swap. A rising watchlist long is sent from the trading key." : "No open ticket."}
+                  {swaps ? "No open swap. A rising SOL or Zebec long is sent from the trading key." : "No open ticket."}
                 </td>
               </tr>
             ) : (

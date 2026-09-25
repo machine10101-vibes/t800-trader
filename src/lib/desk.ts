@@ -1,5 +1,5 @@
 import { invalidateMarketCache } from "@/lib/market/providers";
-import { WATCH_TAPE_LIMIT, WATCHLIST } from "@/lib/market/universe";
+import { isActiveBook, WATCHLIST } from "@/lib/market/universe";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
@@ -31,18 +31,17 @@ function loadingRegime(): MarketRegime {
   };
 }
 
-/** One 5-minute tape per watchlist mint, deepest pool first. Capped so the desk does not burst GeckoTerminal. */
+/** One 5-minute tape for each name on the active book, deepest pool first. */
 export function watchlistTapes(candidates: TokenCandidate[]): TapeCard[] {
-  const rank = new Map(WATCHLIST.map((token, index) => [token.mint, index]));
+  const rank = new Map(WATCHLIST.filter((token) => isActiveBook(token.mint)).map((token, index) => [token.mint, index]));
   const best = new Map<string, TokenCandidate>();
   for (const candidate of candidates) {
-    if (!candidate.watchlist || !candidate.poolAddress || !rank.has(candidate.mint)) continue;
+    if (!candidate.watchlist || !candidate.poolAddress || !isActiveBook(candidate.mint)) continue;
     const prev = best.get(candidate.mint);
     if (!prev || candidate.liquidityUsd > prev.liquidityUsd) best.set(candidate.mint, candidate);
   }
   return [...best.values()]
     .sort((a, b) => (rank.get(a.mint) ?? 99) - (rank.get(b.mint) ?? 99))
-    .slice(0, WATCH_TAPE_LIMIT)
     .map((candidate) => ({
       symbol: candidate.symbol,
       mint: candidate.mint,

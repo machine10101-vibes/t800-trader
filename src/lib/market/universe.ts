@@ -14,8 +14,14 @@ export const JITO_SOL_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
 export const JLP_MINT = "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4";
 export const ZBCN_MINT = "ZBCNpuD7YMXzTHB2fhGkGi78MNsHGLRXUhRewNRm9RU";
 
-/** Watchlist names whose pools and 5-minute charts are loaded. Includes Zebec. */
-export const WATCH_TAPE_LIMIT = 13;
+/** The only names the desk monitors and trades right now. */
+export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT] as const;
+
+const ACTIVE_MINTS = new Set<string>(ACTIVE_BOOK);
+
+export function isActiveBook(mint: string): boolean {
+  return ACTIVE_MINTS.has(mint);
+}
 
 /** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
 export const SOL_USDC_POOLS = [

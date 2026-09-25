@@ -3,7 +3,7 @@ import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } fro
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
-import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCH_TAPE_LIMIT, WATCHLIST } from "./universe";
+import { classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -146,7 +146,8 @@ async function gtPools(path: string, source: string): Promise<TokenCandidate[]> 
 }
 
 async function watchlistPools(): Promise<TokenCandidate[]> {
-  const results = await mapPool(WATCHLIST.slice(0, WATCH_TAPE_LIMIT), 3, async (t) => {
+  const book = WATCHLIST.filter((token) => isActiveBook(token.mint));
+  const results = await mapPool(book, 3, async (t) => {
     try {
       const pools = await gtPools(
         `networks/solana/tokens/${t.mint}/pools?page=1`,
@@ -436,20 +437,13 @@ async function loadMarketOnce(): Promise<{
   const [regime, pools] = await Promise.all([
     fetchRegime(),
     (async () => {
-      const [trending, newPools, topVol] = await Promise.all([
-        gtPools("networks/solana/trending_pools?page=1", "geckoterminal:trending").catch(() => [] as TokenCandidate[]),
-        gtPools("networks/solana/new_pools?page=1", "geckoterminal:new").catch(() => [] as TokenCandidate[]),
-        gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
-          () => [] as TokenCandidate[],
-        ),
-      ]);
       const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
-      return { trending, newPools, topVol, watch };
+      return { watch };
     })(),
   ]);
-  const { trending, newPools, topVol, watch } = pools;
+  const { watch } = pools;
 
-  const merged = mergeCandidates([watch, trending, topVol, newPools]);
+  const merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint));
   let candidates = merged;
   let yields: YieldQuote[] = [];
   try {

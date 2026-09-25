@@ -1,4 +1,5 @@
 import { loadMarket } from "@/lib/market/providers";
+import { isActiveBook } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
@@ -258,7 +259,8 @@ export async function runResearch(
 
   const passed: TokenCandidate[] = [];
   let eliminated = 0;
-  for (const c of market.candidates) {
+  const book = market.candidates.filter((c) => isActiveBook(c.mint));
+  for (const c of book) {
     if (screenCandidate(c, screen)) {
       eliminated += 1;
       continue;
@@ -295,7 +297,7 @@ export async function runResearch(
   const value = {
     regime: market.regime,
     research,
-    universeSize: market.candidates.length,
+    universeSize: book.length,
     eliminated,
     candidates: scored,
   };
