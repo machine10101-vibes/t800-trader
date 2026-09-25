@@ -1,4 +1,4 @@
-import { loadMarket } from "@/lib/market/providers";
+import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { isActiveBook } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
@@ -7,9 +7,10 @@ import type {
   MarketRegime,
   ResearchThesis,
   ScoredCandidate,
+  TechnicalSnapshot,
   TokenCandidate,
 } from "@/lib/types";
-import { technicalFromFlows } from "@/lib/trading/signals";
+import { snapshotTechnical, technicalFromFlows } from "@/lib/trading/signals";
 import { usd } from "@/lib/utils";
 import { scoreCandidate, screenCandidate } from "./scoring";
 
@@ -228,7 +229,13 @@ let researchCache:
     }
   | null = null;
 
-const RESEARCH_CACHE_MS = 120_000;
+const RESEARCH_CACHE_MS = 20_000;
+
+function structureFor(candidate: TokenCandidate): TechnicalSnapshot {
+  const candles = cachedOhlcv(candidate.poolAddress);
+  if (candles && candles.length >= 20) return snapshotTechnical(candles);
+  return technicalFromFlows(candidate);
+}
 
 export function clearResearchCache(): void {
   researchCache = null;
@@ -288,7 +295,7 @@ export async function runResearch(
   }
   for (const row of otherPassed) pushSeed(row);
   const seed = rankedSeed.slice(0, 20);
-  const scored = seed.map((c) => scoreCandidate(c, technicalFromFlows(c)));
+  const scored = seed.map((c) => scoreCandidate(c, structureFor(c)));
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);

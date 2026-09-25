@@ -29,6 +29,12 @@ export const SOL_USDC_POOLS = [
   "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
 ];
 
+/** One deep pool per name the desk trades, so a tick does not list every pool on the mint. */
+export const BOOK_POOLS: { mint: string; pool: string }[] = [
+  { mint: SOL_MINT, pool: "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2" },
+  { mint: ZBCN_MINT, pool: "FaoZEZFsRS2jJAzg5PXwNjDdA1hDAjDGAkDf4xRfY79w" },
+];
+
 export const WATCHLIST: WatchToken[] = [
   { symbol: "SOL", name: "Solana", mint: SOL_MINT, sector: "L1" },
   { symbol: "JUP", name: "Jupiter", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", sector: "DEX" },

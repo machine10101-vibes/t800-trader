@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WATCHLIST } from "./market/universe";
+import { ACTIVE_BOOK, BOOK_POOLS, WATCHLIST } from "./market/universe";
 import { armButton, shellDesk, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
 import type { TokenCandidate } from "./types";
@@ -66,5 +66,14 @@ describe("watchlistTapes", () => {
       ["SOL", "ZBCN"],
     );
     assert.equal(withZebec[1]?.poolAddress, "zbcn-sol");
+  });
+});
+
+describe("BOOK_POOLS", () => {
+  it("pins one pool for every name the desk trades", () => {
+    const pinned = new Set(BOOK_POOLS.map((pin) => pin.mint));
+    for (const mint of ACTIVE_BOOK) assert.equal(pinned.has(mint), true);
+    assert.equal(BOOK_POOLS.length, ACTIVE_BOOK.length);
+    assert.equal(new Set(BOOK_POOLS.map((pin) => pin.pool)).size, BOOK_POOLS.length);
   });
 });

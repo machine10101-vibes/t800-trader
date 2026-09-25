@@ -153,12 +153,30 @@ interface DexPair {
   baseToken?: { address?: string };
 }
 
+const FEED_MS = 2_500;
+
+function deadline<T>(work: Promise<T>, fallback: T, ms = FEED_MS): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
 async function jupiterPrices(mints: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!mints.length) return out;
   const json = await fetchJson<Record<string, { usdPrice?: number }>>(
     `https://lite-api.jup.ag/price/v3?ids=${mints.join(",")}`,
-    { timeoutMs: 8_000, retries: 1 },
+    { timeoutMs: FEED_MS, retries: 1 },
   );
   for (const mint of mints) {
     const price = nullableNum(json[mint]?.usdPrice);
@@ -172,7 +190,7 @@ async function dexPrices(mints: string[]): Promise<Map<string, number>> {
   if (!mints.length) return out;
   const json = await fetchJson<DexPair[] | { pairs?: DexPair[] }>(
     `https://api.dexscreener.com/tokens/v1/solana/${mints.join(",")}`,
-    { timeoutMs: 8_000, retries: 1 },
+    { timeoutMs: FEED_MS, retries: 1 },
   );
   const pairs = Array.isArray(json) ? json : (json.pairs ?? []);
   const best = new Map<string, { price: number; liq: number }>();
@@ -194,7 +212,7 @@ async function llamaPrices(mints: string[]): Promise<Map<string, number>> {
   const json = await fetchJson<{
     coins?: Record<string, { price?: number; confidence?: number; timestamp?: number }>;
   }>(`https://coins.llama.fi/prices/current/${mints.map((m) => `solana:${m}`).join(",")}`, {
-    timeoutMs: 8_000,
+    timeoutMs: FEED_MS,
     retries: 1,
   });
   const now = Date.now();
@@ -217,7 +235,7 @@ async function llamaPrices(mints: string[]): Promise<Map<string, number>> {
 async function jitoYield(): Promise<YieldPrint | null> {
   const json = await fetchJson<{ apy?: { data?: number; date?: string }[] }>(
     "https://kobe.mainnet.jito.network/api/v1/stake_pool_stats",
-    { timeoutMs: 8_000, retries: 1 },
+    { timeoutMs: FEED_MS, retries: 1 },
   );
   const latest = [...(json.apy ?? [])]
     .filter((row) => normalizeRate(num(row.data)) !== null)
@@ -230,7 +248,7 @@ async function jitoYield(): Promise<YieldPrint | null> {
 async function jlpFeed(): Promise<{ price: number | null; yield: YieldPrint | null }> {
   const json = await fetchJson<{ jlpPriceUsdFormatted?: string; jlpApyPct?: string }>(
     "https://perps-api.jup.ag/v1/jlp-info",
-    { timeoutMs: 8_000, retries: 1 },
+    { timeoutMs: FEED_MS, retries: 1 },
   );
   const price = nullableNum(json.jlpPriceUsdFormatted);
   const apy = normalizeRate(num(json.jlpApyPct));
@@ -243,7 +261,7 @@ async function jlpFeed(): Promise<{ price: number | null; yield: YieldPrint | nu
 async function lendYields(): Promise<YieldPrint[]> {
   const json = await fetchJson<
     { address?: string; assetAddress?: string; symbol?: string; totalRate?: number | string }[]
-  >("https://api.jup.ag/lend/v1/earn/tokens", { timeoutMs: 8_000, retries: 1 });
+  >("https://api.jup.ag/lend/v1/earn/tokens", { timeoutMs: FEED_MS, retries: 1 });
   const rows = Array.isArray(json) ? json : [];
   const out: YieldPrint[] = [];
   for (const row of rows) {
@@ -282,12 +300,12 @@ export async function crossCheck(
 ): Promise<{ candidates: TokenCandidate[]; yields: YieldQuote[] }> {
   const mints = mintsToCrossCheck(candidates);
   const [jupR, dexR, llamaR, jitoR, jlpR, lendR] = await Promise.allSettled([
-    jupiterPrices(mints),
-    dexPrices(mints),
-    llamaPrices(mints),
-    jitoYield(),
-    jlpFeed(),
-    lendYields(),
+    deadline(jupiterPrices(mints), new Map<string, number>()),
+    deadline(dexPrices(mints), new Map<string, number>()),
+    deadline(llamaPrices(mints), new Map<string, number>()),
+    deadline(jitoYield(), null),
+    deadline(jlpFeed(), { price: null, yield: null }),
+    deadline(lendYields(), [] as YieldPrint[]),
   ]);
   const jup = jupR.status === "fulfilled" ? jupR.value : new Map<string, number>();
   const dex = dexR.status === "fulfilled" ? dexR.value : new Map<string, number>();

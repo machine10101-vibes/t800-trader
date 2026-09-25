@@ -1,5 +1,5 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { isActiveBook } from "@/lib/market/universe";
+import { ACTIVE_BOOK, isActiveBook, watchMeta } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
@@ -193,6 +193,16 @@ export async function tickBot(
           .filter((c) => isActiveBook(c.mint) && !screenCandidate(c, next.config))
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
+        for (const mint of ACTIVE_BOOK) {
+          if (focus.some((token) => token.mint === mint)) continue;
+          const symbol = watchMeta(mint)?.symbol ?? "Asset";
+          const live = byMint.get(mint) ?? research.candidates.find((token) => token.mint === mint);
+          if (!live) {
+            blocked.push(`${symbol}: pool tape has not arrived`);
+            continue;
+          }
+          blocked.push(`${symbol}: ${screenCandidate(live, next.config) ?? "not offered on this tick"}`);
+        }
 
         const tapeCtx = {
           stance: market.regime.stance,

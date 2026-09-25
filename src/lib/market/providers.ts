@@ -1,9 +1,9 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
-import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
+import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
-import { classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
+import { BOOK_POOLS, classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -63,7 +63,7 @@ let cache:
     }
   | null = null;
 
-const CACHE_MS = 120_000;
+const CACHE_MS = 20_000;
 
 function mintFromGtId(id: string | undefined): string {
   if (!id) return "";
@@ -140,22 +140,43 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string)
 
 async function gtPools(path: string, source: string): Promise<TokenCandidate[]> {
   const url = `https://api.geckoterminal.com/api/v2/${path}${path.includes("?") ? "&" : "?"}include=base_token,quote_token`;
-  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 8_000, retries: 1 });
+  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 6_000, retries: 1 });
   const tokens = tokenMap(json.included);
   return json.data.map((p) => toCandidate(p, tokens, source)).filter((x): x is TokenCandidate => Boolean(x));
 }
 
+async function gtPool(address: string, source: string): Promise<TokenCandidate | null> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${address}?include=base_token,quote_token`;
+  const json = await fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 });
+  return toCandidate(json.data, tokenMap(json.included), source);
+}
+
+function stampWatch(row: TokenCandidate, mint: string): TokenCandidate {
+  const meta = watchMeta(mint);
+  if (!meta) return { ...row, watchlist: true };
+  return { ...row, watchlist: true, symbol: meta.symbol, name: meta.name, sector: meta.sector };
+}
+
+async function poolsForMint(mint: string, symbol: string): Promise<TokenCandidate[]> {
+  const pools = await gtPools(`networks/solana/tokens/${mint}/pools?page=1`, `geckoterminal:token:${symbol}`);
+  return pools.filter((p) => p.mint === mint).map((p) => stampWatch(p, mint));
+}
+
 async function watchlistPools(): Promise<TokenCandidate[]> {
   const book = WATCHLIST.filter((token) => isActiveBook(token.mint));
-  const results = await mapPool(book, 3, async (t) => {
+  const pins = new Map(BOOK_POOLS.map((pin) => [pin.mint, pin.pool]));
+  const results = await mapPool(book, 2, async (t) => {
+    const pin = pins.get(t.mint);
+    if (pin) {
+      try {
+        const row = await gtPool(pin, `geckoterminal:pool:${t.symbol}`);
+        if (row && row.mint === t.mint) return [stampWatch(row, t.mint)];
+      } catch {
+        // The pin missed. The token's pool list is the backup.
+      }
+    }
     try {
-      const pools = await gtPools(
-        `networks/solana/tokens/${t.mint}/pools?page=1`,
-        `geckoterminal:token:${t.symbol}`,
-      );
-      return pools
-        .filter((p) => p.mint === t.mint)
-        .map((p) => ({ ...p, watchlist: true, symbol: t.symbol, name: t.name, sector: t.sector }));
+      return await poolsForMint(t.mint, t.symbol);
     } catch {
       return [] as TokenCandidate[];
     }
@@ -196,35 +217,47 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
 
 const ohlcvCache = new Map<string, { at: number; rows: Candle[] }>();
 const ohlcvMiss = new Map<string, number>();
-const OHLCV_TTL_MS = 3 * 60_000;
+const OHLCV_TTL_MS = 45_000;
 const OHLCV_STALE_MS = 20 * 60_000;
-const OHLCV_MISS_MS = 45_000;
-const OHLCV_GAP_MS = 1_200;
-let ohlcvTail: Promise<unknown> = Promise.resolve();
-let ohlcvNotBefore = 0;
+const OHLCV_MISS_MS = 20_000;
+const OHLCV_PARALLEL = 2;
+let ohlcvActive = 0;
+const ohlcvWaiters: (() => void)[] = [];
+
+function acquireOhlcv(): Promise<void> {
+  if (ohlcvActive < OHLCV_PARALLEL) {
+    ohlcvActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    ohlcvWaiters.push(() => {
+      ohlcvActive += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseOhlcv(): void {
+  ohlcvActive -= 1;
+  const next = ohlcvWaiters.shift();
+  if (next) next();
+}
 
 function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
-  const run = ohlcvTail.then(async () => {
-    const delay = ohlcvNotBefore - Date.now();
-    if (delay > 0) await sleep(delay);
+  return acquireOhlcv().then(async () => {
     try {
       return await task();
     } finally {
-      ohlcvNotBefore = Date.now() + OHLCV_GAP_MS;
+      releaseOhlcv();
     }
   });
-  ohlcvTail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
 }
 
 async function fetchOhlcvOnce(poolAddress: string, timeframe: "minute" | "hour", aggregate: number, limit: number): Promise<Candle[]> {
   const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
   const json = await fetchJson<{
     data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 10_000, retries: 2 });
+  }>(url, { timeoutMs: 6_000, retries: 1 });
   const list = json.data?.attributes?.ohlcv_list ?? [];
   return list
     .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
@@ -288,7 +321,7 @@ export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): 
   return [];
 }
 
-const REGIME_FEED = { timeoutMs: 6_000, retries: 1 };
+const REGIME_FEED = { timeoutMs: 3_500, retries: 1 };
 
 async function fetchRegime(): Promise<MarketRegime> {
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
@@ -429,31 +462,29 @@ export async function loadMarket(force = false): Promise<{
   return run;
 }
 
+async function warmBookCandles(poolAddresses: string[]): Promise<void> {
+  await Promise.all(poolAddresses.map((pool) => fetchOhlcv(pool, 48).catch(() => [] as Candle[])));
+}
+
 async function loadMarketOnce(): Promise<{
   candidates: TokenCandidate[];
   regime: MarketRegime;
   scanned: number;
 }> {
-  const [regime, pools] = await Promise.all([
-    fetchRegime(),
-    (async () => {
-      const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
-      return { watch };
-    })(),
-  ]);
-  const { watch } = pools;
-
+  const regimePromise = fetchRegime();
+  const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
   const merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint));
-  let candidates = merged;
-  let yields: YieldQuote[] = [];
-  try {
-    const crossed = await crossCheck(merged);
-    candidates = crossed.candidates;
-    yields = crossed.yields;
-  } catch {
-    candidates = merged;
-  }
-  const stamped = withYields(regime, yields);
+  const candlePools = uniqueBy(
+    merged.filter((candidate) => candidate.poolAddress),
+    (candidate) => candidate.mint,
+  ).map((candidate) => candidate.poolAddress);
+  const [regime, crossed] = await Promise.all([
+    regimePromise,
+    crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
+    warmBookCandles(candlePools),
+  ]);
+  const candidates = crossed.candidates;
+  const stamped = withYields(regime, crossed.yields);
   cache = { at: Date.now(), candidates, regime: stamped };
   return { candidates, regime: stamped, scanned: candidates.length };
 }

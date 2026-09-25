@@ -902,19 +902,30 @@ function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
     const pools = key.split("|");
     let live = true;
     const pull = async () => {
-      for (const poolAddress of pools) {
-        if (!live) return;
-        try {
-          const rows = await fetchOhlcv(poolAddress, 48);
-          if (!live || !rows.length) continue;
-          setBars((cur) => (cur[poolAddress] === rows ? cur : { ...cur, [poolAddress]: rows }));
-        } catch {
-          // The candle queue already backs off. The next pass retries this pool.
+      const rows = await Promise.all(
+        pools.map(async (poolAddress) => {
+          try {
+            const candles = await fetchOhlcv(poolAddress, 48);
+            return [poolAddress, candles] as const;
+          } catch {
+            return [poolAddress, null] as const;
+          }
+        }),
+      );
+      if (!live) return;
+      setBars((cur) => {
+        const next = { ...cur };
+        let changed = false;
+        for (const [poolAddress, candles] of rows) {
+          if (!candles?.length || next[poolAddress] === candles) continue;
+          next[poolAddress] = candles;
+          changed = true;
         }
-      }
+        return changed ? next : cur;
+      });
     };
     void pull();
-    const id = setInterval(() => void pull(), 180_000);
+    const id = setInterval(() => void pull(), 45_000);
     return () => {
       live = false;
       clearInterval(id);
