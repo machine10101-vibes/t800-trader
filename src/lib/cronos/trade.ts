@@ -8,10 +8,11 @@ import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, type Hex } from 
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { cronos } from "viem/chains";
 import { minOut, planCronosArm } from "./arm";
-import { BOT_MIN_CRO, GAS_CRO, USDC, VVS_ROUTER, WCRO } from "./constants";
+import { BOT_MIN_CRO, GAS_CRO, USDC, VVS_ROUTER } from "./constants";
+import { buildVvsCall, planVvsBuy, planVvsSell, type VvsSwap } from "./vvs";
 import { cronosClient, readCronosBalances, readWcroBalance, type CronosSession, type EthereumProvider } from "./wallet";
 
-const routerAbi = [
+const quoteAbi = [
   {
     name: "getAmountsOut",
     type: "function",
@@ -21,42 +22,6 @@ const routerAbi = [
       { name: "path", type: "address[]" },
     ],
     outputs: [{ name: "amounts", type: "uint256[]" }],
-  },
-  {
-    name: "swapExactETHForTokens",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [
-      { name: "amountOutMin", type: "uint256" },
-      { name: "path", type: "address[]" },
-      { name: "to", type: "address" },
-      { name: "deadline", type: "uint256" },
-    ],
-    outputs: [{ name: "amounts", type: "uint256[]" }],
-  },
-  {
-    name: "swapExactTokensForETH",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "amountIn", type: "uint256" },
-      { name: "amountOutMin", type: "uint256" },
-      { name: "path", type: "address[]" },
-      { name: "to", type: "address" },
-      { name: "deadline", type: "uint256" },
-    ],
-    outputs: [{ name: "amounts", type: "uint256[]" }],
-  },
-] as const;
-
-const wcroAbi = [
-  { name: "deposit", type: "function", stateMutability: "payable", inputs: [], outputs: [] },
-  {
-    name: "withdraw",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "wad", type: "uint256" }],
-    outputs: [],
   },
 ] as const;
 
@@ -149,7 +114,7 @@ async function userSend(
 async function quoteOut(amountIn: bigint, path: readonly [`0x${string}`, `0x${string}`]): Promise<bigint> {
   const amounts = await cronosClient().readContract({
     address: VVS_ROUTER,
-    abi: routerAbi,
+    abi: quoteAbi,
     functionName: "getAmountsOut",
     args: [amountIn, [...path]],
   });
@@ -158,9 +123,9 @@ async function quoteOut(amountIn: bigint, path: readonly [`0x${string}`, `0x${st
   return out;
 }
 
-async function ensureUsdcAllowance(account: PrivateKeyAccount, amount: bigint): Promise<void> {
+async function ensureAllowance(account: PrivateKeyAccount, token: `0x${string}`, amount: bigint): Promise<void> {
   const allowance = await cronosClient().readContract({
-    address: USDC,
+    address: token,
     abi: erc20Abi,
     functionName: "allowance",
     args: [account.address, VVS_ROUTER],
@@ -171,50 +136,35 @@ async function ensureUsdcAllowance(account: PrivateKeyAccount, amount: bigint): 
     functionName: "approve",
     args: [VVS_ROUTER, amount],
   });
-  await sendFrom(account, { to: USDC, data });
+  await sendFrom(account, { to: token, data });
 }
 
-async function swapUsdcForCro(account: PrivateKeyAccount, usdcAmount: number): Promise<ChainFill> {
-  const amountIn = units(usdcAmount, 6);
-  await ensureUsdcAllowance(account, amountIn);
-  const quoted = await quoteOut(amountIn, [USDC, WCRO]);
-  const data = encodeFunctionData({
-    abi: routerAbi,
-    functionName: "swapExactTokensForETH",
-    args: [amountIn, minOut(quoted), [USDC, WCRO], account.address, deadline()],
-  });
-  const signature = await sendFrom(account, { to: VVS_ROUTER, data });
-  const outQty = Number(formatUnits(quoted, 18));
-  const price = outQty > 0 ? usdcAmount / outQty : 0;
-  return { signature, qty: outQty, price, tokenDecimals: 18 };
+function inputDecimals(swap: VvsSwap): number {
+  return swap.method === "swapExactETHForTokens" || swap.approve === undefined ? 18 : swap.path[0] === USDC ? 6 : 18;
 }
 
-async function swapCroForUsdc(account: PrivateKeyAccount, croAmount: number, mark: number): Promise<ChainFill> {
-  const amountIn = units(croAmount, 18);
-  const quoted = await quoteOut(amountIn, [WCRO, USDC]);
-  const data = encodeFunctionData({
-    abi: routerAbi,
-    functionName: "swapExactETHForTokens",
-    args: [minOut(quoted), [WCRO, USDC], account.address, deadline()],
+async function sendVvsSwap(account: PrivateKeyAccount, swap: VvsSwap, mark: number): Promise<ChainFill> {
+  const amountIn = units(swap.amountIn, inputDecimals(swap));
+  if (swap.approve) await ensureAllowance(account, swap.approve, amountIn);
+  const quoted = await quoteOut(amountIn, swap.path);
+  const call = buildVvsCall({
+    method: swap.method,
+    amountIn,
+    amountOutMin: minOut(quoted),
+    path: swap.path,
+    recipient: account.address,
+    deadline: deadline(),
   });
-  const signature = await sendFrom(account, { to: VVS_ROUTER, data, value: amountIn });
+  const signature = await sendFrom(account, call);
+  const buyingCro = swap.method === "swapExactTokensForETH";
+  if (buyingCro) {
+    const outQty = Number(formatUnits(quoted, 18));
+    const price = outQty > 0 ? swap.amountIn / outQty : mark;
+    return { signature, qty: outQty, price, tokenDecimals: 18 };
+  }
   const usdcOut = Number(formatUnits(quoted, 6));
-  const price = croAmount > 0 ? usdcOut / croAmount : mark;
-  return { signature, qty: croAmount, price, tokenDecimals: 18 };
-}
-
-async function wrapCro(account: PrivateKeyAccount, croAmount: number): Promise<string> {
-  const data = encodeFunctionData({ abi: wcroAbi, functionName: "deposit" });
-  return sendFrom(account, { to: WCRO, data, value: units(croAmount, 18) });
-}
-
-async function unwrapCro(account: PrivateKeyAccount, croAmount: number): Promise<string> {
-  const data = encodeFunctionData({
-    abi: wcroAbi,
-    functionName: "withdraw",
-    args: [units(croAmount, 18)],
-  });
-  return sendFrom(account, { to: WCRO, data });
+  const price = swap.amountIn > 0 ? usdcOut / swap.amountIn : mark;
+  return { signature, qty: swap.amountIn, price, tokenDecimals: 18 };
 }
 
 async function settleCronos(session: CronosSession, order: ChainOrder): Promise<ChainFill> {
@@ -224,38 +174,18 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   const leverage = order.leverage ?? 1;
   if (order.kind === "open") {
     const collateral = leverage > 1 ? (order.collateralUsd ?? order.notionalUsd / Math.max(leverage, 1)) : order.notionalUsd;
-    if (!(collateral > 0)) throw new Error("Ticket notional is empty");
     const balances = await readCronosBalances(account.address);
-    let fill: ChainFill;
-    if (balances.usdc + 1e-6 >= collateral) {
-      fill = await swapUsdcForCro(account, collateral);
-    } else {
-      const price = balances.solPriceUsd ?? order.price;
-      if (!(price > 0)) throw new Error("USDC does not cover this ticket, and the CRO price is missing.");
-      const croNeed = collateral / price;
-      if (balances.sol - GAS_CRO < croNeed) {
-        throw new Error(
-          `Trading key has ${balances.usdc.toFixed(2)} USDC and ${balances.sol.toFixed(3)} CRO. This ticket needs about $${collateral.toFixed(2)}.`,
-        );
-      }
-      const signature = await wrapCro(account, croNeed);
-      fill = { signature, qty: croNeed, price, tokenDecimals: 18 };
-    }
+    const plan = planVvsBuy(collateral, balances.usdc, balances.sol);
+    const fill = await sendVvsSwap(account, plan, order.price || balances.solPriceUsd || 0);
     return leverage > 1 ? marginFill(fill, leverage, collateral) : fill;
   }
 
-  const wrapped = await readWcroBalance(account.address);
-  if (wrapped > 0) {
-    const qty = sellQty(order.qty, wrapped);
-    if (!(qty > 0)) throw new Error("ALREADY_FLAT: trading key does not hold this token");
-    const signature = await unwrapCro(account, qty);
-    return { signature, qty, price: order.price, tokenDecimals: 18 };
-  }
   const balances = await readCronosBalances(account.address);
-  const held = Math.max(0, balances.sol - GAS_CRO);
-  const qty = sellQty(order.qty, held);
-  if (!(qty > 0)) throw new Error("ALREADY_FLAT: trading key does not hold this token");
-  return swapCroForUsdc(account, qty, order.price || balances.solPriceUsd || 0);
+  const wrapped = await readWcroBalance(account.address);
+  const native = sellQty(order.qty, Math.max(0, balances.sol - GAS_CRO));
+  const wrappedQty = sellQty(order.qty, wrapped);
+  const plan = planVvsSell(native, wrappedQty);
+  return sendVvsSwap(account, plan, order.price || balances.solPriceUsd || 0);
 }
 
 export function cronosExecutor(session: CronosSession): ChainExecutor {

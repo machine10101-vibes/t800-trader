@@ -61,7 +61,7 @@ export function SettingsPanel({
           {local.allowMemes ? " · memes on" : " · memes off"}
           {local.oneTicketPerTick ? " · one ticket per scan" : " · several tickets per scan"}
           {" · "}
-          {venueSummary(local.venues)}
+          {chain === "cronos" ? "VVS Finance" : venueSummary(local.venues)}
           {local.walletSwaps ? " · wallet swaps" : " · simulated fills"}
           {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n}x`).join(" ")}` : " · spot only"}
         </p>
@@ -103,28 +103,42 @@ export function SettingsPanel({
         />
       </Section>
 
-      <Section
-        title="Venue"
-        hint="New tickets only open on pools from the platforms you leave on. An open ticket stays until it exits, even if you turn its venue off."
-      >
-        {VENUE_OPTIONS.map((venue) => (
+      {chain === "cronos" ? (
+        <Section
+          title="Venue"
+          hint="CRO buys and sells are sent to the VVS Finance router. The pool is WCRO/USDC. A buy spends USDC. A sell returns USDC."
+        >
           <Toggle
-            key={venue.id}
-            label={venue.label}
-            hint={venue.hint}
-            checked={local.venues.includes(venue.id)}
-            onChange={(on) => {
-              const venues = on ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
-              set({ venues });
-            }}
+            label="VVS Finance"
+            hint="On for every Cronos swap. The trading key calls the VVS router, not a wrap."
+            checked
+            onChange={() => {}}
           />
-        ))}
-        {local.venues.length === 0 ? (
-          <p className="text-sm text-[var(--crimson)] md:col-span-2">
-            No venue is on. The next scan will not open a ticket.
-          </p>
-        ) : null}
-      </Section>
+        </Section>
+      ) : (
+        <Section
+          title="Venue"
+          hint="New tickets only open on pools from the platforms you leave on. An open ticket stays until it exits, even if you turn its venue off."
+        >
+          {VENUE_OPTIONS.map((venue) => (
+            <Toggle
+              key={venue.id}
+              label={venue.label}
+              hint={venue.hint}
+              checked={local.venues.includes(venue.id)}
+              onChange={(on) => {
+                const venues = on ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
+                set({ venues });
+              }}
+            />
+          ))}
+          {local.venues.length === 0 ? (
+            <p className="text-sm text-[var(--crimson)] md:col-span-2">
+              No venue is on. The next scan will not open a ticket.
+            </p>
+          ) : null}
+        </Section>
+      )}
 
       <Section title="Cadence" hint="How often the bot looks, and how many new tickets a single scan may add.">
         <Field

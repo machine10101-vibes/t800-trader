@@ -12,6 +12,7 @@ describe("venueForDex", () => {
     assert.equal(venueForDex("pumpswap"), "pump");
     assert.equal(venueForDex("pump-fun"), "pump");
     assert.equal(venueForDex("jupiter"), "jupiter");
+    assert.equal(venueForDex("vvs"), "vvs");
     assert.equal(venueForDex("phoenix"), "other");
     assert.equal(venueForDex("manifest"), "other");
   });

@@ -273,7 +273,7 @@ export async function runResearch(
     minVolume24hUsd: config.minVolume24hUsd,
     minAgeHours: config.minAgeHours,
     allowMemes: config.allowMemes,
-    venues: config.venues,
+    venues: chain === "cronos" ? ["vvs"] : config.venues,
   };
 
   const passed: TokenCandidate[] = [];

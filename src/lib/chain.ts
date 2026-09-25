@@ -75,9 +75,9 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     native: "CRO",
     bookLabel: "CRO",
     walletBook: "CRO + USDC",
-    swapHint: "VVS from the trading key",
+    swapHint: "VVS Finance router",
     connectBlurb:
-      "No demo book. No fallback equity. MetaMask or the Crypto.com DeFi wallet must approve this origin and switch to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A $3 wallet is enough to open.",
+      "No demo book. No fallback equity. MetaMask or the Crypto.com DeFi wallet must approve this origin and switch to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A CRO buy spends USDC on the VVS Finance router. A sell sends CRO back to USDC on that same router. A $3 wallet is enough to open.",
     connectFallback: "Connect Cronos wallet",
     installHint: "Install MetaMask or the Crypto.com DeFi wallet, then reload this page.",
     armBlurb:

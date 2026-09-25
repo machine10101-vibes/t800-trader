@@ -41,6 +41,7 @@ export const VENUE_OPTIONS: VenueOption[] = [
 export const DEFAULT_VENUES: string[] = VENUE_OPTIONS.map((v) => v.id);
 
 const KNOWN: { id: string; test: (dex: string) => boolean }[] = [
+  { id: "vvs", test: (dex) => dex === "vvs" || dex.startsWith("vvs-") },
   { id: "raydium", test: (dex) => dex.startsWith("raydium") },
   { id: "orca", test: (dex) => dex === "orca" || dex.includes("whirlpool") },
   { id: "meteora", test: (dex) => dex.startsWith("meteora") },
@@ -54,6 +55,7 @@ export function venueForDex(dex: string): string {
 }
 
 export function venueLabel(id: string): string {
+  if (id === "vvs") return "VVS Finance";
   return VENUE_OPTIONS.find((venue) => venue.id === id)?.label ?? id;
 }
 
