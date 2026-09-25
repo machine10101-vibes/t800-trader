@@ -1,5 +1,5 @@
-import { SOL_MINT } from "@/lib/market/universe";
-import type { ChainOrder, Position } from "@/lib/types";
+import { SOL_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import type { ChainFill, ChainOrder, Position } from "@/lib/types";
 
 /** Jupiter perp multipliers the desk can send. */
 export const MULTIPLIERS = [5, 10] as const;
@@ -31,7 +31,7 @@ export function pickMultiplier(enabled: readonly Multiplier[], confidence: numbe
   return null;
 }
 
-/** Solana is the only name in this book with a Jupiter perp. Zebec stays spot. */
+/** SOL and Zebec both take 5x or 10x. Anything else in the book stays spot. */
 export function multiplierFor(
   multipliers: unknown,
   confidence: number,
@@ -39,8 +39,19 @@ export function multiplierFor(
   symbol: string,
   mint: string,
 ): 1 | Multiplier {
-  if (symbol !== "SOL" && mint !== SOL_MINT) return 1;
+  const levered = symbol === "SOL" || symbol === "ZBCN" || mint === SOL_MINT || mint === ZBCN_MINT;
+  if (!levered) return 1;
   return pickMultiplier(normalizeMultipliers(multipliers), confidence, reason) ?? 1;
+}
+
+/**
+ * A Zebec multiplier buys the collateral as spot, then the book marks the full exposure.
+ * Jupiter perps do not list ZBCN, so this is how that 5x or 10x is held.
+ */
+export function marginFill(fill: ChainFill, leverage: number, collateralUsd: number): ChainFill {
+  const mult = leverage === 10 ? 10 : leverage === 5 ? 5 : 1;
+  if (mult === 1) return fill;
+  return { ...fill, qty: fill.qty * mult, leverage: mult, collateralUsd };
 }
 
 /**

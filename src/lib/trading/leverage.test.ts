@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SOL_MINT, ZBCN_MINT } from "../market/universe";
-import { collateralFor, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
+import { collateralFor, marginFill, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
 
 describe("multipliers", () => {
   it("keeps 5x and 10x and drops anything else", () => {
@@ -18,10 +18,22 @@ describe("multipliers", () => {
     assert.equal(pickMultiplier([], 90, "breakout"), null);
   });
 
-  it("leaves Zebec at spot and levers Solana", () => {
+  it("levers Solana and Zebec, and leaves every other name at spot", () => {
     assert.equal(multiplierFor([5, 10], 80, "breakout", "SOL", SOL_MINT), 10);
-    assert.equal(multiplierFor([5, 10], 60, "reclaim", "ZBCN", ZBCN_MINT), 1);
+    assert.equal(multiplierFor([5, 10], 60, "reclaim", "ZBCN", ZBCN_MINT), 5);
+    assert.equal(multiplierFor([5, 10], 80, "breakout", "ZBCN", ZBCN_MINT), 10);
+    assert.equal(multiplierFor([5, 10], 90, "breakout", "JUP", "jup"), 1);
     assert.equal(multiplierFor([], 90, "breakout", "SOL", SOL_MINT), 1);
+  });
+
+  it("marks a Zebec spot bag at the full 5x or 10x exposure", () => {
+    const five = marginFill({ signature: "sig", qty: 1000, price: 0.002, tokenDecimals: 6 }, 5, 10);
+    assert.equal(five.qty, 5000);
+    assert.equal(five.leverage, 5);
+    assert.equal(five.collateralUsd, 10);
+    const ten = marginFill({ signature: "sig", qty: 1000, price: 0.002, tokenDecimals: 6 }, 10, 12);
+    assert.equal(ten.qty, 10000);
+    assert.equal(ten.leverage, 10);
   });
 
   it("posts at least $10 when the wallet can, and stays spot below that", () => {

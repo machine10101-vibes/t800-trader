@@ -2,6 +2,7 @@ import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { dexesForVenues } from "@/lib/market/venues";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
+import { marginFill } from "@/lib/trading/leverage";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { broadcastTransaction, mintDecimals, readBalances, readMintBalance, type WalletSession } from "./wallet";
@@ -200,9 +201,16 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
 }
 
 export function executorFor(session: WalletSession): ChainExecutor {
-  return (order) => {
-    if ((order.leverage ?? 1) > 1) {
-      return import("./perps").then((mod) => mod.settlePerp(session, order));
+  return async (order) => {
+    const leverage = order.leverage ?? 1;
+    if (leverage > 1 && (order.symbol === "SOL" || order.mint === SOL_MINT)) {
+      const { settlePerp } = await import("./perps");
+      return settlePerp(session, order);
+    }
+    if (leverage > 1 && order.kind === "open") {
+      const collateral = order.collateralUsd ?? order.notionalUsd / leverage;
+      const spot = await settleSpot(session, { ...order, notionalUsd: collateral, leverage: undefined, collateralUsd: undefined });
+      return marginFill(spot, leverage, collateral);
     }
     return settleSpot(session, order);
   };

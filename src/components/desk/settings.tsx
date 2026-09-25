@@ -77,11 +77,11 @@ export function SettingsPanel({
 
       <Section
         title="Multiplier"
-        hint="Solana can open a Jupiter perpetual at 5x or 10x. A new perp needs at least $10 of SOL or USDC as collateral. Below that, the same signal stays a spot buy. A stronger signal uses 10x when both are on. Zebec has no on-chain perp, so it stays a spot swap. Shorts stay off-chain."
+        hint="SOL and Zebec can open at 5x or 10x once the trading key has $10. SOL is a Jupiter perpetual. Zebec posts that collateral as a spot bag and the ticket is marked at the multiplier, because Jupiter has no ZBCN perp. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. Shorts stay off-chain."
       >
         <Toggle
-          label="5x Solana"
-          hint="Posts collateral and takes five times that exposure on the SOL perp."
+          label="5x"
+          hint="Posts at least $10 and takes five times that exposure on SOL or Zebec."
           checked={local.multipliers.includes(5)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
@@ -89,8 +89,8 @@ export function SettingsPanel({
           }}
         />
         <Toggle
-          label="10x Solana"
-          hint="Used when the signal is a breakout or confidence is 72 or higher. Ten times the collateral, so a smaller adverse move liquidates it."
+          label="10x"
+          hint="Used for SOL or Zebec when the signal is a breakout or confidence is 72 or higher. Ten times the collateral, so a smaller adverse move liquidates it."
           checked={local.multipliers.includes(10)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);

@@ -262,8 +262,9 @@ export interface BotConfig {
   /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
   walletSwaps: boolean;
   /**
-   * Jupiter perp multipliers for SOL. 10x is used when the signal is strong.
-   * An empty list keeps every ticket a spot swap. Zebec has no perp.
+   * 5x and 10x for SOL and Zebec. 10x is used when the signal is strong.
+   * SOL is a Jupiter perp. Zebec posts the collateral as spot and the book marks the multiplier.
+   * An empty list keeps every ticket a spot swap.
    */
   multipliers: number[];
   /**
@@ -283,7 +284,7 @@ export interface ChainOrder {
   price: number;
   tokenDecimals?: number;
   venues?: string[];
-  /** 5 or 10 sends a Jupiter SOL perp. Missing keeps the ticket a spot swap. */
+  /** 5 or 10. SOL is a Jupiter perp. Zebec is a spot bag marked at this multiplier. */
   leverage?: number;
   collateralUsd?: number;
   positionPubkey?: string;

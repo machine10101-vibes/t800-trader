@@ -105,7 +105,7 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     c.mint === SOL_MINT
       ? "A confirmed long is a Jupiter perp at 5x, or 10x when the signal is strong, once the key has $10. Below that it is a spot bid."
       : c.mint === ZBCN_MINT
-        ? "A confirmed long is a spot bid. Zebec has no on-chain perp on this desk."
+        ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. Jupiter lists no ZBCN perp, so that collateral is a Zebec spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
         : "A confirmed long is a spot bid.";
   const coreThesis = `${tapeRead(c.symbol, c.flows.m5.priceChangePct, c.flows.m15.priceChangePct, c.flows.h1.priceChangePct)} ${techLine(c)} ${path} Reserves ${usd(c.liquidityUsd)}, 24h volume ${usd(c.volume24hUsd)}.`;
 
