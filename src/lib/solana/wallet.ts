@@ -21,6 +21,7 @@ export interface WalletSession {
 export interface InjectedProvider {
   isPhantom?: boolean;
   isSolflare?: boolean;
+  isConnected?: boolean;
   publicKey?: { toBase58(): string } | null;
   connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toBase58(): string } }>;
   disconnect?: () => Promise<void>;
@@ -31,14 +32,110 @@ export interface InjectedProvider {
   signTransaction?: (tx: unknown) => Promise<{ serialize(): Uint8Array }>;
 }
 
-function injected(): InjectedProvider | null {
-  if (typeof window === "undefined") return null;
+/** Phantom mobile has no extension. This opens the current page in its in-app browser. */
+export function phantomBrowseUrl(pageUrl: string): string {
+  const url = new URL(pageUrl);
+  return `https://phantom.app/ul/browse/${encodeURIComponent(url.toString())}?ref=${encodeURIComponent(url.origin)}`;
+}
+
+export function isPhoneEnvironment(input: { userAgent: string; maxTouchPoints?: number }): boolean {
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(input.userAgent)) return true;
+  return /Macintosh/i.test(input.userAgent) && (input.maxTouchPoints ?? 0) > 1;
+}
+
+export class OpenPhantomApp extends Error {
+  readonly browseUrl: string;
+  constructor(browseUrl: string) {
+    super("Open this page in the Phantom app, then tap Connect.");
+    this.name = "OpenPhantomApp";
+    this.browseUrl = browseUrl;
+  }
+}
+
+export interface WalletConnectEnv {
+  mobile: boolean;
+  phantom?: InjectedProvider | null;
+  solflare?: InjectedProvider | null;
+  solana?: InjectedProvider | null;
+  pageUrl: string;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function providerAddress(provider: InjectedProvider): string | null {
+  try {
+    const address = provider.publicKey?.toBase58();
+    return address || null;
+  } catch {
+    return null;
+  }
+}
+
+export function pickInjectedProvider(env: WalletConnectEnv): InjectedProvider | null {
+  if (env.phantom?.connect) return env.phantom;
+  if (env.solflare?.connect) return env.solflare;
+  if (env.solana?.connect) return env.solana;
+  return null;
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+  return "";
+}
+
+function errorCode(error: unknown): number {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = Number((error as { code?: unknown }).code);
+    return Number.isFinite(code) ? code : NaN;
+  }
+  return NaN;
+}
+
+export function isUnexpectedWalletError(error: unknown): boolean {
+  return /unexpected error/i.test(errorText(error)) || errorCode(error) === -32603;
+}
+
+/** A page-load connect() on Phantom's in-app browser rejects with "Unexpected error" and blocks the tap. */
+export function shouldPromptOnLoad(input: { mobile: boolean; hasPublicKey: boolean }): boolean {
+  return !input.mobile && !input.hasPublicKey;
+}
+
+export function walletConnectFailure(error: unknown, input: { mobile: boolean; insidePhantom: boolean }): string {
+  const message = errorText(error);
+  const code = errorCode(error);
+  const rejected = code === 4001 || /user rejected|user denied|rejected the request/i.test(message);
+  if (rejected && !/unexpected/i.test(message)) {
+    return "The wallet closed the connect request. Tap Connect and approve it.";
+  }
+  if (isUnexpectedWalletError(error)) {
+    if (input.mobile && !input.insidePhantom) return "Open this page in the Phantom app, then tap Connect.";
+    return "Phantom could not open the connect sheet. Close any other wallet prompt, then tap Connect again.";
+  }
+  return message || "Wallet connect failed";
+}
+
+function browserEnv(): WalletConnectEnv {
   const w = window as Window & {
     phantom?: { solana?: InjectedProvider };
     solflare?: InjectedProvider;
     solana?: InjectedProvider;
   };
-  return w.phantom?.solana || w.solflare || w.solana || null;
+  return {
+    mobile: isPhoneEnvironment({
+      userAgent: navigator.userAgent || "",
+      maxTouchPoints: navigator.maxTouchPoints,
+    }),
+    phantom: w.phantom?.solana ?? null,
+    solflare: w.solflare ?? null,
+    solana: w.solana ?? null,
+    pageUrl: window.location.href,
+  };
+}
+
+function injected(): InjectedProvider | null {
+  if (typeof window === "undefined") return null;
+  return pickInjectedProvider(browserEnv());
 }
 
 export function walletInstalled(): boolean {
@@ -245,16 +342,101 @@ export async function readMintBalance(owner: string, mint: string): Promise<numb
   return combineMintReads(amounts);
 }
 
-export async function connectWallet(onlyIfTrusted = false): Promise<WalletSession> {
-  const provider = injected();
+const CONNECT_RETRY_MS = 350;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolves the wallet address without reading balances.
+ * An explicit tap calls connect() with no options. Passing `{ onlyIfTrusted: false }`
+ * is what Phantom's in-app browser rejects as "Unexpected error."
+ */
+export async function requestWalletAddress(
+  onlyIfTrusted: boolean,
+  env: WalletConnectEnv,
+): Promise<{ address: string; provider: InjectedProvider }> {
+  const provider = pickInjectedProvider(env);
+  const sleep = env.sleep ?? delay;
   if (!provider?.connect) {
+    if (!onlyIfTrusted && env.mobile) throw new OpenPhantomApp(phantomBrowseUrl(env.pageUrl));
     throw new Error("No Solana wallet found. Install Phantom or Solflare, then reload.");
   }
-  const res = await provider.connect({ onlyIfTrusted });
-  const address = res.publicKey?.toBase58() || provider.publicKey?.toBase58();
-  if (!address) throw new Error("Wallet connected but did not return a public key.");
-  const balances = await readBalances(address);
-  return { ...balances, provider };
+
+  const existing = providerAddress(provider);
+  if (existing && (onlyIfTrusted || provider.isConnected !== false)) {
+    return { address: existing, provider };
+  }
+
+  if (onlyIfTrusted) {
+    if (!shouldPromptOnLoad({ mobile: env.mobile, hasPublicKey: Boolean(existing) })) {
+      throw new Error("Wallet is not connected.");
+    }
+    const res = await provider.connect({ onlyIfTrusted: true });
+    const address = res?.publicKey?.toBase58() || providerAddress(provider);
+    if (!address) throw new Error("Wallet is not connected.");
+    return { address, provider };
+  }
+
+  const insidePhantom = Boolean(provider.isPhantom);
+  const prompt = async () => {
+    const res = await provider.connect();
+    return res?.publicKey?.toBase58() || providerAddress(provider);
+  };
+
+  try {
+    const address = await prompt();
+    if (!address) throw new Error("Wallet connected but did not return a public key.");
+    return { address, provider };
+  } catch (error) {
+    if (!isUnexpectedWalletError(error)) {
+      throw new Error(walletConnectFailure(error, { mobile: env.mobile, insidePhantom }));
+    }
+    await sleep(CONNECT_RETRY_MS);
+    try {
+      const address = await prompt();
+      if (!address) throw new Error("Wallet connected but did not return a public key.");
+      return { address, provider };
+    } catch (retryError) {
+      if (env.mobile && !insidePhantom && !provider.isSolflare) {
+        throw new OpenPhantomApp(phantomBrowseUrl(env.pageUrl));
+      }
+      throw new Error(walletConnectFailure(retryError, { mobile: env.mobile, insidePhantom }));
+    }
+  }
+}
+
+let connectInflight: Promise<WalletSession> | null = null;
+
+export async function connectWallet(onlyIfTrusted = false): Promise<WalletSession> {
+  const previous = connectInflight;
+  if (onlyIfTrusted && previous) return previous;
+  const run = async () => {
+    if (!onlyIfTrusted && previous) {
+      try {
+        await previous;
+      } catch {
+        // The page-load attempt missed. The tap still gets its own prompt.
+      }
+    }
+    const { address, provider } = await requestWalletAddress(onlyIfTrusted, browserEnv());
+    try {
+      const balances = await readBalances(address);
+      return { ...balances, provider };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not read the wallet balance.";
+      if (/still armed|access forbidden|\b403\b/i.test(message)) {
+        throw new Error("Phantom connected, but Solana refused the balance read from this browser. Tap Connect again in a moment.");
+      }
+      throw new Error(`The wallet connected, but the balance read failed. ${message}`);
+    }
+  };
+  const pending = run().finally(() => {
+    if (connectInflight === pending) connectInflight = null;
+  });
+  connectInflight = pending;
+  return pending;
 }
 
 export async function refreshWallet(session: WalletSession): Promise<WalletSession> {
