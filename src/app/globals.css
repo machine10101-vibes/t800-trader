@@ -3,6 +3,9 @@
 :root {
   --bg: #050508;
   --bg-2: #09090f;
+  --header: rgba(5, 5, 8, 0.92);
+  --chip: rgba(255, 255, 255, 0.02);
+  --nav-hover: rgba(255, 255, 255, 0.03);
   --panel: #0c0c14;
   --line: rgba(255, 74, 216, 0.14);
   --line-2: rgba(255, 74, 216, 0.36);
@@ -14,6 +17,23 @@
   --mint: #3ee8a8;
   --ice: #79d4ff;
   --magenta: #ff4ad8;
+  --accent-soft: rgba(255, 74, 216, 0.16);
+  --accent-wash: rgba(255, 74, 216, 0.05);
+  --accent-chip: rgba(255, 74, 216, 0.12);
+  --accent-ink: #140015;
+  --danger-soft: rgba(255, 59, 143, 0.14);
+  --danger-line: rgba(255, 59, 143, 0.3);
+  --danger-fill: rgba(255, 59, 143, 0.08);
+  --danger-border: rgba(255, 59, 74, 0.45);
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-label: #b8b0c8;
+  --field: rgba(0, 0, 0, 0.3);
+  --pill-mint-border: rgba(62, 232, 168, 0.28);
+  --pill-mint-bg: rgba(62, 232, 168, 0.06);
+  --pill-crimson-border: rgba(255, 59, 74, 0.28);
+  --pill-crimson-bg: rgba(255, 59, 74, 0.06);
+  --pill-magenta-border: rgba(255, 74, 216, 0.4);
+  --pill-magenta-bg: rgba(255, 74, 216, 0.08);
   --radius: 18px;
 }
 
@@ -354,6 +374,132 @@ input[type="range"] {
   .toast {
     min-width: 0;
   }
+}
+
+/* Cronos desk only. Solana keeps the magenta theme on :root. */
+.theme-cronos {
+  --bg: #f4f8fd;
+  --bg-2: #ffffff;
+  --header: rgba(255, 255, 255, 0.94);
+  --chip: #ffffff;
+  --nav-hover: rgba(0, 82, 255, 0.06);
+  --panel: #ffffff;
+  --line: rgba(0, 82, 255, 0.16);
+  --line-2: rgba(0, 82, 255, 0.4);
+  --text: #071833;
+  --muted: #3e5678;
+  --faint: #6d84a3;
+  --crimson: #d31245;
+  --amber: #a16207;
+  --mint: #0b7a52;
+  --ice: #1d6fe8;
+  --magenta: #0052ff;
+  --accent-soft: rgba(0, 82, 255, 0.12);
+  --accent-wash: rgba(0, 82, 255, 0.06);
+  --accent-chip: rgba(0, 82, 255, 0.12);
+  --accent-ink: #ffffff;
+  --danger-soft: rgba(211, 18, 69, 0.1);
+  --danger-line: rgba(211, 18, 69, 0.32);
+  --danger-fill: rgba(211, 18, 69, 0.08);
+  --danger-border: rgba(211, 18, 69, 0.42);
+  --chart-grid: rgba(7, 24, 51, 0.08);
+  --chart-label: #3e5678;
+  --field: #ffffff;
+  --pill-mint-border: rgba(11, 122, 82, 0.28);
+  --pill-mint-bg: rgba(11, 122, 82, 0.08);
+  --pill-crimson-border: rgba(211, 18, 69, 0.28);
+  --pill-crimson-bg: rgba(211, 18, 69, 0.08);
+  --pill-magenta-border: rgba(0, 82, 255, 0.35);
+  --pill-magenta-bg: rgba(0, 82, 255, 0.08);
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: light;
+  min-height: 100dvh;
+}
+
+html[data-desk="cronos"] body {
+  background-color: #f4f8fd;
+  color: #071833;
+  background-image:
+    radial-gradient(980px 460px at 86% -12%, rgba(0, 82, 255, 0.16), transparent 54%),
+    radial-gradient(760px 420px at -8% 108%, rgba(0, 82, 255, 0.08), transparent 50%),
+    linear-gradient(rgba(0, 82, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 82, 255, 0.045) 1px, transparent 1px);
+}
+
+html[data-desk="cronos"] ::selection {
+  background: rgba(0, 82, 255, 0.22);
+}
+
+html[data-desk="cronos"] :focus-visible {
+  outline-color: rgba(0, 82, 255, 0.55);
+}
+
+html[data-desk="cronos"] .desk-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 82, 255, 0.28);
+}
+
+.theme-cronos .glass,
+.theme-cronos .neon {
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  border-color: var(--line);
+  box-shadow:
+    0 12px 32px rgba(7, 24, 51, 0.06),
+    inset 0 1px 0 #ffffff;
+}
+
+.theme-cronos .neon {
+  border-color: var(--line-2);
+  box-shadow:
+    0 0 0 1px rgba(0, 82, 255, 0.04),
+    0 14px 34px rgba(7, 24, 51, 0.07),
+    inset 0 1px 0 #ffffff;
+}
+
+.theme-cronos .btn-magenta {
+  background: linear-gradient(180deg, #3d84ff, #0052ff);
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 82, 255, 0.24);
+}
+
+.theme-cronos .btn-ink {
+  background: #071833;
+  color: #ffffff;
+}
+
+.theme-cronos .btn-ghost {
+  background: #ffffff;
+  color: var(--text);
+}
+
+.theme-cronos .orb {
+  background:
+    radial-gradient(circle at 30% 25%, #ffffff, transparent 46%),
+    linear-gradient(160deg, #3d84ff, #003ec4);
+  box-shadow:
+    0 0 0 1px rgba(0, 82, 255, 0.2),
+    0 18px 40px rgba(0, 82, 255, 0.22);
+}
+
+.theme-cronos .skel {
+  background: linear-gradient(90deg, rgba(0, 82, 255, 0.04), rgba(0, 82, 255, 0.12), rgba(0, 82, 255, 0.04));
+  background-size: 220% 100%;
+}
+
+.theme-cronos .nav-item[data-active="true"] {
+  background: rgba(0, 82, 255, 0.1);
+  box-shadow: inset 3px 0 0 #0052ff;
+}
+
+.theme-cronos .toast {
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgba(7, 24, 51, 0.12);
+}
+
+.theme-cronos .bg-black\/20,
+.theme-cronos .bg-black\/30 {
+  background-color: #ffffff;
 }
 
 @media (prefers-reduced-motion: reduce) {

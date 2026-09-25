@@ -61,16 +61,16 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
           x2={w - pad}
           y1={pad + (h - pad * 2) * p}
           y2={pad + (h - pad * 2) * p}
-          stroke="rgba(255,255,255,0.05)"
+          stroke="var(--chart-grid)"
         />
       ))}
       <path d={linePath(vwap, xOf, y)} fill="none" stroke="rgba(243,193,91,0.55)" strokeWidth="1.2" strokeDasharray="3 3" />
       <path d={linePath(ema21, xOf, y)} fill="none" stroke="rgba(121,212,255,0.7)" strokeWidth="1.3" />
-      <path d={linePath(ema9, xOf, y)} fill="none" stroke="rgba(255,74,216,0.85)" strokeWidth="1.4" />
+      <path d={linePath(ema9, xOf, y)} fill="none" stroke="var(--magenta)" strokeWidth="1.4" />
       {slice.map((c, i) => {
         const x = xOf(i);
         const green = c.close >= c.open;
-        const color = green ? "#3ee8a8" : "#ff3b8f";
+        const color = green ? "var(--mint)" : "var(--crimson)";
         return (
           <g key={`${c.time}-${i}`}>
             <line x1={x} x2={x} y1={y(c.high)} y2={y(c.low)} stroke={color} strokeWidth="1.2" />
@@ -89,7 +89,7 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
           </g>
         );
       })}
-      <text x={w - pad} y={14} textAnchor="end" fill={up ? "#3ee8a8" : "#ff3b8f"} fontSize="10" className="num">
+      <text x={w - pad} y={14} textAnchor="end" fill={up ? "var(--mint)" : "var(--crimson)"} fontSize="10" className="num">
         {last.close}
       </text>
     </svg>
@@ -111,16 +111,16 @@ export function ScatterTape({ dots }: { dots: TapeDot[] }) {
   const r = (liq: number) => Math.min(16, 3 + Math.sqrt(Math.max(liq, 0)) / 180);
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
-      <line x1={28} x2={w - 28} y1={h / 2} y2={h / 2} stroke="rgba(255,255,255,0.05)" />
-      <line x1={w / 2} x2={w / 2} y1={16} y2={h - 16} stroke="rgba(255,255,255,0.05)" />
+      <line x1={28} x2={w - 28} y1={h / 2} y2={h / 2} stroke="var(--chart-grid)" />
+      <line x1={w / 2} x2={w / 2} y1={16} y2={h - 16} stroke="var(--chart-grid)" />
       {dots.map((d) => {
         const up = d.change24h >= 0;
-        const color = up ? "#3ee8a8" : "#ff3b8f";
+        const color = up ? "var(--mint)" : "var(--crimson)";
         return (
           <g key={d.mint}>
             <circle cx={sx(d.score)} cy={sy(d.change24h)} r={r(d.liquidityUsd) + 7} fill={color} opacity="0.1" />
             <circle cx={sx(d.score)} cy={sy(d.change24h)} r={r(d.liquidityUsd)} fill={color} opacity="0.88" />
-            <text x={sx(d.score) + 9} y={sy(d.change24h) - 8} className="num" fill="#b8b0c8" fontSize="10">
+            <text x={sx(d.score) + 9} y={sy(d.change24h) - 8} className="num" fill="var(--chart-label)" fontSize="10">
               {d.symbol}
             </text>
             <title>
@@ -149,7 +149,7 @@ export function EquityPath({ values }: { values: number[] }) {
   const line = pts.map((p) => p.join(",")).join(" ");
   const area = `6,${h - 4} ${line} ${w - 6},${h - 4}`;
   const up = series[series.length - 1] >= series[0];
-  const stroke = up ? "#3ee8a8" : "#ff3b8f";
+  const stroke = up ? "var(--mint)" : "var(--crimson)";
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
       <defs>
@@ -185,7 +185,7 @@ export function VolumeBars({ candles }: { candles: Candle[] }) {
             width={bw}
             height={Math.max(1, bh)}
             rx="1.5"
-            fill={up ? "#ff4ad8" : "#3ee8a8"}
+            fill={up ? "var(--magenta)" : "var(--mint)"}
             opacity="0.88"
           />
         );

@@ -51,6 +51,9 @@ export function DeskApp() {
   const markRunning = useCallback((chain: ChainId, next: boolean) => {
     setRunning((cur) => (cur[chain] === next ? cur : { ...cur, [chain]: next }));
   }, []);
+  useEffect(() => {
+    document.documentElement.dataset.desk = view;
+  }, [view]);
   return (
     <>
       <div hidden={view !== "solana"}>
@@ -62,7 +65,7 @@ export function DeskApp() {
           onSwitch={setView}
         />
       </div>
-      <div hidden={view !== "cronos"}>
+      <div hidden={view !== "cronos"} className="theme-cronos">
         <ChainDesk
           chain="cronos"
           active={view === "cronos"}
@@ -577,7 +580,7 @@ function ChainDesk({
       <div className="min-h-dvh overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
         <div className="neon boot-fade w-full max-w-xl p-5 sm:p-10">
-          <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
+          <div className="orb mb-6 grid place-items-center text-lg font-semibold text-[var(--accent-ink)]">T8</div>
           <div className="mb-5 flex justify-end">
             <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
           </div>
@@ -628,7 +631,7 @@ function ChainDesk({
                 onChange={(event) => setWatchDraft(event.target.value)}
                 placeholder="Wallet address"
                 spellCheck={false}
-                className="num w-full rounded-xl border border-[var(--line)] bg-black/30 px-3 py-3 text-sm outline-none"
+                className="num w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-3 text-sm outline-none"
               />
               <button type="submit" className="btn btn-ink shrink-0">
                 Watch
@@ -701,7 +704,7 @@ function ChainDesk({
                 setThesis(null);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              className="nav-item mb-1 flex w-auto items-center justify-between whitespace-nowrap px-3 py-2.5 text-left hover:bg-[rgba(255,255,255,0.03)] lg:w-full lg:py-3"
+              className="nav-item mb-1 flex w-auto items-center justify-between whitespace-nowrap px-3 py-2.5 text-left hover:bg-[var(--nav-hover)] lg:w-full lg:py-3"
             >
               <span>
                 <span className="mr-2 hidden text-[11px] text-[var(--faint)] lg:inline">{item.kicker}</span>
@@ -715,7 +718,7 @@ function ChainDesk({
             disabled={busy || !desk}
             onClick={() => void control(desk?.bot.running ? "stop" : "start")}
             className={`btn mt-3 w-full ${
-              desk?.bot.running ? "bg-[rgba(255,59,143,0.14)] text-[var(--crimson)]" : "btn-magenta"
+              desk?.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"
             }`}
           >
             {desk?.bot.running ? "Disarm bot" : "Arm bot"}
@@ -746,7 +749,7 @@ function ChainDesk({
 
         <main className="min-w-0 space-y-5 pt-1">
           {error ? (
-            <div className="rounded-[18px] border border-[rgba(255,59,143,0.3)] bg-[rgba(255,59,143,0.08)] px-4 py-3 text-sm text-[var(--crimson)]">
+            <div className="rounded-[18px] border border-[var(--danger-line)] bg-[var(--danger-fill)] px-4 py-3 text-sm text-[var(--crimson)]">
               {error}
             </div>
           ) : null}
@@ -838,7 +841,7 @@ function ChainDesk({
 
 function GateChip({ label, hint }: { label: string; hint: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] px-3 py-3">
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--chip)] px-3 py-3">
       <div className="text-xs font-medium text-[var(--text)]">{label}</div>
       <div className="mt-1 text-[11px] text-[var(--faint)]">{hint}</div>
     </div>
@@ -861,7 +864,7 @@ function ChainSwitch({
       type="button"
       onClick={() => onSwitch(id)}
       className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.12em] sm:min-h-0 sm:py-1 sm:tracking-[0.16em] ${
-        chain === id ? "bg-[rgba(255,74,216,0.16)] text-[var(--magenta)]" : "text-[var(--faint)]"
+        chain === id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)]"
       }`}
     >
       {armed ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mint)]" /> : null}
@@ -912,11 +915,11 @@ function Header({
   const armed = Boolean(desk?.bot.running);
   const equity = usd(trading ? trading.equityUsd : wallet.equityUsd);
   return (
-    <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.92)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent-chip)] text-sm font-semibold text-[var(--magenta)]">
               T8
             </div>
             <div className="min-w-0">
@@ -1184,7 +1187,7 @@ function Overview({
                   key={r.id}
                   onClick={() => onFocus(r.candidate.mint)}
                   className={`rounded-full px-2.5 py-1 text-[11px] ${
-                    focus?.id === r.id ? "bg-[rgba(255,74,216,0.16)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                    focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
                   }`}
                 >
                   {r.ticker}
@@ -1195,7 +1198,7 @@ function Overview({
           <button
             disabled={busy}
             onClick={onArm}
-            className={`btn mt-5 w-full ${desk.bot.running ? "bg-[rgba(255,59,143,0.14)] text-[var(--crimson)]" : "btn-magenta"}`}
+            className={`btn mt-5 w-full ${desk.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"}`}
           >
             {armButton(desk.bot.running).label}
           </button>
@@ -1363,7 +1366,7 @@ function Overview({
               <button
                 key={r.id}
                 onClick={() => onOpen(r)}
-                className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
+                className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2 text-left hover:bg-[var(--accent-wash)]"
               >
                 <span className="min-w-0">
                   {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
@@ -1446,7 +1449,7 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
                 <tr
                   key={r.id}
                   onClick={() => onOpen(r)}
-                  className="cursor-pointer border-t border-[var(--line)] hover:bg-[rgba(255,74,216,0.04)]"
+                  className="cursor-pointer border-t border-[var(--line)] hover:bg-[var(--accent-wash)]"
                 >
                   <td className="px-4 py-3 font-medium">{r.asset}</td>
                   <td className="num">
@@ -1580,7 +1583,7 @@ function BotView({
               type="button"
               disabled={cancelling}
               onClick={onCancelResting}
-              className="rounded-lg border border-[rgba(255,59,74,0.4)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
+              className="rounded-lg border border-[var(--danger-border)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
             >
               {cancelling ? "Cancelling…" : "Cancel bid"}
             </button>
@@ -1714,7 +1717,7 @@ function BotView({
                 <button
                   key={r.id}
                   onClick={() => onOpen(r)}
-                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl px-2 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl px-2 py-2 text-left hover:bg-[var(--accent-wash)]"
                 >
                   <span className="min-w-0">
                     {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
@@ -2033,7 +2036,7 @@ function PositionActions({
           type="button"
           disabled={closing}
           onClick={onClose}
-          className="rounded-lg border border-[rgba(255,59,74,0.45)] bg-[rgba(255,59,74,0.08)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
+          className="rounded-lg border border-[var(--danger-border)] bg-[var(--danger-fill)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
         >
           {closing ? "Closing…" : "Close"}
         </button>
@@ -2061,7 +2064,7 @@ function PositionDrawer({
   return (
     <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onDismiss}>
       <aside
-        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-2)] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -2099,7 +2102,7 @@ function PositionDrawer({
           type="button"
           disabled={closing}
           onClick={onExit}
-          className="btn mt-6 w-full bg-[rgba(255,59,74,0.14)] text-[var(--crimson)] disabled:opacity-60"
+          className="btn mt-6 w-full bg-[var(--danger-soft)] text-[var(--crimson)] disabled:opacity-60"
         >
           {closing ? "Closing…" : "Close position"}
         </button>
@@ -2112,7 +2115,7 @@ function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: ()
   return (
     <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onClose}>
       <aside
-        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-2)] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">

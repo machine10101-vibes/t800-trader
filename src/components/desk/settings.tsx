@@ -514,7 +514,7 @@ function Toggle({
         <span className="mt-1 block text-xs leading-5 text-[var(--faint)]">{hint}</span>
       </span>
       <span
-        className={`num mt-0.5 shrink-0 rounded-full px-2 py-1 text-[11px] ${checked ? "bg-[var(--magenta)] text-black" : "border border-[var(--line)] text-[var(--muted)]"}`}
+        className={`num mt-0.5 shrink-0 rounded-full px-2 py-1 text-[11px] ${checked ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
       >
         {checked ? "On" : "Off"}
       </span>

@@ -15,11 +15,11 @@ export function Pill({
 }) {
   const map = {
     default: "border-[var(--line)] text-[var(--muted)]",
-    mint: "border-[rgba(62,232,168,0.28)] text-[var(--mint)] bg-[rgba(62,232,168,0.06)]",
-    crimson: "border-[rgba(255,59,74,0.28)] text-[var(--crimson)] bg-[rgba(255,59,74,0.06)]",
+    mint: "border-[var(--pill-mint-border)] text-[var(--mint)] bg-[var(--pill-mint-bg)]",
+    crimson: "border-[var(--pill-crimson-border)] text-[var(--crimson)] bg-[var(--pill-crimson-bg)]",
     amber: "border-[rgba(243,193,91,0.28)] text-[var(--amber)] bg-[rgba(243,193,91,0.08)]",
     ice: "border-[rgba(121,212,255,0.28)] text-[var(--ice)] bg-[rgba(121,212,255,0.06)]",
-    magenta: "border-[rgba(255,74,216,0.4)] text-[var(--magenta)] bg-[rgba(255,74,216,0.08)]",
+    magenta: "border-[var(--pill-magenta-border)] text-[var(--magenta)] bg-[var(--pill-magenta-bg)]",
   };
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tracking-wide ${map[tone]}`}>
@@ -58,7 +58,7 @@ export function ScoreRing({ score }: { score: number }) {
   return (
     <div className="relative h-16 w-16">
       <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
-        <circle cx="32" cy="32" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="6" />
+        <circle cx="32" cy="32" r={r} fill="none" stroke="var(--chart-grid)" strokeWidth="6" />
         <circle
           cx="32"
           cy="32"
@@ -89,7 +89,7 @@ export function Spark({ values, up }: { values: number[]; up?: boolean }) {
       return `${x},${y}`;
     })
     .join(" ");
-  const color = up === false || (up === undefined && values[values.length - 1] < values[0]) ? "#ff3b8f" : "#3ee8a8";
+  const color = up === false || (up === undefined && values[values.length - 1] < values[0]) ? "var(--crimson)" : "var(--mint)";
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-9 w-28">
       <polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" points={pts} />

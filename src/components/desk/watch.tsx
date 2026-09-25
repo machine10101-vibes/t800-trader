@@ -69,9 +69,9 @@ export function WatchScreen({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.92)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1100px] flex-wrap items-center gap-3 px-3 py-3 sm:px-4">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent-chip)] text-sm font-semibold text-[var(--magenta)]">
             T8
           </div>
           <div className="min-w-0">
