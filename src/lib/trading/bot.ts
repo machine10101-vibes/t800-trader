@@ -27,6 +27,7 @@ import {
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, collateralFor, multiplierFor, orderForPosition } from "./leverage";
+import { LIMIT_MIN_USD, shouldReplace, type MakerDesk } from "./quote";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
 function huntRank(token: ScoredCandidate): number {
@@ -66,7 +67,11 @@ async function walletExit(
   }
 }
 
-export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | null): Promise<AppState> {
+export async function tickBot(
+  executor?: ChainExecutor,
+  budget?: WalletBudget | null,
+  maker?: MakerDesk | null,
+): Promise<AppState> {
   return mutateState(async (state) => {
     try {
       const market = await loadMarket();
@@ -130,6 +135,44 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
 
       const signals: Signal[] = [];
       let opened = 0;
+      let quoteNote = "";
+      let quoteOwned = false;
+      if (maker && next.config.walletSwaps && next.bot.resting) {
+        const resting = next.bot.resting;
+        try {
+          const looked = await maker.lookup(resting);
+          if (looked !== "open" && looked !== "gone") {
+            next = openPosition(
+              next,
+              {
+                id: resting.orderKey,
+                mint: resting.mint,
+                symbol: resting.symbol,
+                poolAddress: resting.poolAddress,
+                sector: resting.sector,
+                side: "long",
+                reason: resting.reason,
+                confidence: resting.confidence,
+                price: looked.price,
+                stopPct: resting.stopPct,
+                targetPct: resting.targetPct,
+                thesis: resting.thesis,
+                researchScore: resting.researchScore,
+                createdAt: resting.placedAt,
+              },
+              looked.qty,
+              market.regime.stance,
+              looked,
+            );
+            next = { ...next, bot: { ...next.bot, resting: undefined } };
+            opened += 1;
+          } else if (looked === "gone") {
+            next = { ...next, bot: { ...next.bot, resting: undefined } };
+          }
+        } catch (error) {
+          blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
+        }
+      }
       const risk = walletRiskBook(next.portfolio, next.positions, next.trades, budget, next.config.walletSwaps);
       if (next.bot.running && !dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config);
@@ -234,6 +277,64 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
               `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} collateral, so this ticket stays a spot buy`,
             );
           }
+          const resting = next.bot.resting;
+          const quoteNotional = Math.max(collateralUsd, resting && resting.mint === learned.mint ? resting.notionalUsd : 0);
+          if (
+            maker &&
+            next.config.walletSwaps &&
+            leverage === 1 &&
+            learned.side === "long" &&
+            quoteNotional >= LIMIT_MIN_USD &&
+            !pauseOpens &&
+            !bookTooSmall
+          ) {
+            quoteOwned = true;
+            if (resting && resting.mint === learned.mint && !shouldReplace(resting.limitPrice, learned.price)) {
+              quoteNote = ` · ${learned.symbol} limit bid resting`;
+              continue;
+            }
+            try {
+              if (resting) {
+                await maker.cancel(resting.orderKey);
+                next = { ...next, bot: { ...next.bot, resting: undefined } };
+              }
+              const placed = await maker.place({
+                mint: learned.mint,
+                symbol: learned.symbol,
+                mid: learned.price,
+                notionalUsd: quoteNotional,
+              });
+              next = {
+                ...next,
+                bot: {
+                  ...next.bot,
+                  resting: {
+                    orderKey: placed.orderKey,
+                    signature: placed.signature,
+                    mint: learned.mint,
+                    symbol: learned.symbol,
+                    poolAddress: learned.poolAddress,
+                    sector: learned.sector,
+                    side: "long",
+                    reason: learned.reason,
+                    confidence: learned.confidence,
+                    researchScore: learned.researchScore,
+                    stopPct: learned.stopPct,
+                    targetPct: learned.targetPct,
+                    thesis: learned.thesis,
+                    limitPrice: placed.limitPrice,
+                    notionalUsd: quoteNotional,
+                    outputDecimals: placed.outputDecimals,
+                    placedAt: new Date().toISOString(),
+                  },
+                },
+              };
+              quoteNote = ` · ${learned.symbol} limit bid sent`;
+            } catch (error) {
+              blocked.push(`${learned.symbol}: ${error instanceof Error ? error.message : "limit bid failed"}`);
+            }
+            continue;
+          }
           if (!token) {
             blocked.push(`${learned.symbol}: missing live mark`);
           } else if (collateralUsd < MIN_TICKET_USD || qty <= 0) {
@@ -292,20 +393,38 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
           }
         }
         signals.splice(0, signals.length, ...shown);
+        if (maker && next.bot.resting && !quoteOwned) {
+          try {
+            await maker.cancel(next.bot.resting.orderKey);
+            next = { ...next, bot: { ...next.bot, resting: undefined } };
+            quoteNote = " · pulled the resting bid";
+          } catch (error) {
+            blocked.push(`limit: ${error instanceof Error ? error.message : "could not cancel the resting bid"}`);
+          }
+        }
       } else if (next.bot.running && dayLossBreached(risk.portfolio, next.config)) {
         blocked.push("Daily loss cap — new risk is closed");
+        if (maker && next.bot.resting) {
+          try {
+            await maker.cancel(next.bot.resting.orderKey);
+            next = { ...next, bot: { ...next.bot, resting: undefined } };
+          } catch (error) {
+            blocked.push(`limit: ${error instanceof Error ? error.message : "could not cancel the resting bid"}`);
+          }
+        }
       }
 
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
       const mode = next.config.walletSwaps ? " · wallet swaps" : " · simulated";
       const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
+      const quoted = quoteNote;
       const hunting =
         next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
           ? " · scanning — SOL goes out at 5x or 10x once the key has $10, Zebec stays spot"
           : "";
       const note = next.bot.running
-        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${hunting}${held}`
+        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${quoted}${hunting}${held}`
         : `Standby · closed ${closed} · ${market.regime.stance}${mode}${held}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
@@ -348,7 +467,7 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
     const flat = pushEquity(flattenBook(state, "manual"));
     return {
       ...flat,
-      bot: { ...flat.bot, running: false, lastNote: "Book flattened by hand" },
+      bot: { ...flat.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },
     };
   }
   if (action === "start") {
@@ -370,7 +489,7 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
   }
   return {
     ...state,
-    bot: { ...state.bot, running: false, lastNote: "Disarmed" },
+    bot: { ...state.bot, running: false, resting: undefined, lastNote: "Disarmed" },
   };
 }
 

@@ -301,6 +301,26 @@ export interface ChainFill {
 
 export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;
 
+export interface RestingQuote {
+  orderKey: string;
+  signature: string;
+  mint: string;
+  symbol: string;
+  poolAddress: string;
+  sector: Sector;
+  side: "long";
+  reason: TradeReason;
+  confidence: number;
+  researchScore: number | null;
+  stopPct: number;
+  targetPct: number;
+  thesis: string;
+  limitPrice: number;
+  notionalUsd: number;
+  outputDecimals: number;
+  placedAt: string;
+}
+
 export interface BotState {
   running: boolean;
   lastTickAt: string | null;
@@ -313,6 +333,8 @@ export interface BotState {
   blocked: string[];
   /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
   swapHoldUntil?: string | null;
+  /** A Jupiter limit bid waiting for a taker. The position is booked only after it fills. */
+  resting?: RestingQuote | null;
   /** Signature of the arm transaction that funded the browser trading key. */
   swapAuthSignature?: string | null;
   /** Address that signs Jupiter swaps after that arm transaction. */

@@ -8,6 +8,7 @@ import {
   tradingProfitUsd,
   tradingSnapshot,
 } from "@/lib/solana/authorize";
+import { makerDesk } from "@/lib/solana/limit";
 import { executorFor } from "@/lib/solana/swap";
 import { orderForPosition } from "@/lib/trading/leverage";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
@@ -59,10 +60,15 @@ export async function controlBot(
   session?: WalletSession | null,
 ): Promise<DeskPayload> {
   const executor = session ? executorFor(session) : undefined;
+  const maker = session ? makerDesk(session) : null;
   if (action === "tick") {
     const state = await loadState();
-    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
+    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null, state.config.walletSwaps ? maker : null);
     return buildDesk();
+  }
+  if ((action === "stop" || action === "flatten" || action === "reset") && maker) {
+    const resting = (await loadState()).bot.resting;
+    if (resting) await maker.cancel(resting.orderKey).catch(() => undefined);
   }
   if ((action === "stop" || action === "flatten" || action === "reset") && executor) {
     await sellSignedPositions(executor);
@@ -131,7 +137,7 @@ export async function controlBot(
   });
   if (action === "start") {
     const state = await loadState();
-    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null);
+    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null, state.config.walletSwaps ? maker : null);
   }
   return buildDesk();
 }

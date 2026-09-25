@@ -1271,6 +1271,11 @@ function BotView({
             </ul>
           ) : null}
         </div>
+        {desk.bot.resting ? (
+          <p className="mt-4 text-sm text-[var(--muted)]">
+            {desk.bot.resting.symbol} limit bid at {priceFmt(desk.bot.resting.limitPrice)} · waiting for a taker · {txLink(desk.bot.resting.signature)}
+          </p>
+        ) : null}
         {(desk.bot.blocked ?? []).length ? (
           <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
             <Label>Blocked this tick</Label>
