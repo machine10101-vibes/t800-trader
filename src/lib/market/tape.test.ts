@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { candleChangePct, tapeRead, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 300, open: close, high: close, low: close, close, volume: 1 };
@@ -40,5 +40,14 @@ describe("candle tape", () => {
     assert.match(tapeRead("SOL", 0.4, 0.8, 1), /green at 0.80%.*long is eligible/);
     assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), staying in cash/);
     assert.match(tickPass("SOL", -0.4), /red \(-0.40%\), staying in cash/);
+  });
+
+  it("names SOL and Zebec on every tick", () => {
+    const blocked = ["ZBCN: 15m is flat (0.00%), staying in cash"];
+    const signals = [{ symbol: "SOL", side: "long", reason: "reclaim", confidence: 68.2 }];
+    assert.equal(assetCall("SOL", signals, blocked), "long reclaim 68");
+    assert.match(assetCall("ZBCN", [], blocked), /flat \(0.00%\)/);
+    assert.match(tickHeadline(2, signals, blocked, false), /Tick 2 · SOL long reclaim 68 · Zebec .*flat.* · arm to send/);
+    assert.doesNotMatch(tickHeadline(2, signals, blocked, true), /arm to send/);
   });
 });

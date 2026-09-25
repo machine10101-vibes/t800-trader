@@ -22,6 +22,7 @@ import {
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
+import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import {
   connectWallet,
@@ -236,9 +237,11 @@ export function DeskApp() {
     return () => clearInterval(id);
   }, []);
 
+  const scanSecondsRef = useRef(8);
+  scanSecondsRef.current = Math.max(6, desk?.config.scanSeconds ?? 8);
+
   useEffect(() => {
     if (!walletRef.current) return;
-    const seconds = Math.max(6, desk?.config.scanSeconds ?? 8);
     let cancel = false;
     let inflight = false;
     const run = async () => {
@@ -261,13 +264,13 @@ export function DeskApp() {
       window.clearInterval(first);
       void run();
     }, 300);
-    const id = window.setInterval(() => void run(), seconds * 1000);
+    const id = window.setInterval(() => void run(), scanSecondsRef.current * 1000);
     return () => {
       cancel = true;
       window.clearInterval(first);
       window.clearInterval(id);
     };
-  }, [applyDesk, desk?.config.scanSeconds, wallet?.address]);
+  }, [applyDesk, wallet?.address]);
 
   useEffect(() => {
     const session = walletRef.current;
@@ -931,7 +934,7 @@ function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
       });
     };
     void pull();
-    const id = setInterval(() => void pull(), 45_000);
+    const id = setInterval(() => void pull(), 15_000);
     return () => {
       live = false;
       clearInterval(id);
@@ -1026,33 +1029,40 @@ function Overview({
       </div>
 
       <section className="neon p-3">
-        <div className="mb-3 flex items-center justify-between px-1">
+        <div className="mb-2 flex items-center justify-between px-1">
           <Label>5-minute tapes</Label>
-          <span className="text-[11px] text-[var(--faint)]">{desk.tapes.length ? "SOL · Zebec" : "Waiting on pools"}</span>
+          <span className="text-[11px] text-[var(--faint)]">
+            {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
+          </span>
         </div>
-        {desk.tapes.length === 0 ? (
-          <p className="px-1 pb-2 text-sm text-[var(--muted)]">SOL and Zebec 5-minute charts load with the tape.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {desk.tapes.map((tape) => (
+        <p className="mb-3 px-1 text-sm leading-6 text-[var(--text)]">
+          {desk.bot.lastNote ?? "Waiting for the first SOL and Zebec tick."}
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          {(["SOL", "ZBCN"] as const).map((symbol) => {
+            const tape = desk.tapes.find((row) => row.symbol === symbol);
+            const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
+            const live = desk.signals.some((row) => row.symbol === symbol);
+            return (
               <button
-                key={tape.poolAddress}
-                onClick={() => onFocus(tape.mint)}
+                key={symbol}
+                onClick={() => tape && onFocus(tape.mint)}
                 className={`rounded-2xl border p-2 text-left ${
-                  focusTape?.poolAddress === tape.poolAddress ? "border-[var(--magenta)]" : "border-[var(--line)]"
+                  tape && focusTape?.poolAddress === tape.poolAddress ? "border-[var(--magenta)]" : "border-[var(--line)]"
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between px-1">
-                  <span className="text-sm font-medium">{tape.symbol}</span>
-                  <Tone value={tape.change15m} />
+                  <span className="text-sm font-medium">{symbol === "ZBCN" ? "Zebec" : "SOL"}</span>
+                  {tape ? <Tone value={tape.change15m} /> : <span className="text-[11px] text-[var(--faint)]">—</span>}
                 </div>
+                <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[132px]">
-                  <CandleChart candles={bars[tape.poolAddress] ?? []} />
+                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} /> : null}
                 </div>
               </button>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
       </section>
 
       {open.length ? <PositionRail positions={open} /> : null}

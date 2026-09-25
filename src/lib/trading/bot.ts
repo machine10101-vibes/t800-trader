@@ -1,5 +1,5 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { tickPass } from "@/lib/market/tape";
+import { tickHeadline, tickPass } from "@/lib/market/tape";
 import { ACTIVE_BOOK, isActiveBook, watchMeta } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
@@ -440,15 +440,8 @@ export async function tickBot(
 
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
-      const mode = next.config.walletSwaps ? " · wallet swaps" : " · simulated";
-      const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
-      const quoted = quoteNote;
-      const hunting =
-        next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
-          ? " · scanning — SOL goes out at 5x or 10x once the key has $10, Zebec stays spot"
-          : "";
-      const idle = next.bot.running ? "" : " · arm the bot to send a ticket";
-      const note = `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${quoted}${hunting}${held}${idle}`;
+      const fills = opened || closed ? ` · opened ${opened} · closed ${closed}` : "";
+      const note = `${tickHeadline(next.bot.ticks + 1, signals, blocked, next.bot.running)}${quoteNote}${fills}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
       next.bot = {

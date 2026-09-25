@@ -4,7 +4,7 @@ import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
 import { withCandleTape } from "./tape";
-import { BOOK_POOLS, classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
+import { ACTIVE_BOOK, BOOK_POOLS, classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -63,6 +63,26 @@ let cache:
       regime: MarketRegime;
     }
   | null = null;
+
+/** A missed GeckoTerminal read must not erase the last SOL or Zebec print. */
+const lastBook = new Map<string, TokenCandidate>();
+
+function bookComplete(rows: TokenCandidate[]): boolean {
+  return ACTIVE_BOOK.every((mint) => rows.some((row) => row.mint === mint));
+}
+
+function fillActiveBook(rows: TokenCandidate[]): TokenCandidate[] {
+  const out = [...rows];
+  for (const mint of ACTIVE_BOOK) {
+    const row = out.find((candidate) => candidate.mint === mint);
+    if (row) lastBook.set(mint, row);
+    else {
+      const prev = lastBook.get(mint);
+      if (prev) out.push(prev);
+    }
+  }
+  return out;
+}
 
 const CACHE_MS = 20_000;
 
@@ -181,6 +201,7 @@ async function watchlistPools(): Promise<TokenCandidate[]> {
   const pins = new Map(BOOK_POOLS.map((pin) => [pin.mint, pin.pool]));
   const pools: TokenCandidate[] = [];
   for (const t of book) {
+    if (pools.length) await sleep(350);
     const pin = pins.get(t.mint);
     const row = pin ? await pinnedPool(t.mint, t.symbol, pin) : null;
     if (row) {
@@ -486,7 +507,20 @@ async function loadMarketOnce(): Promise<{
 }> {
   const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
   const regimePromise = fetchRegime();
-  const merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint));
+  let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint));
+  if (!bookComplete(merged)) {
+    const pins = new Map(BOOK_POOLS.map((pin) => [pin.mint, pin.pool]));
+    for (const mint of ACTIVE_BOOK) {
+      if (merged.some((candidate) => candidate.mint === mint)) continue;
+      const meta = watchMeta(mint);
+      const pin = pins.get(mint);
+      if (!meta || !pin) continue;
+      await sleep(350);
+      const row = await pinnedPool(mint, meta.symbol, pin);
+      if (row) merged.push(row);
+    }
+  }
+  merged = fillActiveBook(merged);
   const candlePools = uniqueBy(
     merged.filter((candidate) => candidate.poolAddress),
     (candidate) => candidate.mint,
@@ -496,9 +530,11 @@ async function loadMarketOnce(): Promise<{
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
     warmBookCandles(candlePools),
   ]);
-  const candidates = crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress)));
+  const candidates = fillActiveBook(
+    crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
+  );
   const stamped = withYields(regime, crossed.yields);
-  cache = { at: Date.now(), candidates, regime: stamped };
+  if (bookComplete(candidates)) cache = { at: Date.now(), candidates, regime: stamped };
   return { candidates, regime: stamped, scanned: candidates.length };
 }
 

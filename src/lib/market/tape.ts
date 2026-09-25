@@ -41,3 +41,26 @@ export function tickPass(symbol: string, m15: number): string {
   if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), staying in cash`;
   return `${symbol}: 15m is green (${m15.toFixed(2)}%), and the 5m tape did not confirm a long`;
 }
+
+export function assetCall(
+  symbol: string,
+  signals: Array<{ symbol: string; side: string; reason: string; confidence: number }>,
+  blocked: string[],
+): string {
+  const sig = signals.find((s) => s.symbol === symbol);
+  if (sig) return `${sig.side} ${sig.reason} ${Math.round(sig.confidence)}`;
+  const line = blocked.find((b) => b.startsWith(`${symbol}:`));
+  if (!line) return "waiting on the tape";
+  return line.slice(symbol.length + 1).trim();
+}
+
+/** One line that names SOL and Zebec on every scan. */
+export function tickHeadline(
+  tick: number,
+  signals: Array<{ symbol: string; side: string; reason: string; confidence: number }>,
+  blocked: string[],
+  armed: boolean,
+): string {
+  const arm = armed ? "" : " · arm to send";
+  return `Tick ${tick} · SOL ${assetCall("SOL", signals, blocked)} · Zebec ${assetCall("ZBCN", signals, blocked)}${arm}`;
+}
