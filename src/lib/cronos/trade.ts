@@ -70,18 +70,28 @@ async function sendFrom(
   tx: { to: `0x${string}`; data?: Hex; value?: bigint },
 ): Promise<string> {
   const client = cronosClient();
-  try {
+  const signAndSend = async (gas?: bigint) => {
     const prepared = await client.prepareTransactionRequest({
       account,
       chain: cronos,
       to: tx.to,
       data: tx.data,
       value: tx.value ?? 0n,
+      ...(gas ? { gas } : {}),
     });
     const serialized = await account.signTransaction(prepared as Parameters<PrivateKeyAccount["signTransaction"]>[0]);
-    return await client.sendRawTransaction({ serializedTransaction: serialized });
+    return client.sendRawTransaction({ serializedTransaction: serialized });
+  };
+  try {
+    return await signAndSend();
   } catch (error) {
-    throw cronosError(error);
+    const message = error instanceof Error ? error.message : "";
+    if (!/estimate|gas|intrinsic/i.test(message)) throw cronosError(error);
+    try {
+      return await signAndSend(450_000n);
+    } catch (retry) {
+      throw cronosError(retry);
+    }
   }
 }
 
@@ -176,11 +186,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
     const collateral = leverage > 1 ? (order.collateralUsd ?? order.notionalUsd / Math.max(leverage, 1)) : order.notionalUsd;
     const balances = await readCronosBalances(account.address);
     const price = order.price || balances.solPriceUsd || 0;
-    const plan = planCronosOpen(collateral, balances.usdc, balances.sol, price);
-    if (plan.kind === "held") {
-      const fill = { signature: "held", qty: plan.qty, price: plan.price, tokenDecimals: 18 };
-      return leverage > 1 ? marginFill(fill, leverage, Math.min(collateral, plan.qty * plan.price)) : fill;
-    }
+    const plan = planCronosOpen(collateral, balances.usdc, balances.sol);
     const fill = await sendVvsSwap(account, plan.swap, price);
     return leverage > 1 ? marginFill(fill, leverage, collateral) : fill;
   }
@@ -204,10 +210,10 @@ export async function cronosBudget(session?: CronosSession | null): Promise<Wall
   try {
     const live = await readCronosBalances(address);
     return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
-  } catch {
-    return account
-      ? { usdc: 0, sol: 0, solPriceUsd: session.solPriceUsd ?? 0 }
-      : { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+  } catch (error) {
+    if (!account) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+    const message = error instanceof Error ? error.message : "balance read failed";
+    throw new Error(`Could not read the CRO trading key, so no swap was sent. ${message}`);
   }
 }
 

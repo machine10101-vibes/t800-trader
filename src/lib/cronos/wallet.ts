@@ -51,7 +51,7 @@ export function detectedCronosWallet(): string | null {
 }
 
 export async function croPriceUsd(): Promise<number | null> {
-  try {
+  const gecko = async (): Promise<number | null> => {
     const json = await fetchJson<{
       data?: { attributes?: { token_prices?: Record<string, string> } };
     }>(`https://api.geckoterminal.com/api/v2/simple/networks/cro/token_price/${WCRO}`, {
@@ -61,9 +61,27 @@ export async function croPriceUsd(): Promise<number | null> {
     const prices = json.data?.attributes?.token_prices ?? {};
     const raw = prices[WCRO] ?? prices[WCRO.toLowerCase()] ?? Object.values(prices)[0];
     return nullableNum(raw);
+  };
+  const llama = async (): Promise<number | null> => {
+    const json = await fetchJson<{ coins?: Record<string, { price?: number }> }>(
+      `https://coins.llama.fi/prices/current/cronos:${WCRO}`,
+      { timeoutMs: 4_000, retries: 1 },
+    );
+    return nullableNum(json.coins?.[`cronos:${WCRO}`]?.price);
+  };
+  try {
+    const first = await gecko();
+    if (first && first > 0) return first;
+  } catch {
+    // The pool price below is the backup.
+  }
+  try {
+    const second = await llama();
+    if (second && second > 0) return second;
   } catch {
     return null;
   }
+  return null;
 }
 
 export async function readCronosBalances(address: string): Promise<Omit<CronosSession, "provider">> {

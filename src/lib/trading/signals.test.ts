@@ -271,6 +271,18 @@ describe("indicators", () => {
       },
     };
     assert.equal(buildFlowSignals(thin, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
+    const modest = {
+      ...token,
+      flows: {
+        m5: flow(0.02, 40, 60),
+        m15: flow(0.2, 40, 60),
+        m30: flow(0.1, 40, 60),
+        h1: flow(1, 40, 60),
+        h6: flow(0.2, 40, 60),
+        h24: flow(1, 40, 60),
+      },
+    };
+    assert.equal(buildFlowSignals(modest, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 1);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

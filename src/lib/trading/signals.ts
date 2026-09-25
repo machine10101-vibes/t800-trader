@@ -353,7 +353,10 @@ export function buildFlowSignals(
     h1 > 0 &&
     h1 < 10 &&
     tape >= 0.53;
-  if (!aligned && !impulse && !rising) return [];
+  // A green 15m watchlist name is a long. Buy-share still has to be real, not a one-sided print.
+  const greenLong =
+    token.watchlist && m15 >= 0.1 && m15 < 8 && m5 > -0.2 && h1 > -2 && h1 < 10 && tape >= 0.35;
+  if (!aligned && !impulse && !rising && !greenLong) return [];
 
   const stopPct = clamp(1.25 + (defensive ? 0.15 : 0), 1.2, 2.6);
   const rr = withMinRR(stopPct, stopPct * 1.8);

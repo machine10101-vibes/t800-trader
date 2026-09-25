@@ -191,6 +191,52 @@ export async function tickBot(
           blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
         }
       }
+      if (
+        chain === "cronos" &&
+        next.bot.running &&
+        next.config.walletSwaps &&
+        executor &&
+        budget &&
+        !croAlreadyLive
+      ) {
+        const cro = byMint.get(WCRO_MINT) ?? [...byMint.values()].find((row) => sameMint(row.mint, WCRO_MINT));
+        const price = cro?.priceUsd || budget.solPriceUsd || 0;
+        const qty = Math.max(0, budget.sol - GAS_CRO);
+        const flat = Boolean(cro && tapeInCash(cro.flows.m15.priceChangePct));
+        if (flat && price > 0 && qty * price >= MIN_TICKET_USD) {
+          try {
+            const fill = await executor({
+              kind: "close",
+              side: "long",
+              mint: WCRO_MINT,
+              symbol: "CRO",
+              notionalUsd: qty * price,
+              qty,
+              price,
+              venues: ["vvs"],
+              tokenDecimals: 18,
+            });
+            next = recordCashSale(next, {
+              mint: WCRO_MINT,
+              symbol: "CRO",
+              qty: fill.qty,
+              price: fill.price,
+              signature: fill.signature,
+              note: "CRO 15m is red or flat, so the trading key sold CRO to USDC on VVS.",
+            });
+            closed += 1;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "wallet sell failed";
+            blocked.push(`CRO: ${message}`);
+          }
+        } else if (flat && budget.sol > GAS_CRO + 1) {
+          blocked.push(
+            price > 0
+              ? `CRO: trading key has ${qty.toFixed(3)} CRO, under the minimum sell`
+              : "CRO: price is missing, so the cash sell waits",
+          );
+        }
+      }
       const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
       const nativeMark = marks.find((row) => sameMint(row.mint, nativeMint))?.price ?? 0;
       const priced =
@@ -208,45 +254,6 @@ export async function tickBot(
           );
         }
         const screen = bookScreen(next.config, chain);
-        if (
-          chain === "cronos" &&
-          next.bot.running &&
-          next.config.walletSwaps &&
-          executor &&
-          priced &&
-          !croAlreadyLive
-        ) {
-          const cro = byMint.get(WCRO_MINT) ?? [...byMint.values()].find((row) => sameMint(row.mint, WCRO_MINT));
-          const qty = Math.max(0, priced.sol - GAS_CRO);
-          const price = cro?.priceUsd || priced.solPriceUsd;
-          if (cro && tapeInCash(cro.flows.m15.priceChangePct) && price > 0 && qty * price >= MIN_TRADE_USD) {
-            try {
-              const fill = await executor({
-                kind: "close",
-                side: "long",
-                mint: WCRO_MINT,
-                symbol: "CRO",
-                notionalUsd: qty * price,
-                qty,
-                price,
-                venues: ["vvs"],
-                tokenDecimals: 18,
-              });
-              next = recordCashSale(next, {
-                mint: WCRO_MINT,
-                symbol: "CRO",
-                qty: fill.qty,
-                price: fill.price,
-                signature: fill.signature,
-                note: "CRO 15m is red or flat, so the trading key sold CRO to USDC on VVS.",
-              });
-              closed += 1;
-            } catch (error) {
-              const message = error instanceof Error ? error.message : "wallet sell failed";
-              if (!/ALREADY_FLAT/i.test(message)) blocked.push(`CRO: ${message}`);
-            }
-          }
-        }
         const focus = research.candidates
           .filter((c) => isActiveBook(c.mint, chain) && !screenCandidate(c, screen))
           .sort((a, b) => huntRank(b) - huntRank(a))
@@ -341,7 +348,7 @@ export async function tickBot(
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
           }
-          const token = byMint.get(learned.mint);
+          const token = byMint.get(learned.mint) ?? [...byMint.values()].find((row) => sameMint(row.mint, learned.mint));
           const streak = consecutiveLosses(risk.trades);
           const sized = token
             ? sizePosition({

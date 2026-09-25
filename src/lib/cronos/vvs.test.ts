@@ -50,12 +50,10 @@ describe("VVS routing", () => {
     assert.throws(() => planVvsBuy(12, 0, 200), /Buying CRO on VVS needs USDC/);
   });
 
-  it("keeps a CRO-funded key as the long until a red tape sells it", () => {
-    const held = planCronosOpen(12, 0, 200, 0.1);
-    assert.equal(held.kind, "held");
-    if (held.kind === "held") assert.ok(held.qty > 190);
-    const bought = planCronosOpen(12, 20, 4, 0.1);
+  it("buys with USDC and refuses to pretend a CRO balance is a buy", () => {
+    const bought = planCronosOpen(12, 20, 4);
     assert.equal(bought.kind, "swap");
+    assert.throws(() => planCronosOpen(12, 0, 200), /needs USDC/);
   });
 
   it("sells native CRO through the VVS router", () => {

@@ -9,6 +9,10 @@ import { readBalances, type WalletSession } from "./wallet";
 
 const PERPS_URL = "https://perps-api.jup.ag/v1";
 const MIN_SOL = 0.005;
+/** Extra margin so Jupiter's own mark still clears the $10 floor. */
+const COLLATERAL_CUSHION = 1.25;
+/** Left on the key for the position account and the network fee. */
+const RENT_SOL = 0.015;
 
 export interface PerpIncreasePlan {
   asset: "SOL";
@@ -57,32 +61,46 @@ export function planPerpIncrease(
   if (order.sol < MIN_SOL) throw new Error("Need at least 0.005 SOL in the wallet to pay the network fee.");
   const side = "long" as const;
   const maxSlippageBps = "100" as const;
-  if (order.usdc + 1e-6 >= collateral) {
+  const cushioned = collateral * COLLATERAL_CUSHION;
+  if (order.usdc + 1e-6 >= cushioned) {
     return {
       asset: "SOL",
       inputToken: "USDC",
-      inputTokenAmount: baseUnits(collateral, 6),
+      inputTokenAmount: baseUnits(cushioned, 6),
       side,
       leverage: String(leverage) as "5" | "10",
       maxSlippageBps,
-      collateralUsd: collateral,
+      collateralUsd: cushioned,
+    };
+  }
+  if (order.usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD && order.usdc + 1e-6 >= collateral) {
+    return {
+      asset: "SOL",
+      inputToken: "USDC",
+      inputTokenAmount: baseUnits(order.usdc, 6),
+      side,
+      leverage: String(leverage) as "5" | "10",
+      maxSlippageBps,
+      collateralUsd: order.usdc,
     };
   }
   if (!(order.solPriceUsd > 0)) throw new Error("USDC does not cover this margin, and the SOL price is missing.");
-  const solNeed = collateral / order.solPriceUsd;
-  if (order.sol - SOL_FEE_RESERVE < solNeed) {
+  const capSol = order.sol - SOL_FEE_RESERVE - RENT_SOL;
+  const capUsd = capSol * order.solPriceUsd;
+  const post = Math.min(cushioned, capUsd);
+  if (!(post + 1e-6 >= PERP_MIN_COLLATERAL_USD)) {
     throw new Error(
-      `A ${leverage}x position needs about $${collateral.toFixed(2)} of collateral. The trading key does not cover that after the fee reserve.`,
+      `A ${leverage}x position needs at least $${PERP_MIN_COLLATERAL_USD} of collateral. The trading key does not cover that after the fee reserve.`,
     );
   }
   return {
     asset: "SOL",
     inputToken: "SOL",
-    inputTokenAmount: baseUnits(solNeed, 9),
+    inputTokenAmount: baseUnits(post / order.solPriceUsd, 9),
     side,
     leverage: String(leverage) as "5" | "10",
     maxSlippageBps,
-    collateralUsd: collateral,
+    collateralUsd: post,
   };
 }
 
@@ -203,25 +221,41 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
   const trader = signer.publicKey.toBase58();
   const balances = await readBalances(trader);
   if (order.kind === "open") {
-    const plan = planPerpIncrease({
-      ...order,
-      usdc: balances.usdc,
-      sol: balances.sol,
-      solPriceUsd: balances.solPriceUsd ?? 0,
-    });
-    const opened = await perps<{ serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote }>(
-      "/positions/increase",
-      "POST",
-      {
-        asset: plan.asset,
-        inputToken: plan.inputToken,
-        inputTokenAmount: plan.inputTokenAmount,
-        side: plan.side,
-        leverage: plan.leverage,
-        maxSlippageBps: plan.maxSlippageBps,
-        walletAddress: trader,
-      },
-    );
+    const price = balances.solPriceUsd ?? order.price ?? 0;
+    const openWith = async (collateralUsd: number | undefined) => {
+      const plan = planPerpIncrease({
+        ...order,
+        collateralUsd: collateralUsd ?? order.collateralUsd,
+        usdc: balances.usdc,
+        sol: balances.sol,
+        solPriceUsd: price,
+      });
+      const opened = await perps<{ serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote }>(
+        "/positions/increase",
+        "POST",
+        {
+          asset: plan.asset,
+          inputToken: plan.inputToken,
+          inputTokenAmount: plan.inputTokenAmount,
+          side: plan.side,
+          leverage: plan.leverage,
+          maxSlippageBps: plan.maxSlippageBps,
+          walletAddress: trader,
+        },
+      );
+      return { plan, opened };
+    };
+    let plan: PerpIncreasePlan;
+    let opened: { serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote };
+    try {
+      ({ plan, opened } = await openWith(order.collateralUsd));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const tiny = /collateral size|at least \$10/i.test(message);
+      const bumped = (order.collateralUsd ?? PERP_MIN_COLLATERAL_USD) * 1.25;
+      if (!tiny || !(bumped > (order.collateralUsd ?? 0))) throw error;
+      ({ plan, opened } = await openWith(bumped));
+    }
     if (!opened.serializedTxBase64 || !opened.quote) throw new Error("Jupiter did not return a 5x or 10x transaction.");
     const signature = await submit(opened.serializedTxBase64, signer, "increase-position");
     const positionPubkey = opened.positionPubkey || (await waitForPosition(trader, plan.side));

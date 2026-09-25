@@ -61,8 +61,10 @@ async function budgetFor(session?: WalletSession | null): Promise<WalletBudget |
       live = await readBalances(address);
     }
     return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
-  } catch {
-    return bot ? { usdc: 0, sol: 0, solPriceUsd: session.solPriceUsd ?? 0 } : { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+  } catch (error) {
+    if (!bot) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+    const message = error instanceof Error ? error.message : "balance read failed";
+    throw new Error(`Could not read the SOL trading key, so no swap was sent. ${message}`);
   }
 }
 

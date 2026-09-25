@@ -29,11 +29,12 @@ describe("perp planner", () => {
     const sol = planPerpIncrease({ ...order(), usdc: 0, sol: 0.2, solPriceUsd: 200 });
     assert.equal(sol.leverage, "5");
     assert.equal(sol.inputToken, "SOL");
-    assert.equal(sol.inputTokenAmount, "50000000");
+    assert.equal(sol.inputTokenAmount, "62500000");
+    assert.ok(sol.collateralUsd >= 12);
     const usdc = planPerpIncrease({ ...order({ leverage: 10, collateralUsd: 10, notionalUsd: 100 }), usdc: 12, sol: 0.02, solPriceUsd: 200 });
     assert.equal(usdc.leverage, "10");
     assert.equal(usdc.inputToken, "USDC");
-    assert.equal(usdc.inputTokenAmount, "10000000");
+    assert.equal(usdc.inputTokenAmount, "12000000");
   });
 
   it("refuses a sub-$10 margin, a short, and Zebec", () => {
