@@ -54,13 +54,18 @@ export function assetCall(
   return line.slice(symbol.length + 1).trim();
 }
 
-/** One line that names SOL and Zebec on every scan. */
+/** One line that names every asset on this chain's book. Solana names SOL and Zebec. */
 export function tickHeadline(
   tick: number,
   signals: Array<{ symbol: string; side: string; reason: string; confidence: number }>,
   blocked: string[],
   armed: boolean,
+  names: { symbol: string; label: string }[] = [
+    { symbol: "SOL", label: "SOL" },
+    { symbol: "ZBCN", label: "Zebec" },
+  ],
 ): string {
   const arm = armed ? "" : " · arm to send";
-  return `Tick ${tick} · SOL ${assetCall("SOL", signals, blocked)} · Zebec ${assetCall("ZBCN", signals, blocked)}${arm}`;
+  const body = names.map((name) => `${name.label} ${assetCall(name.symbol, signals, blocked)}`).join(" · ");
+  return `Tick ${tick} · ${body}${arm}`;
 }

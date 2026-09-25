@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, spendableUsd, walletRiskBook } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
-import type { MarketRegime, Portfolio, Signal } from "../types";
+import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
 const regime = (stance: MarketRegime["stance"]): MarketRegime =>
   ({
@@ -353,7 +353,7 @@ describe("risk", () => {
       notional: 2,
       initialStop: 0.98,
       scaled: false,
-    };
+    } as Position;
     const reason = canOpen({
       positions: [held],
       signal,
@@ -472,7 +472,7 @@ describe("risk", () => {
       thesis: "t",
       researchScore: 70,
       createdAt: new Date().toISOString(),
-    };
+    } as Signal;
     assert.equal(
       canOpen({ positions: [], signal, config: tight, portfolio: portfolio() }),
       "Confidence below the quality floor",
@@ -480,7 +480,7 @@ describe("risk", () => {
     assert.equal(
       canOpen({
         positions: [],
-        signal: { ...signal, confidence: 82 },
+        signal: { ...signal, confidence: 82 } as Signal,
         config: { ...tight, maxPerSector: 1 },
         portfolio: portfolio(),
       }),

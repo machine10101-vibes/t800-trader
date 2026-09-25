@@ -1,21 +1,25 @@
 "use client";
 
+import { CHAIN_COPY, type ChainId } from "@/lib/chain";
 import { VENUE_OPTIONS, venueSummary } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 export function SettingsPanel({
+  chain = "solana",
   desk,
   busy,
   onSave,
   onReset,
 }: {
+  chain?: ChainId;
   desk: DeskPayload;
   busy: boolean;
   onSave: (config: Partial<BotConfig>) => void;
   onReset: () => void;
 }) {
+  const copy = CHAIN_COPY[chain];
   const [local, setLocal] = useState(() => normalizeConfig(desk.config));
   useEffect(() => setLocal(normalizeConfig(desk.config)), [desk.config]);
 
@@ -31,7 +35,7 @@ export function SettingsPanel({
             <h2 className="text-2xl font-medium">Desk policy</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               These controls change the next scan. The wallet mark still sizes the book. Saving keeps open tickets where
-              they are. Reset wallet book is the control that clears the paper account back to the live SOL and USDC mark.
+              they are. {copy.settingsReset}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -69,7 +73,7 @@ export function SettingsPanel({
       >
         <Toggle
           label="Send swaps to this wallet"
-          hint="On: Arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain."
+          hint={copy.settingsWallet}
           checked={local.walletSwaps}
           onChange={(v) => set({ walletSwaps: v })}
         />
@@ -77,11 +81,11 @@ export function SettingsPanel({
 
       <Section
         title="Multiplier"
-        hint="SOL and Zebec can open at 5x or 10x once the trading key has $10. SOL is a Jupiter perpetual. Zebec posts that collateral as a spot bag and the ticket is marked at the multiplier, because Jupiter has no ZBCN perp. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. Shorts stay off-chain."
+        hint={copy.settingsMultiplier}
       >
         <Toggle
           label="5x"
-          hint="Posts at least $10 and takes five times that exposure on SOL or Zebec."
+          hint={copy.settingsFive}
           checked={local.multipliers.includes(5)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
@@ -90,7 +94,7 @@ export function SettingsPanel({
         />
         <Toggle
           label="10x"
-          hint="Used for SOL or Zebec when the signal is a breakout or confidence is 72 or higher. Ten times the collateral, so a smaller adverse move liquidates it."
+          hint={copy.settingsTen}
           checked={local.multipliers.includes(10)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);

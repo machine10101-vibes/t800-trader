@@ -231,7 +231,7 @@ describe("indicators", () => {
     const found = buildFlowSignals(token, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
     assert.equal(found.length, 1);
     assert.equal(found[0]?.side, "long");
-    const unknown = { ...token, symbol: "PUMP", sector: "Unknown", watchlist: false };
+    const unknown = { ...token, symbol: "PUMP", sector: "Unknown" as const, watchlist: false } as TokenCandidate;
     assert.equal(buildFlowSignals(unknown, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
     const bid = {
       ...token,

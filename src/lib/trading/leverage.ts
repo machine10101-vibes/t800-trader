@@ -1,4 +1,5 @@
-import { SOL_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { sameMint } from "@/lib/chain";
 import type { ChainFill, ChainOrder, Position } from "@/lib/types";
 
 /** Jupiter perp multipliers the desk can send. */
@@ -31,7 +32,7 @@ export function pickMultiplier(enabled: readonly Multiplier[], confidence: numbe
   return null;
 }
 
-/** SOL and Zebec both take 5x or 10x. Anything else in the book stays spot. */
+/** SOL, Zebec, and CRO take 5x or 10x. Anything else in the book stays spot. */
 export function multiplierFor(
   multipliers: unknown,
   confidence: number,
@@ -39,14 +40,20 @@ export function multiplierFor(
   symbol: string,
   mint: string,
 ): 1 | Multiplier {
-  const levered = symbol === "SOL" || symbol === "ZBCN" || mint === SOL_MINT || mint === ZBCN_MINT;
+  const levered =
+    symbol === "SOL" ||
+    symbol === "ZBCN" ||
+    symbol === "CRO" ||
+    mint === SOL_MINT ||
+    mint === ZBCN_MINT ||
+    sameMint(mint, WCRO_MINT);
   if (!levered) return 1;
   return pickMultiplier(normalizeMultipliers(multipliers), confidence, reason) ?? 1;
 }
 
 /**
- * A Zebec multiplier buys the collateral as spot, then the book marks the full exposure.
- * Jupiter perps do not list ZBCN, so this is how that 5x or 10x is held.
+ * A Zebec or CRO multiplier buys the collateral as spot, then the book marks the full exposure.
+ * Jupiter perps do not list ZBCN or CRO, so this is how that 5x or 10x is held.
  */
 export function marginFill(fill: ChainFill, leverage: number, collateralUsd: number): ChainFill {
   const mult = leverage === 10 ? 10 : leverage === 5 ? 5 : 1;

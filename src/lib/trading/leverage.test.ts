@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SOL_MINT, ZBCN_MINT } from "../market/universe";
+import { SOL_MINT, WCRO_MINT, ZBCN_MINT } from "../market/universe";
 import { collateralFor, marginFill, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
 
 describe("multipliers", () => {
@@ -22,6 +22,8 @@ describe("multipliers", () => {
     assert.equal(multiplierFor([5, 10], 80, "breakout", "SOL", SOL_MINT), 10);
     assert.equal(multiplierFor([5, 10], 60, "reclaim", "ZBCN", ZBCN_MINT), 5);
     assert.equal(multiplierFor([5, 10], 80, "breakout", "ZBCN", ZBCN_MINT), 10);
+    assert.equal(multiplierFor([5, 10], 80, "breakout", "CRO", WCRO_MINT), 10);
+    assert.equal(multiplierFor([5, 10], 60, "reclaim", "CRO", WCRO_MINT), 5);
     assert.equal(multiplierFor([5, 10], 90, "breakout", "JUP", "jup"), 1);
     assert.equal(multiplierFor([], 90, "breakout", "SOL", SOL_MINT), 1);
   });

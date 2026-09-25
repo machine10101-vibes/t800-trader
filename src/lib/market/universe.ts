@@ -1,3 +1,4 @@
+import { sameMint, type ChainId } from "@/lib/chain";
 import type { Sector } from "@/lib/types";
 
 export interface WatchToken {
@@ -14,13 +15,20 @@ export const JITO_SOL_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
 export const JLP_MINT = "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4";
 export const ZBCN_MINT = "ZBCNpuD7YMXzTHB2fhGkGi78MNsHGLRXUhRewNRm9RU";
 
-/** The only names the desk monitors and trades right now. */
+/** Wrapped CRO on Cronos. The desk trades this as CRO. */
+export const WCRO_MINT = "0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23";
+/** USDC on the VVS WCRO pool. */
+export const CRONOS_USDC = "0xc21223249ca28397b4b6541dffaecc539bff0c59";
+/** Deep VVS WCRO/USDC pool. GeckoTerminal network id is `cro`. */
+export const CRO_POOL = "0xe61db569e231b3f5530168aa2c9d50246525b6d6";
+
+/** The only names the Solana desk monitors and trades. */
 export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT] as const;
 
-const ACTIVE_MINTS = new Set<string>(ACTIVE_BOOK);
+const CRONOS_BOOK: WatchToken[] = [{ symbol: "CRO", name: "Cronos", mint: WCRO_MINT, sector: "L1" }];
 
-export function isActiveBook(mint: string): boolean {
-  return ACTIVE_MINTS.has(mint);
+export function geckoNetwork(chain: ChainId = "solana"): string {
+  return chain === "cronos" ? "cro" : "solana";
 }
 
 /** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
@@ -107,6 +115,35 @@ export function classifySector(symbol: string, name: string): Sector {
   return "Unknown";
 }
 
-export function watchMeta(mint: string): WatchToken | undefined {
+export function bookTokens(chain: ChainId = "solana"): WatchToken[] {
+  if (chain === "cronos") return CRONOS_BOOK;
+  return ACTIVE_BOOK.map((mint) => WATCH_BY_MINT.get(mint)).filter((token): token is WatchToken => Boolean(token));
+}
+
+export function bookPools(chain: ChainId = "solana"): { mint: string; pool: string }[] {
+  if (chain === "cronos") return [{ mint: WCRO_MINT, pool: CRO_POOL }];
+  return BOOK_POOLS;
+}
+
+export function bookMints(chain: ChainId = "solana"): string[] {
+  return bookTokens(chain).map((token) => token.mint);
+}
+
+export function headlineFor(chain: ChainId = "solana"): { symbol: string; label: string }[] {
+  if (chain === "cronos") return [{ symbol: "CRO", label: "CRO" }];
+  return [
+    { symbol: "SOL", label: "SOL" },
+    { symbol: "ZBCN", label: "Zebec" },
+  ];
+}
+
+export function isActiveBook(mint: string, chain: ChainId = "solana"): boolean {
+  return bookMints(chain).some((item) => sameMint(item, mint));
+}
+
+export function watchMeta(mint: string, chain: ChainId = "solana"): WatchToken | undefined {
+  const onBook = bookTokens(chain).find((token) => sameMint(token.mint, mint));
+  if (onBook) return onBook;
+  if (chain !== "solana") return undefined;
   return WATCH_BY_MINT.get(mint);
 }

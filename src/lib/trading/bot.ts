@@ -1,6 +1,7 @@
+import type { ChainId } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { tickHeadline, tickPass } from "@/lib/market/tape";
-import { ACTIVE_BOOK, isActiveBook, watchMeta } from "@/lib/market/universe";
+import { bookMints, headlineFor, isActiveBook, watchMeta } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
@@ -73,10 +74,11 @@ export async function tickBot(
   executor?: ChainExecutor,
   budget?: WalletBudget | null,
   maker?: MakerDesk | null,
+  chain: ChainId = "solana",
 ): Promise<AppState> {
   return mutateState(async (state) => {
     try {
-      const market = await loadMarket();
+      const market = await loadMarket(false, chain);
       const byMint = new Map(market.candidates.map((c) => [c.mint, c]));
       const marks: { mint: string; price: number }[] = market.candidates.map((c) => ({
         mint: c.mint,
@@ -180,23 +182,23 @@ export async function tickBot(
       }
       const risk = walletRiskBook(next.portfolio, next.positions, next.trades, budget, next.config.walletSwaps);
       if (!dayLossBreached(risk.portfolio, next.config)) {
-        const research = await runResearch(next.config);
+        const research = await runResearch(next.config, false, chain);
         next = studyTape(next, research.candidates, market.regime.stance);
         const spendable = budget ? payableUsd(budget) : 0;
         const marked = budget ? walletMarkUsd(budget) : 0;
         const bookTooSmall = Boolean(budget) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
           blocked.push(
-            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much SOL or USDC before a swap is sent`,
+            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${chain === "cronos" ? "CRO" : "SOL"} or USDC before a swap is sent`,
           );
         }
         const focus = research.candidates
-          .filter((c) => isActiveBook(c.mint) && !screenCandidate(c, next.config))
+          .filter((c) => isActiveBook(c.mint, chain) && !screenCandidate(c, next.config))
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
-        for (const mint of ACTIVE_BOOK) {
-          if (focus.some((token) => token.mint === mint)) continue;
-          const symbol = watchMeta(mint)?.symbol ?? "Asset";
+        for (const mint of bookMints(chain)) {
+          if (focus.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) continue;
+          const symbol = watchMeta(mint, chain)?.symbol ?? "Asset";
           const live = byMint.get(mint) ?? research.candidates.find((token) => token.mint === mint);
           if (!live) {
             blocked.push(`${symbol}: pool tape has not arrived`);
@@ -441,7 +443,7 @@ export async function tickBot(
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
       const fills = opened || closed ? ` · opened ${opened} · closed ${closed}` : "";
-      const note = `${tickHeadline(next.bot.ticks + 1, signals, blocked, next.bot.running)}${quoteNote}${fills}`;
+      const note = `${tickHeadline(next.bot.ticks + 1, signals, blocked, next.bot.running, headlineFor(chain))}${quoteNote}${fills}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
       next.bot = {
@@ -472,7 +474,7 @@ export async function tickBot(
         },
       };
     }
-  });
+  }, chain);
 }
 
 export function applyControl(state: AppState, action: "start" | "stop" | "reset" | "flatten"): AppState {

@@ -8,13 +8,14 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint",
-    "test": "tsx --test src/lib/research/scoring.test.ts src/lib/market/quotes.test.ts src/lib/market/tape.test.ts src/lib/market/venues.test.ts src/lib/solana/swap.test.ts src/lib/solana/wallet.test.ts src/lib/solana/perps.test.ts src/lib/solana/authorize.test.ts src/lib/trading/signals.test.ts src/lib/trading/risk.test.ts src/lib/trading/leverage.test.ts src/lib/trading/quote.test.ts src/lib/trading/close.test.ts src/lib/trading/paper.test.ts src/lib/trading/learn.test.ts src/lib/monitor.test.ts src/lib/store.test.ts src/lib/utils.test.ts src/lib/desk.test.ts"
+    "test": "tsx --test src/lib/research/scoring.test.ts src/lib/market/quotes.test.ts src/lib/market/tape.test.ts src/lib/market/venues.test.ts src/lib/solana/swap.test.ts src/lib/solana/wallet.test.ts src/lib/solana/perps.test.ts src/lib/solana/authorize.test.ts src/lib/cronos/arm.test.ts src/lib/trading/signals.test.ts src/lib/trading/risk.test.ts src/lib/trading/leverage.test.ts src/lib/trading/quote.test.ts src/lib/trading/close.test.ts src/lib/trading/paper.test.ts src/lib/trading/learn.test.ts src/lib/monitor.test.ts src/lib/store.test.ts src/lib/utils.test.ts src/lib/desk.test.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
     "next": "^15.5.4",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "viem": "^2.37.6"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

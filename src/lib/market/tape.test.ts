@@ -50,4 +50,10 @@ describe("candle tape", () => {
     assert.match(tickHeadline(2, signals, blocked, false), /Tick 2 · SOL long reclaim 68 · Zebec .*flat.* · arm to send/);
     assert.doesNotMatch(tickHeadline(2, signals, blocked, true), /arm to send/);
   });
+
+  it("names CRO on a Cronos tick", () => {
+    const blocked = ["CRO: 15m is red (-0.40%), staying in cash"];
+    assert.match(tickHeadline(3, [], blocked, false, [{ symbol: "CRO", label: "CRO" }]), /Tick 3 · CRO .*red.* · arm to send/);
+    assert.doesNotMatch(tickHeadline(3, [], blocked, true, [{ symbol: "CRO", label: "CRO" }]), /Zebec|SOL/);
+  });
 });

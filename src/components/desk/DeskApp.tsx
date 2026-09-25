@@ -3,6 +3,7 @@
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
+import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
 import {
   adoptLiveEquity,
   armButton,
@@ -22,16 +23,10 @@ import {
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { fetchOhlcv } from "@/lib/market/providers";
+import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
-import {
-  connectWallet,
-  detectedWalletName,
-  disconnectWallet,
-  listenWallet,
-  refreshWallet,
-  type WalletSession,
-} from "@/lib/solana/wallet";
+import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -50,8 +45,51 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
 ];
 
 export function DeskApp() {
+  const [view, setView] = useState<ChainId>("solana");
+  const [running, setRunning] = useState<Record<ChainId, boolean>>({ solana: false, cronos: false });
+  const markRunning = useCallback((chain: ChainId, next: boolean) => {
+    setRunning((cur) => (cur[chain] === next ? cur : { ...cur, [chain]: next }));
+  }, []);
+  return (
+    <>
+      <div hidden={view !== "solana"}>
+        <ChainDesk
+          chain="solana"
+          active={view === "solana"}
+          peerArmed={running.cronos}
+          onRunning={(next) => markRunning("solana", next)}
+          onSwitch={setView}
+        />
+      </div>
+      <div hidden={view !== "cronos"}>
+        <ChainDesk
+          chain="cronos"
+          active={view === "cronos"}
+          peerArmed={running.solana}
+          onRunning={(next) => markRunning("cronos", next)}
+          onSwitch={setView}
+        />
+      </div>
+    </>
+  );
+}
+
+function ChainDesk({
+  chain,
+  active,
+  peerArmed,
+  onRunning,
+  onSwitch,
+}: {
+  chain: ChainId;
+  active: boolean;
+  peerArmed: boolean;
+  onRunning: (running: boolean) => void;
+  onSwitch: (next: ChainId) => void;
+}) {
+  const copy = CHAIN_COPY[chain];
   const [tab, setTab] = useState<Tab>("overview");
-  const [wallet, setWallet] = useState<WalletSession | null>(null);
+  const [wallet, setWallet] = useState<DeskSession | null>(null);
   const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -80,9 +118,9 @@ export function DeskApp() {
   const armEnsure = useRef<string | null>(null);
 
   const openWatch = useCallback((raw: string) => {
-    const parsed = parseWalletAddress(raw);
+    const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
     if (!parsed) {
-      setWatchError("That is not a Solana address.");
+      setWatchError(copy.watchError);
       return;
     }
     setWatchError(null);
@@ -90,7 +128,7 @@ export function DeskApp() {
     const url = new URL(window.location.href);
     url.searchParams.set("watch", parsed);
     window.history.replaceState(null, "", url);
-  }, []);
+  }, [chain, copy.watchError]);
 
   const closeWatch = useCallback(() => {
     setWatchAddress(null);
@@ -113,20 +151,20 @@ export function DeskApp() {
   const refresh = useCallback(async () => {
     if (!wallet) return;
     try {
-      applyDesk(await loadDesk());
+      applyDesk(await loadDesk(false, chain));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Desk refresh failed");
     } finally {
       setBooting(false);
     }
-  }, [applyDesk, wallet]);
+  }, [applyDesk, chain, wallet]);
 
   const connect = useCallback(async (trusted = false) => {
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const session = await connectWallet(trusted);
-      const book = await attachWallet(session.address, session.equityUsd);
+      const session = await connectDesk(chain, trusted);
+      const book = await attachWallet(session.address, session.equityUsd, chain);
       applyDesk(shellDesk(book));
       setWallet(session);
       setBooting(false);
@@ -135,34 +173,35 @@ export function DeskApp() {
     } finally {
       setWalletBusy(false);
     }
-  }, [applyDesk]);
+  }, [applyDesk, chain]);
 
   const disconnect = useCallback(async () => {
-    await disconnectWallet(wallet?.provider);
-    detachWallet();
+    await disconnectDesk(chain, wallet);
+    detachWallet(chain);
     setWallet(null);
     setTrading(null);
     setDesk(null);
     setThesis(null);
     setError(null);
     setBooting(false);
-  }, [wallet]);
+  }, [chain, wallet]);
 
   useEffect(() => {
-    setWalletHint(detectedWalletName());
-  }, []);
+    setWalletHint(detectedDeskWallet(chain));
+  }, [chain]);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("watch");
-    if (query && parseWalletAddress(query)) return;
+    const parsed = chain === "cronos" ? parseCronosAddress(query ?? "") : query ? parseWalletAddress(query) : null;
+    if (parsed) return;
     void connect(true);
-  }, [connect]);
+  }, [chain, connect]);
 
   useEffect(() => {
     if (!wallet) return;
-    return listenWallet(wallet.provider, {
+    return listenDesk(chain, wallet, {
       onDisconnect: () => {
-        detachWallet();
+        detachWallet(chain);
         setWallet(null);
         setTrading(null);
         setDesk(null);
@@ -173,16 +212,16 @@ export function DeskApp() {
           return;
         }
         void (async () => {
-          detachWallet();
-          const session = await refreshWallet({ ...wallet, address });
-          const book = await attachWallet(session.address, session.equityUsd);
+          detachWallet(chain);
+          const session = await refreshDesk(chain, { ...wallet, address });
+          const book = await attachWallet(session.address, session.equityUsd, chain);
           applyDesk(shellDesk(book));
           setWallet(session);
           setBooting(false);
         })();
       },
     });
-  }, [applyDesk, disconnect, wallet]);
+  }, [applyDesk, chain, disconnect, wallet]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -195,22 +234,22 @@ export function DeskApp() {
     if (!wallet) return;
     let live = true;
     const pullTrading = () => {
-      void tradingSnapshot(wallet.address)
+      void tradingSnapshot(wallet.address, chain)
         .then(async (snap) => {
           if (!live) return;
           setTrading(snap);
           if (!snap) return;
-          const wrote = await baselineTradingPrincipal(snap.equityUsd);
-          if (wrote && live) applyDesk(await loadDesk());
+          const wrote = await baselineTradingPrincipal(snap.equityUsd, chain);
+          if (wrote && live) applyDesk(await loadDesk(false, chain));
         })
         .catch(() => undefined);
     };
     pullTrading();
     const id = setInterval(() => {
-      void refreshWallet(wallet)
+      void refreshDesk(chain, wallet)
         .then(async (session) => {
           setWallet(session);
-          await attachWallet(session.address, session.equityUsd);
+          await attachWallet(session.address, session.equityUsd, chain);
           pullTrading();
         })
         .catch(() => undefined);
@@ -219,16 +258,16 @@ export function DeskApp() {
       live = false;
       clearInterval(id);
     };
-  }, [applyDesk, wallet]);
+  }, [applyDesk, chain, wallet]);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("watch");
     if (query) {
-      const parsed = parseWalletAddress(query);
+      const parsed = chain === "cronos" ? parseCronosAddress(query) : parseWalletAddress(query);
       if (parsed) setWatchAddress(parsed);
     }
-    setKnownBooks(listLocalBooks());
-  }, []);
+    setKnownBooks(listLocalBooks(chain));
+  }, [chain]);
 
   useEffect(() => {
     const tick = () => setClock(new Date().toLocaleTimeString());
@@ -249,7 +288,7 @@ export function DeskApp() {
       if (!current || cancel || inflight || busyRef.current) return false;
       inflight = true;
       try {
-        const next = await controlBot("tick", current);
+        const next = await controlBot("tick", current, chain);
         if (!cancel) applyDesk(next);
         return true;
       } catch (e) {
@@ -270,7 +309,7 @@ export function DeskApp() {
       window.clearInterval(first);
       window.clearInterval(id);
     };
-  }, [applyDesk, wallet?.address]);
+  }, [applyDesk, chain, wallet?.address]);
 
   useEffect(() => {
     const session = walletRef.current;
@@ -284,13 +323,13 @@ export function DeskApp() {
     let cancel = false;
     void (async () => {
       try {
-        const fresh = await refreshWallet(session);
+        const fresh = await refreshDesk(chain, session);
         if (cancel) return;
         setWallet(fresh);
-        const next = await controlBot("start", fresh);
+        const next = await controlBot("start", fresh, chain);
         if (cancel) return;
         applyDesk(next);
-        setTrading(await tradingSnapshot(fresh.address).catch(() => null));
+        setTrading(await tradingSnapshot(fresh.address, chain).catch(() => null));
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Arm signature failed");
       }
@@ -298,9 +337,16 @@ export function DeskApp() {
     return () => {
       cancel = true;
     };
-  }, [applyDesk, desk?.bot.running, desk?.config.walletSwaps, trading, wallet?.address]);
+  }, [applyDesk, chain, desk?.bot.running, desk?.config.walletSwaps, trading, wallet?.address]);
+
+  const onRunningRef = useRef(onRunning);
+  onRunningRef.current = onRunning;
+  useEffect(() => {
+    onRunningRef.current(Boolean(desk?.bot.running));
+  }, [desk?.bot.running]);
 
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Escape") {
         setThesis(null);
@@ -334,7 +380,7 @@ export function DeskApp() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desk?.bot.running, wallet, refresh]);
+  }, [active, desk?.bot.running, wallet, refresh]);
 
   useEffect(() => {
     const rows = desk?.config.walletSwaps ? desk.trades.filter((trade) => trade.signature) : desk?.trades;
@@ -355,7 +401,7 @@ export function DeskApp() {
 
   const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten") => {
     if (!wallet) {
-      setError("Connect a Solana wallet to trade.");
+      setError(copy.needWallet);
       return;
     }
     busyRef.current = true;
@@ -363,30 +409,30 @@ export function DeskApp() {
     if (action === "start") armEnsure.current = wallet.address;
     try {
       if (action === "start" || action === "reset") {
-        const session = await refreshWallet(wallet);
+        const session = await refreshDesk(chain, wallet);
         setWallet(session);
         if (action === "start" && session.equityUsd < MIN_TRADE_USD) {
-          const funded = await tradingSnapshot(session.address);
+          const funded = await tradingSnapshot(session.address, chain);
           if (!funded || funded.equityUsd < MIN_TRADE_USD) {
-            setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
+            setError(`Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`);
             return;
           }
         }
-        if (action === "start") await attachWallet(session.address, Math.max(session.equityUsd, trading?.equityUsd ?? 0));
-        applyDesk(await controlBot(action, session));
-        setTrading(await tradingSnapshot(session.address).catch(() => null));
+        if (action === "start") await attachWallet(session.address, Math.max(session.equityUsd, trading?.equityUsd ?? 0), chain);
+        applyDesk(await controlBot(action, session, chain));
+        setTrading(await tradingSnapshot(session.address, chain).catch(() => null));
         if (action === "reset") {
-          await adoptLiveEquity(session.equityUsd);
-          const next = await loadDesk();
+          await adoptLiveEquity(session.equityUsd, chain);
+          const next = await loadDesk(false, chain);
           applyDesk(next);
           if (next.portfolio.equityUsd < MIN_TRADE_USD) {
-            setError(`Wallet needs at least $${MIN_TRADE_USD} of priced SOL/USDC to trade.`);
+            setError(`Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`);
           }
         }
         return;
       }
-      applyDesk(await controlBot(action, wallet));
-      setTrading(await tradingSnapshot(wallet.address).catch(() => null));
+      applyDesk(await controlBot(action, wallet, chain));
+      setTrading(await tradingSnapshot(wallet.address, chain).catch(() => null));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Control failed");
     } finally {
@@ -397,16 +443,16 @@ export function DeskApp() {
 
   const withdrawProfit = async () => {
     if (!wallet) {
-      setError("Connect a Solana wallet to trade.");
+      setError(copy.needWallet);
       return;
     }
     busyRef.current = true;
     setBusy(true);
     try {
-      applyDesk(await withdrawTradingProfit(wallet));
+      applyDesk(await withdrawTradingProfit(wallet, chain));
       const [session, snap] = await Promise.all([
-        refreshWallet(wallet),
-        tradingSnapshot(wallet.address).catch(() => null),
+        refreshDesk(chain, wallet),
+        tradingSnapshot(wallet.address, chain).catch(() => null),
       ]);
       setWallet(session);
       setTrading(snap);
@@ -422,7 +468,7 @@ export function DeskApp() {
     if (!wallet) return;
     setBusy(true);
     try {
-      applyDesk(await configureBot(config));
+      applyDesk(await configureBot(config, chain));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Config failed");
     } finally {
@@ -439,7 +485,7 @@ export function DeskApp() {
     setCloseError(null);
     busyRef.current = true;
     try {
-      applyDesk(await closeTicket(positionId, wallet));
+      applyDesk(await closeTicket(positionId, wallet, chain));
       setDetailId((cur) => (cur === positionId ? null : cur));
     } catch (e) {
       setCloseError({ id: positionId, message: e instanceof Error ? e.message : "Close failed" });
@@ -457,7 +503,7 @@ export function DeskApp() {
     setCancelling(true);
     busyRef.current = true;
     try {
-      applyDesk(await cancelResting(wallet));
+      applyDesk(await cancelResting(wallet, chain));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not cancel the limit bid");
     } finally {
@@ -478,12 +524,25 @@ export function DeskApp() {
   }, [desk]);
 
   const detail = desk?.positions.find((position) => position.id === detailId) ?? null;
-  const solRow = desk?.research.find((r) => r.ticker === "SOL");
-  const solPx = desk?.regime.sol.price || solRow?.price || wallet?.solPriceUsd || 0;
-  const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
+  const nativeRow = desk?.research.find((r) => r.ticker === copy.native);
+  const solPx = (chain === "solana" ? desk?.regime.sol.price : 0) || nativeRow?.price || wallet?.solPriceUsd || 0;
+  const solChg = chain === "solana" && desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
+  const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : peerArmed;
+  const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : peerArmed;
+  const switchChain = (next: ChainId) => {
+    setWatchAddress(null);
+    onSwitch(next);
+  };
 
   if (watchAddress) {
-    return <WatchScreen address={watchAddress} onClose={closeWatch} />;
+    return (
+      <div>
+        <div className="sticky top-0 z-30 flex justify-end border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] px-4 py-2 backdrop-blur-xl">
+          <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
+        </div>
+        <WatchScreen address={watchAddress} chain={chain} onClose={closeWatch} />
+      </div>
+    );
   }
 
   if (!wallet) {
@@ -492,20 +551,20 @@ export function DeskApp() {
         <div className="mx-auto w-full max-w-xl">
         <div className="neon boot-fade w-full max-w-xl p-8 sm:p-10">
           <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
-          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // Solana</div>
+          <div className="mb-5 flex justify-end">
+            <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
+          </div>
+          <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
           <h1 className="mt-3 text-4xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
-          <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
-            No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real
-            SOL and USDC and sizes the book from that. A $3 wallet is enough to open.
-          </p>
+          <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
-            <GateChip label="Wallet book" hint="SOL + USDC only" />
-            <GateChip label="Live swaps" hint="Jupiter from the trading key" />
+            <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
+            <GateChip label="Live swaps" hint={copy.swapHint} />
           </div>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
           <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
-            {walletBusy ? "Waiting on wallet…" : walletHint ? `Connect ${walletHint}` : "Connect Solana wallet"}
+            {walletBusy ? "Waiting on wallet…" : walletHint ? `Connect ${walletHint}` : copy.connectFallback}
           </button>
           <form
             className="mt-6 border-t border-[var(--line)] pt-5"
@@ -516,7 +575,7 @@ export function DeskApp() {
           >
             <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--faint)]">Watch a book</div>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              Paste a Solana address. This page shows that wallet&apos;s live SOL and USDC, plus signed swaps stored in this browser.
+              {copy.watchBlurb}
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <input
@@ -542,8 +601,7 @@ export function DeskApp() {
             ) : null}
           </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
-            {walletHint ? `${walletHint} is injected in this browser.` : "Install Phantom or Solflare, then reload this page."}{" "}
-            Arm signs once. That signature moves spare SOL and USDC onto a trading key in this browser, and that key sends each swap. Tickets list only those signed fills.
+            {walletHint ? `${walletHint} is injected in this browser.` : copy.installHint} {copy.armBlurb}
           </p>
         </div>
         </div>
@@ -567,12 +625,17 @@ export function DeskApp() {
 
   return (
     <div className="min-h-screen">
-      <Header
+        <Header
         desk={desk}
         wallet={wallet}
         clock={clock}
         solPx={solPx}
         solChg={solChg}
+        nativeLabel={copy.native}
+        chain={chain}
+        solArmed={solArmed}
+        croArmed={croArmed}
+        onSwitch={switchChain}
         updatedAt={updatedAt}
         onDisconnect={() => void disconnect()}
         onRefresh={() => void refresh()}
@@ -624,8 +687,8 @@ export function DeskApp() {
           {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
           <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
             {trading
-              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
-              : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC. ${
+              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
+              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
                   desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
                 }`}
           </p>
@@ -652,15 +715,17 @@ export function DeskApp() {
                   trading={trading}
                   winRate={winRate}
                   focusMint={focusMint}
+                  chain={chain}
                   onFocus={setFocusMint}
                   onOpen={setThesis}
                   onArm={() => void control(armButton(desk.bot.running).action)}
                   busy={busy}
                 />
               ) : null}
-              {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
+              {tab === "radar" ? <Radar desk={desk} chain={chain} onOpen={setThesis} /> : null}
               {tab === "bot" ? (
                 <BotView
+                  chain={chain}
                   desk={desk}
                   busy={busy}
                   closingId={closingId}
@@ -675,6 +740,7 @@ export function DeskApp() {
               ) : null}
               {tab === "book" ? (
                 <Book
+                  chain={chain}
                   desk={desk}
                   wallet={wallet}
                   trading={trading}
@@ -689,7 +755,7 @@ export function DeskApp() {
                   onWithdraw={() => void withdrawProfit()}
                 />
               ) : null}
-              {tab === "risk" ? <SettingsPanel desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
+              {tab === "risk" ? <SettingsPanel chain={chain} desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
             </div>
           )}
           {desk ? (
@@ -732,12 +798,48 @@ function GateChip({ label, hint }: { label: string; hint: string }) {
   );
 }
 
+function ChainSwitch({
+  chain,
+  solArmed,
+  croArmed,
+  onSwitch,
+}: {
+  chain: ChainId;
+  solArmed: boolean;
+  croArmed: boolean;
+  onSwitch: (next: ChainId) => void;
+}) {
+  const item = (id: ChainId, label: string, armed: boolean) => (
+    <button
+      type="button"
+      onClick={() => onSwitch(id)}
+      className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.16em] ${
+        chain === id ? "bg-[rgba(255,74,216,0.16)] text-[var(--magenta)]" : "text-[var(--faint)]"
+      }`}
+    >
+      {armed ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-[var(--line)] p-1">
+      {item("solana", "SOL", solArmed)}
+      {item("cronos", "CRO", croArmed)}
+    </div>
+  );
+}
+
 function Header({
   desk,
   wallet,
   clock,
   solPx,
   solChg,
+  nativeLabel,
+  chain,
+  solArmed,
+  croArmed,
+  onSwitch,
   updatedAt,
   onDisconnect,
   onRefresh,
@@ -745,10 +847,15 @@ function Header({
   trading,
 }: {
   desk: DeskPayload | null;
-  wallet: WalletSession;
+  wallet: DeskSession;
   clock: string;
   solPx: number;
   solChg?: number;
+  nativeLabel: string;
+  chain: ChainId;
+  solArmed: boolean;
+  croArmed: boolean;
+  onSwitch: (next: ChainId) => void;
   updatedAt: string | null;
   onDisconnect: () => void;
   onRefresh: () => void;
@@ -767,8 +874,9 @@ function Header({
             <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">Live stream</div>
           </div>
         </div>
+        <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={onSwitch} />
         <div className="hidden items-center gap-5 md:flex">
-          <Ticker label="SOL" value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
+          <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
           <Ticker
             label="BTC"
             value={desk?.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"}
@@ -903,7 +1011,7 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
   );
 }
 
-function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
+function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle[]> {
   const key = tapes.map((tape) => tape.poolAddress).join("|");
   const [bars, setBars] = useState<Record<string, Candle[]>>({});
   useEffect(() => {
@@ -914,7 +1022,7 @@ function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
       const rows = await Promise.all(
         pools.map(async (poolAddress) => {
           try {
-            const candles = await fetchOhlcv(poolAddress, 48);
+            const candles = await fetchOhlcv(poolAddress, 48, chain);
             return [poolAddress, candles] as const;
           } catch {
             return [poolAddress, null] as const;
@@ -939,7 +1047,7 @@ function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
       live = false;
       clearInterval(id);
     };
-  }, [key]);
+  }, [chain, key]);
   return bars;
 }
 
@@ -949,23 +1057,26 @@ function Overview({
   trading,
   winRate,
   focusMint,
+  chain,
   onFocus,
   onOpen,
   onArm,
   busy,
 }: {
   desk: DeskPayload;
-  wallet: WalletSession;
+  wallet: DeskSession;
   trading: { equityUsd: number } | null;
   winRate: number;
   focusMint: string | null;
+  chain: ChainId;
   onFocus: (mint: string) => void;
   onOpen: (t: ResearchThesis) => void;
   onArm: () => void;
   busy: boolean;
 }) {
+  const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
-  const bars = useWatchTapes(desk.tapes);
+  const bars = useWatchTapes(desk.tapes, chain);
   const focusTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? desk.tapes[0] ?? null;
   const focusCandles = focusTape ? bars[focusTape.poolAddress] ?? [] : [];
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
@@ -1036,10 +1147,11 @@ function Overview({
           </span>
         </div>
         <p className="mb-3 px-1 text-sm leading-6 text-[var(--text)]">
-          {desk.bot.lastNote ?? "Waiting for the first SOL and Zebec tick."}
+          {desk.bot.lastNote ?? copy.waitingTick}
         </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          {(["SOL", "ZBCN"] as const).map((symbol) => {
+        <div className={`grid gap-3 ${bookTokens(chain).length > 1 ? "md:grid-cols-2" : ""}`}>
+          {bookTokens(chain).map((token) => {
+            const symbol = token.symbol;
             const tape = desk.tapes.find((row) => row.symbol === symbol);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
@@ -1052,7 +1164,7 @@ function Overview({
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between px-1">
-                  <span className="text-sm font-medium">{symbol === "ZBCN" ? "Zebec" : "SOL"}</span>
+                  <span className="text-sm font-medium">{tapeLabel(symbol)}</span>
                   {tape ? <Tone value={tape.change15m} /> : <span className="text-[11px] text-[var(--faint)]">—</span>}
                 </div>
                 <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
@@ -1146,7 +1258,7 @@ function Overview({
             <div className="space-y-2 text-sm text-[var(--muted)]">
               <p>
                 {swaps
-                  ? "No signed swaps yet. An armed bot sends the next rising SOL or Zebec long from the trading key. The row appears here with a Solscan link once that swap confirms."
+                  ? copy.noSwaps
                   : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
               </p>
               {desk.bot.lastNote ? <p className="text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
@@ -1195,14 +1307,12 @@ function Overview({
   );
 }
 
-function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis) => void }) {
+function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onOpen: (t: ResearchThesis) => void }) {
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
-        <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-          SOL and Zebec only. Empty rows mean the feeds missed this cycle — nothing is invented.
-        </p>
+        <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
       </div>
       <div className="neon desk-scroll overflow-x-auto p-1">
         <table className="w-full min-w-[1080px] text-left text-sm">
@@ -1273,6 +1383,7 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
 }
 
 function BotView({
+  chain,
   desk,
   busy,
   closingId,
@@ -1284,6 +1395,7 @@ function BotView({
   onClose,
   onCancelResting,
 }: {
+  chain: ChainId;
   desk: DeskPayload;
   busy: boolean;
   closingId: string | null;
@@ -1303,7 +1415,7 @@ function BotView({
       <section className="neon p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? "Scanning Solana" : "Idle"}</Pill>
+            <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? CHAIN_COPY[chain].scanning : "Idle"}</Pill>
             <h2 className="mt-3 text-3xl font-medium">Wallet-gated ticks. Time-boxed.</h2>
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
               {desk.bot.lastNote ??
@@ -1392,7 +1504,7 @@ function BotView({
           {open.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
               {swaps
-                ? "No open swap. This list refreshes on every scan, and a signed ticket shows up here with its Solscan link."
+                ? `No open swap. This list refreshes on every scan, and a signed ticket shows up here with its ${CHAIN_COPY[chain].explorerName} link.`
                 : "No open ticket. This list refreshes on every scan."}
             </p>
           ) : (
@@ -1523,6 +1635,7 @@ function BotView({
 }
 
 function Book({
+  chain,
   desk,
   wallet,
   trading,
@@ -1536,8 +1649,9 @@ function Book({
   onWalletSwaps,
   onWithdraw,
 }: {
+  chain: ChainId;
   desk: DeskPayload;
-  wallet: WalletSession;
+  wallet: DeskSession;
   trading: { address: string; sol: number; usdc: number; equityUsd: number } | null;
   winRate: number;
   busy: boolean;
@@ -1549,6 +1663,7 @@ function Book({
   onWalletSwaps: (on: boolean) => void;
   onWithdraw: () => void;
 }) {
+  const copy = CHAIN_COPY[chain];
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
   const open = shownFills(desk.positions, swaps);
@@ -1570,7 +1685,7 @@ function Book({
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
-                ? "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back."
+                ? copy.bookArm
                 : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
             </p>
           </div>
@@ -1593,8 +1708,8 @@ function Book({
           value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
           sub={
             trading
-              ? `${trading.sol.toFixed(3)} SOL · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
-              : `${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`
+              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
+              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
           }
         />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />
@@ -1626,7 +1741,7 @@ function Book({
             {open.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
-                  {swaps ? "No open swap. A rising SOL or Zebec long is sent from the trading key." : "No open ticket."}
+                  {swaps ? copy.noOpen : "No open ticket."}
                 </td>
               </tr>
             ) : (
@@ -1689,9 +1804,7 @@ function Book({
             {fills.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
-                  {swaps
-                    ? "No live tickets yet. A swap from the trading key shows up here with a Solscan link. A red 15m tape stays in cash."
-                    : "No tickets."}
+                  {swaps ? copy.noTickets : "No tickets."}
                 </td>
               </tr>
             ) : (
@@ -1704,7 +1817,7 @@ function Book({
                   <td className="num">{priceFmt(t.price)}</td>
                   <td>{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</td>
                   <td className="text-[var(--muted)]">{t.reason}</td>
-                  <td>{txLink(t.signature)}</td>
+                  <td>{txLink(t.signature, chain)}</td>
                 </tr>
               ))
             )}
@@ -1715,14 +1828,19 @@ function Book({
   );
 }
 
-function txLink(signature?: string) {
+function txLink(signature: string | undefined, chain: ChainId = "solana") {
   if (!signature) return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Simulated</span>;
   const short = signature.length > 10 ? `${signature.slice(0, 4)}…${signature.slice(-4)}` : signature;
   return (
-    <a className="num text-[11px] text-[var(--mint)]" href={`https://solscan.io/tx/${signature}`} target="_blank" rel="noreferrer">
+    <a className="num text-[11px] text-[var(--mint)]" href={txUrl(chain, signature)} target="_blank" rel="noreferrer">
       {short}
     </a>
   );
+}
+
+function parseCronosAddress(input: string): string | null {
+  const trimmed = input.trim();
+  return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? trimmed.toLowerCase() : null;
 }
 
 function PositionActions({

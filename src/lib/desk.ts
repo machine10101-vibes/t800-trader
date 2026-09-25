@@ -1,5 +1,6 @@
+import type { ChainId } from "@/lib/chain";
 import { invalidateMarketCache } from "@/lib/market/providers";
-import { isActiveBook, WATCHLIST } from "@/lib/market/universe";
+import { bookTokens, isActiveBook } from "@/lib/market/universe";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
@@ -31,17 +32,17 @@ function loadingRegime(): MarketRegime {
   };
 }
 
-/** One 5-minute tape for each name on the active book, deepest pool first. */
-export function watchlistTapes(candidates: TokenCandidate[]): TapeCard[] {
-  const rank = new Map(WATCHLIST.filter((token) => isActiveBook(token.mint)).map((token, index) => [token.mint, index]));
+/** One 5-minute tape for each name on this chain's book, deepest pool first. */
+export function watchlistTapes(candidates: TokenCandidate[], chain: ChainId = "solana"): TapeCard[] {
+  const rank = new Map(bookTokens(chain).map((token, index) => [token.mint.toLowerCase(), index]));
   const best = new Map<string, TokenCandidate>();
   for (const candidate of candidates) {
-    if (!candidate.watchlist || !candidate.poolAddress || !isActiveBook(candidate.mint)) continue;
+    if (!candidate.watchlist || !candidate.poolAddress || !isActiveBook(candidate.mint, chain)) continue;
     const prev = best.get(candidate.mint);
     if (!prev || candidate.liquidityUsd > prev.liquidityUsd) best.set(candidate.mint, candidate);
   }
   return [...best.values()]
-    .sort((a, b) => (rank.get(a.mint) ?? 99) - (rank.get(b.mint) ?? 99))
+    .sort((a, b) => (rank.get(a.mint.toLowerCase()) ?? 99) - (rank.get(b.mint.toLowerCase()) ?? 99))
     .map((candidate) => ({
       symbol: candidate.symbol,
       mint: candidate.mint,
@@ -79,14 +80,14 @@ export function shellDesk(state: AppState): DeskPayload {
   };
 }
 
-export async function buildDesk(force = false): Promise<DeskPayload> {
+export async function buildDesk(force = false, chain: ChainId = "solana"): Promise<DeskPayload> {
   if (force) {
-    invalidateMarketCache();
-    clearResearchCache();
+    invalidateMarketCache(chain);
+    clearResearchCache(chain);
   }
-  const state = await loadState();
-  const research = await runResearch(state.config, force);
-  const studied = await mutateState((current) => studyTape(current, research.candidates, research.regime.stance));
+  const state = await loadState(chain);
+  const research = await runResearch(state.config, force, chain);
+  const studied = await mutateState((current) => studyTape(current, research.candidates, research.regime.stance), chain);
   return {
     regime: research.regime,
     research: research.research,
@@ -109,7 +110,7 @@ export async function buildDesk(force = false): Promise<DeskPayload> {
       liquidityUsd: c.liquidityUsd,
       volume24hUsd: c.volume24hUsd,
     })),
-    tapes: watchlistTapes(research.candidates),
+    tapes: watchlistTapes(research.candidates, chain),
     stats: bookStats(studied.trades, studied.portfolio, studied.equityCurve),
     learning: learningReport(studied.memory),
     generatedAt: new Date().toISOString(),

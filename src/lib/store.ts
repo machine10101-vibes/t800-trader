@@ -1,3 +1,4 @@
+import type { ChainId } from "@/lib/chain";
 import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
@@ -91,15 +92,40 @@ function hydrate(state: AppState): AppState {
   return { ...state, config: normalizeConfig(state.config), memory: ensureMemory(state.memory) };
 }
 
-let activeWallet: string | null = null;
-let memory: AppState | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
-
-export function getActiveWallet(): string | null {
-  return activeWallet;
+interface BookSlot {
+  wallet: string | null;
+  memory: AppState | null;
+  writeQueue: Promise<void>;
 }
 
-function storageKey(wallet: string): string {
+function blankSlot(): BookSlot {
+  return { wallet: null, memory: null, writeQueue: Promise.resolve() };
+}
+
+const slots: Record<ChainId, BookSlot> = {
+  solana: blankSlot(),
+  cronos: blankSlot(),
+};
+
+function slotFor(chain: ChainId = "solana"): BookSlot {
+  return slots[chain];
+}
+
+function walletError(chain: ChainId): string {
+  return chain === "cronos"
+    ? "Connect a Cronos wallet to load a live book."
+    : "Connect a Solana wallet to load a live book.";
+}
+
+export function getActiveWallet(chain: ChainId = "solana"): string | null {
+  return slotFor(chain).wallet;
+}
+
+export function bookStorageKey(chain: ChainId, wallet: string): string {
+  return `t800-trader-state:${chain}:${wallet}`;
+}
+
+function legacyStorageKey(wallet: string): string {
   return `t800-trader-state:${wallet}`;
 }
 
@@ -140,25 +166,34 @@ export function emptyState(config: Partial<BotConfig> = DEFAULT_CONFIG): AppStat
   };
 }
 
-export function peekBook(address: string): AppState | null {
-  return readBrowserState(address);
+export function peekBook(address: string, chain: ChainId = "solana"): AppState | null {
+  return readBrowserState(chain, address);
 }
 
-export function listLocalBooks(): string[] {
+export function listLocalBooks(chain: ChainId = "solana"): string[] {
   if (typeof window === "undefined") return [];
-  const prefix = "t800-trader-state:";
+  const prefix = `t800-trader-state:${chain}:`;
+  const legacy = "t800-trader-state:";
   const out: string[] = [];
   for (let i = 0; i < window.localStorage.length; i += 1) {
     const key = window.localStorage.key(i);
-    if (key?.startsWith(prefix)) out.push(key.slice(prefix.length));
+    if (!key) continue;
+    if (key.startsWith(prefix)) {
+      out.push(key.slice(prefix.length));
+      continue;
+    }
+    if (chain !== "solana" || !key.startsWith(legacy)) continue;
+    const addr = key.slice(legacy.length);
+    if (!addr || addr.includes(":") || out.includes(addr)) continue;
+    out.push(addr);
   }
   return out;
 }
 
-function readBrowserState(wallet: string): AppState | null {
+function readRaw(key: string): AppState | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(storageKey(wallet));
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed?.config || !parsed?.portfolio) return null;
@@ -168,10 +203,17 @@ function readBrowserState(wallet: string): AppState | null {
   }
 }
 
-function writeBrowserState(wallet: string, next: AppState): void {
+function readBrowserState(chain: ChainId, wallet: string): AppState | null {
+  const current = readRaw(bookStorageKey(chain, wallet));
+  if (current) return current;
+  if (chain === "solana") return readRaw(legacyStorageKey(wallet));
+  return null;
+}
+
+function writeBrowserState(chain: ChainId, wallet: string, next: AppState): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey(wallet), JSON.stringify(next));
+    window.localStorage.setItem(bookStorageKey(chain, wallet), JSON.stringify(next));
   } catch {
     // Quota or private-mode — keep the in-memory book.
   }
@@ -199,64 +241,71 @@ export function freshBook(state: AppState, liveEquityUsd: number): AppState {
   return emptyState({ ...state.config, startingEquity: liveEquityUsd });
 }
 
-export async function adoptLiveEquity(liveEquityUsd: number): Promise<AppState> {
-  if (!activeWallet) throw new Error("Connect a Solana wallet to load a live book.");
-  const current = memory ?? readBrowserState(activeWallet) ?? emptyState();
+export async function adoptLiveEquity(liveEquityUsd: number, chain: ChainId = "solana"): Promise<AppState> {
+  const slot = slotFor(chain);
+  if (!slot.wallet) throw new Error(walletError(chain));
+  const current = slot.memory ?? readBrowserState(chain, slot.wallet) ?? emptyState();
   const next = freshBook(current, liveEquityUsd);
-  memory = next;
-  writeBrowserState(activeWallet, next);
+  slot.memory = next;
+  writeBrowserState(chain, slot.wallet, next);
   return next;
 }
 
-export async function attachWallet(address: string, liveEquityUsd: number): Promise<AppState> {
-  if (activeWallet === address && memory) {
-    const next = seedFromLiveEquity(memory, liveEquityUsd);
-    if (next !== memory) {
-      memory = next;
-      writeBrowserState(address, memory);
+export async function attachWallet(address: string, liveEquityUsd: number, chain: ChainId = "solana"): Promise<AppState> {
+  const slot = slotFor(chain);
+  if (slot.wallet === address && slot.memory) {
+    const next = seedFromLiveEquity(slot.memory, liveEquityUsd);
+    if (next !== slot.memory) {
+      slot.memory = next;
+      writeBrowserState(chain, address, slot.memory);
     }
-    return memory;
+    return slot.memory;
   }
-  activeWallet = address;
-  const loaded = readBrowserState(address);
+  slot.wallet = address;
+  const loaded = readBrowserState(chain, address);
   if (loaded) {
-    memory = seedFromLiveEquity(loaded, liveEquityUsd);
-    writeBrowserState(address, memory);
-    return memory;
+    slot.memory = seedFromLiveEquity(loaded, liveEquityUsd);
+    writeBrowserState(chain, address, slot.memory);
+    return slot.memory;
   }
-  memory = emptyState({ ...DEFAULT_CONFIG, startingEquity: Math.max(0, liveEquityUsd) });
-  writeBrowserState(address, memory);
-  return memory;
+  slot.memory = emptyState({ ...DEFAULT_CONFIG, startingEquity: Math.max(0, liveEquityUsd) });
+  writeBrowserState(chain, address, slot.memory);
+  return slot.memory;
 }
 
-export function detachWallet(): void {
-  activeWallet = null;
-  memory = null;
+export function detachWallet(chain: ChainId = "solana"): void {
+  const slot = slotFor(chain);
+  slot.wallet = null;
+  slot.memory = null;
 }
 
-export async function loadState(): Promise<AppState> {
-  if (!activeWallet) {
-    throw new Error("Connect a Solana wallet to load a live book.");
-  }
-  if (memory) return memory;
-  memory = readBrowserState(activeWallet) ?? emptyState();
-  return memory;
+export async function loadState(chain: ChainId = "solana"): Promise<AppState> {
+  const slot = slotFor(chain);
+  if (!slot.wallet) throw new Error(walletError(chain));
+  if (slot.memory) return slot.memory;
+  slot.memory = readBrowserState(chain, slot.wallet) ?? emptyState();
+  return slot.memory;
 }
 
-export async function saveState(next: AppState): Promise<AppState> {
-  if (!activeWallet) throw new Error("Connect a Solana wallet to persist the book.");
-  memory = next;
-  writeBrowserState(activeWallet, next);
+export async function saveState(next: AppState, chain: ChainId = "solana"): Promise<AppState> {
+  const slot = slotFor(chain);
+  if (!slot.wallet) throw new Error(walletError(chain).replace("load a live book", "persist the book"));
+  slot.memory = next;
+  writeBrowserState(chain, slot.wallet, next);
   return next;
 }
 
-export async function mutateState(fn: (state: AppState) => AppState | Promise<AppState>): Promise<AppState> {
-  const run = writeQueue.then(async () => {
-    const current = await loadState();
+export async function mutateState(
+  fn: (state: AppState) => AppState | Promise<AppState>,
+  chain: ChainId = "solana",
+): Promise<AppState> {
+  const slot = slotFor(chain);
+  const run = slot.writeQueue.then(async () => {
+    const current = await loadState(chain);
     const next = await fn(structuredClone(current));
-    return saveState(next);
+    return saveState(next, chain);
   });
-  writeQueue = run.then(
+  slot.writeQueue = run.then(
     () => undefined,
     () => undefined,
   );

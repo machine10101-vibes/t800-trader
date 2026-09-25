@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ACTIVE_BOOK, BOOK_POOLS, WATCHLIST } from "./market/universe";
+import { ACTIVE_BOOK, BOOK_POOLS, WCRO_MINT, WATCHLIST, bookPools, bookTokens } from "./market/universe";
 import { armButton, shellDesk, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
 import type { TokenCandidate } from "./types";
@@ -75,5 +75,29 @@ describe("BOOK_POOLS", () => {
     for (const mint of ACTIVE_BOOK) assert.equal(pinned.has(mint), true);
     assert.equal(BOOK_POOLS.length, ACTIVE_BOOK.length);
     assert.equal(new Set(BOOK_POOLS.map((pin) => pin.pool)).size, BOOK_POOLS.length);
+    assert.deepEqual(
+      bookTokens("cronos").map((token) => token.symbol),
+      ["CRO"],
+    );
+    assert.equal(bookPools("cronos")[0]?.mint, WCRO_MINT);
+    const cro = bookTokens("cronos")[0]!;
+    const flow = { buys: 1, sells: 1, buyers: 1, sellers: 1, volumeUsd: 1, priceChangePct: 0.4 };
+    const croTapes = watchlistTapes(
+      [
+        {
+          symbol: "CRO",
+          mint: cro.mint,
+          poolAddress: "cro-pool",
+          liquidityUsd: 1_000_000,
+          watchlist: true,
+          flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
+        } as TokenCandidate,
+      ],
+      "cronos",
+    );
+    assert.deepEqual(
+      croTapes.map((tape) => tape.symbol),
+      ["CRO"],
+    );
   });
 });

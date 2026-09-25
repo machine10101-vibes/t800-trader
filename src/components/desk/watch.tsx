@@ -1,14 +1,15 @@
 "use client";
 
+import type { ChainId } from "@/lib/chain";
 import { buildMonitor, type MonitorView } from "@/lib/monitor";
-import { peekBook } from "@/lib/store";
+import { bookStorageKey, peekBook } from "@/lib/store";
 import { readBalances } from "@/lib/solana/wallet";
 import { pct, shortAddress, usd } from "@/lib/utils";
 import { rMultiple } from "@/lib/trading/risk";
 import { useEffect, useState } from "react";
 import { Label, Pill, Spark, Stat, Tone } from "./bits";
 
-export function WatchScreen({ address, onClose }: { address: string; onClose: () => void }) {
+export function WatchScreen({ address, chain = "solana", onClose }: { address: string; chain?: ChainId; onClose: () => void }) {
   const [view, setView] = useState<MonitorView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -16,9 +17,12 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
   useEffect(() => {
     let live = true;
     const pull = async () => {
-      const book = peekBook(address);
+      const book = peekBook(address, chain);
       try {
-        const balances = await readBalances(address);
+        const balances =
+          chain === "cronos"
+            ? await import("@/lib/cronos/wallet").then((mod) => mod.readCronosBalances(address))
+            : await readBalances(address);
         if (!live) return;
         setView(buildMonitor(address, book, balances));
         setError(null);
@@ -31,7 +35,7 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
     void pull();
     const id = window.setInterval(() => void pull(), 15_000);
     const onStore = (event: StorageEvent) => {
-      if (event.key === `t800-trader-state:${address}`) void pull();
+      if (event.key === bookStorageKey(chain, address) || event.key === `t800-trader-state:${address}`) void pull();
     };
     window.addEventListener("storage", onStore);
     return () => {
@@ -39,7 +43,7 @@ export function WatchScreen({ address, onClose }: { address: string; onClose: ()
       window.clearInterval(id);
       window.removeEventListener("storage", onStore);
     };
-  }, [address]);
+  }, [address, chain]);
 
   const copyLink = async () => {
     const url = new URL(window.location.href);

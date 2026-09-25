@@ -1,6 +1,8 @@
+import type { ChainId } from "@/lib/chain";
+import { sameMint } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { tapeRead } from "@/lib/market/tape";
-import { isActiveBook, SOL_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
@@ -106,7 +108,9 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
       ? "A confirmed long is a Jupiter perp at 5x, or 10x when the signal is strong, once the key has $10. Below that it is a spot bid."
       : c.mint === ZBCN_MINT
         ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. Jupiter lists no ZBCN perp, so that collateral is a Zebec spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
-        : "A confirmed long is a spot bid.";
+        : sameMint(c.mint, WCRO_MINT)
+          ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. This desk has no CRO perp, so that collateral is a CRO spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
+          : "A confirmed long is a spot bid.";
   const coreThesis = `${tapeRead(c.symbol, c.flows.m5.priceChangePct, c.flows.m15.priceChangePct, c.flows.h1.priceChangePct)} ${techLine(c)} ${path} Reserves ${usd(c.liquidityUsd)}, 24h volume ${usd(c.volume24hUsd)}.`;
 
   const m15Now = c.flows.m15.priceChangePct;
@@ -223,19 +227,18 @@ function techLine(c: ScoredCandidate): string {
   return bits.length ? `5m structure: ${bits.join(", ")}.` : "5m structure unavailable this cycle.";
 }
 
-let researchCache:
-  | {
-      at: number;
-      key: string;
-      value: {
-        regime: MarketRegime;
-        research: ResearchThesis[];
-        universeSize: number;
-        eliminated: number;
-        candidates: ScoredCandidate[];
-      };
-    }
-  | null = null;
+interface ResearchValue {
+  regime: MarketRegime;
+  research: ResearchThesis[];
+  universeSize: number;
+  eliminated: number;
+  candidates: ScoredCandidate[];
+}
+
+const researchCache: Record<ChainId, { at: number; key: string; value: ResearchValue } | null> = {
+  solana: null,
+  cronos: null,
+};
 
 const RESEARCH_CACHE_MS = 20_000;
 
@@ -245,25 +248,26 @@ function structureFor(candidate: TokenCandidate): TechnicalSnapshot {
   return technicalFromFlows(candidate);
 }
 
-export function clearResearchCache(): void {
-  researchCache = null;
+export function clearResearchCache(chain?: ChainId): void {
+  if (!chain) {
+    researchCache.solana = null;
+    researchCache.cronos = null;
+    return;
+  }
+  researchCache[chain] = null;
 }
 
 export async function runResearch(
   config: BotConfig,
   force = false,
-): Promise<{
-  regime: MarketRegime;
-  research: ResearchThesis[];
-  universeSize: number;
-  eliminated: number;
-  candidates: ScoredCandidate[];
-}> {
-  const key = screenKey(config);
-  if (!force && researchCache && researchCache.key === key && Date.now() - researchCache.at < RESEARCH_CACHE_MS) {
-    return researchCache.value;
+  chain: ChainId = "solana",
+): Promise<ResearchValue> {
+  const key = `${chain}|${screenKey(config)}`;
+  const cached = researchCache[chain];
+  if (!force && cached && cached.key === key && Date.now() - cached.at < RESEARCH_CACHE_MS) {
+    return cached.value;
   }
-  const market = await loadMarket();
+  const market = await loadMarket(false, chain);
   const screen = {
     minLiquidityUsd: config.minLiquidityUsd,
     minVolume24hUsd: config.minVolume24hUsd,
@@ -274,7 +278,7 @@ export async function runResearch(
 
   const passed: TokenCandidate[] = [];
   let eliminated = 0;
-  const book = market.candidates.filter((c) => isActiveBook(c.mint));
+  const book = market.candidates.filter((c) => isActiveBook(c.mint, chain));
   for (const c of book) {
     if (screenCandidate(c, screen)) {
       eliminated += 1;
@@ -316,7 +320,7 @@ export async function runResearch(
     eliminated,
     candidates: scored,
   };
-  researchCache = { at: Date.now(), key, value };
+  researchCache[chain] = { at: Date.now(), key, value };
   return value;
 }
 
