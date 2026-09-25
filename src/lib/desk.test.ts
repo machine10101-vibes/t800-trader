@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { armButton, shellDesk } from "./desk";
+import { WATCHLIST } from "./market/universe";
+import { armButton, shellDesk, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
+import type { TokenCandidate } from "./types";
 
 describe("armButton", () => {
   it("disarms when the book is already running", () => {
@@ -24,5 +26,34 @@ describe("shellDesk", () => {
 
     const fresh = shellDesk(emptyState());
     assert.equal(fresh.bot.running, false);
+    assert.equal(fresh.tapes.length, 0);
+  });
+});
+
+describe("watchlistTapes", () => {
+  it("keeps one 5-minute tape per watchlist name and drops everything else", () => {
+    const sol = WATCHLIST[0]!;
+    const jup = WATCHLIST[1]!;
+    const flow = { buys: 1, sells: 1, buyers: 1, sellers: 1, volumeUsd: 1, priceChangePct: 0.4 };
+    const row = (token: typeof sol, pool: string, liquidityUsd: number): TokenCandidate =>
+      ({
+        symbol: token.symbol,
+        mint: token.mint,
+        poolAddress: pool,
+        liquidityUsd,
+        watchlist: true,
+        flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
+      }) as TokenCandidate;
+    const tapes = watchlistTapes([
+      row(jup, "jup-thin", 1_000),
+      row(jup, "jup-deep", 9_000),
+      row(sol, "sol-pool", 50_000),
+      { ...row(sol, "other", 1), symbol: "PUMP", mint: "pump", watchlist: false } as TokenCandidate,
+    ]);
+    assert.deepEqual(
+      tapes.map((tape) => tape.symbol),
+      ["SOL", "JUP"],
+    );
+    assert.equal(tapes[1]?.poolAddress, "jup-deep");
   });
 });

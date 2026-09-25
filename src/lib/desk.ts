@@ -1,9 +1,10 @@
 import { invalidateMarketCache } from "@/lib/market/providers";
+import { WATCHLIST } from "@/lib/market/universe";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
 import { bookStats } from "@/lib/trading/stats";
-import type { AppState, DeskPayload, MarketRegime } from "@/lib/types";
+import type { AppState, DeskPayload, MarketRegime, TapeCard, TokenCandidate } from "@/lib/types";
 
 function loadingRegime(): MarketRegime {
   const flat = { price: 0, change24h: 0, marketCap: 0, volume24h: 0 };
@@ -30,6 +31,26 @@ function loadingRegime(): MarketRegime {
   };
 }
 
+/** One 5-minute tape per watchlist mint, deepest pool first. Capped so the desk does not burst GeckoTerminal. */
+export function watchlistTapes(candidates: TokenCandidate[]): TapeCard[] {
+  const rank = new Map(WATCHLIST.map((token, index) => [token.mint, index]));
+  const best = new Map<string, TokenCandidate>();
+  for (const candidate of candidates) {
+    if (!candidate.watchlist || !candidate.poolAddress || !rank.has(candidate.mint)) continue;
+    const prev = best.get(candidate.mint);
+    if (!prev || candidate.liquidityUsd > prev.liquidityUsd) best.set(candidate.mint, candidate);
+  }
+  return [...best.values()]
+    .sort((a, b) => (rank.get(a.mint) ?? 99) - (rank.get(b.mint) ?? 99))
+    .slice(0, 12)
+    .map((candidate) => ({
+      symbol: candidate.symbol,
+      mint: candidate.mint,
+      poolAddress: candidate.poolAddress,
+      change15m: candidate.flows.m15.priceChangePct,
+    }));
+}
+
 /** Overview and the sidebar share this. A saved armed book must not keep offering Arm. */
 export function armButton(running: boolean): { action: "start" | "stop"; label: string } {
   return running ? { action: "stop", label: "Disarm the bot" } : { action: "start", label: "Arm the bot" };
@@ -52,6 +73,7 @@ export function shellDesk(state: AppState): DeskPayload {
     equityCurve: state.equityCurve,
     whatCouldBeWrong: [],
     tapeDots: [],
+    tapes: [],
     stats: bookStats(state.trades, state.portfolio, state.equityCurve),
     learning: learningReport(state.memory),
     generatedAt: new Date().toISOString(),
@@ -88,6 +110,7 @@ export async function buildDesk(force = false): Promise<DeskPayload> {
       liquidityUsd: c.liquidityUsd,
       volume24hUsd: c.volume24hUsd,
     })),
+    tapes: watchlistTapes(research.candidates),
     stats: bookStats(studied.trades, studied.portfolio, studied.equityCurve),
     learning: learningReport(studied.memory),
     generatedAt: new Date().toISOString(),

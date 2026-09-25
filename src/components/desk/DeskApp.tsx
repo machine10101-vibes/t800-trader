@@ -30,7 +30,7 @@ import {
   refreshWallet,
   type WalletSession,
 } from "@/lib/solana/wallet";
-import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
+import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
@@ -59,7 +59,6 @@ export function DeskApp() {
   const [booting, setBooting] = useState(false);
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
-  const [candles, setCandles] = useState<Candle[]>([]);
   const [focusMint, setFocusMint] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [walletHint, setWalletHint] = useState<string | null>(null);
@@ -139,7 +138,6 @@ export function DeskApp() {
     setTrading(null);
     setDesk(null);
     setThesis(null);
-    setCandles([]);
     setError(null);
     setBooting(false);
   }, [wallet]);
@@ -232,30 +230,6 @@ export function DeskApp() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
-
-  const focusPool = useMemo(() => {
-    const row = desk?.research.find((r) => r.candidate.mint === focusMint) ?? desk?.research[0];
-    return row?.candidate.poolAddress ?? null;
-  }, [desk?.research, focusMint]);
-
-  useEffect(() => {
-    if (!focusPool) return;
-    let live = true;
-    setCandles([]);
-    const pull = () => {
-      fetchOhlcv(focusPool, 80)
-        .then((rows) => {
-          if (live && rows.length) setCandles(rows);
-        })
-        .catch(() => undefined);
-    };
-    pull();
-    const id = setInterval(pull, 180_000);
-    return () => {
-      live = false;
-      clearInterval(id);
-    };
-  }, [focusPool]);
 
   useEffect(() => {
     const session = walletRef.current;
@@ -636,7 +610,6 @@ export function DeskApp() {
                   desk={desk}
                   wallet={wallet}
                   trading={trading}
-                  candles={candles}
                   winRate={winRate}
                   focusMint={focusMint}
                   onFocus={setFocusMint}
@@ -646,7 +619,9 @@ export function DeskApp() {
                 />
               ) : null}
               {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
-              {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
+              {tab === "bot" ? (
+                <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} onClose={(id) => void closePos(id)} />
+              ) : null}
               {tab === "book" ? (
                 <Book
                   desk={desk}
@@ -864,11 +839,39 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
   );
 }
 
+function useWatchTapes(tapes: TapeCard[]): Record<string, Candle[]> {
+  const key = tapes.map((tape) => tape.poolAddress).join("|");
+  const [bars, setBars] = useState<Record<string, Candle[]>>({});
+  useEffect(() => {
+    if (!key) return;
+    const pools = key.split("|");
+    let live = true;
+    const pull = async () => {
+      for (const poolAddress of pools) {
+        if (!live) return;
+        try {
+          const rows = await fetchOhlcv(poolAddress, 48);
+          if (!live || !rows.length) continue;
+          setBars((cur) => (cur[poolAddress] === rows ? cur : { ...cur, [poolAddress]: rows }));
+        } catch {
+          // The candle queue already backs off. The next pass retries this pool.
+        }
+      }
+    };
+    void pull();
+    const id = setInterval(() => void pull(), 180_000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [key]);
+  return bars;
+}
+
 function Overview({
   desk,
   wallet,
   trading,
-  candles,
   winRate,
   focusMint,
   onFocus,
@@ -879,7 +882,6 @@ function Overview({
   desk: DeskPayload;
   wallet: WalletSession;
   trading: { equityUsd: number } | null;
-  candles: Candle[];
   winRate: number;
   focusMint: string | null;
   onFocus: (mint: string) => void;
@@ -888,6 +890,9 @@ function Overview({
   busy: boolean;
 }) {
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
+  const bars = useWatchTapes(desk.tapes);
+  const focusTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? desk.tapes[0] ?? null;
+  const focusCandles = focusTape ? bars[focusTape.poolAddress] ?? [] : [];
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
@@ -938,11 +943,11 @@ function Overview({
         </section>
         <section className="neon p-3">
           <div className="flex items-center justify-between px-1">
-            <Label>{focus ? `${focus.ticker} tape` : "Live candles"}</Label>
+            <Label>{focusTape ? `${focusTape.symbol} 5m` : "5-minute tapes"}</Label>
             <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">EMA9 · EMA21 · VWAP</span>
           </div>
           <div className="h-[168px]">
-            <CandleChart candles={candles} />
+            <CandleChart candles={focusCandles} />
           </div>
         </section>
         <section className="neon p-5">
@@ -956,6 +961,36 @@ function Overview({
           </div>
         </section>
       </div>
+
+      <section className="neon p-3">
+        <div className="mb-3 flex items-center justify-between px-1">
+          <Label>5-minute tapes</Label>
+          <span className="text-[11px] text-[var(--faint)]">{desk.tapes.length ? `${desk.tapes.length} watchlist names` : "Waiting on pools"}</span>
+        </div>
+        {desk.tapes.length === 0 ? (
+          <p className="px-1 pb-2 text-sm text-[var(--muted)]">The watchlist 5-minute charts load with the tape.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {desk.tapes.map((tape) => (
+              <button
+                key={tape.poolAddress}
+                onClick={() => onFocus(tape.mint)}
+                className={`rounded-2xl border p-2 text-left ${
+                  focusTape?.poolAddress === tape.poolAddress ? "border-[var(--magenta)]" : "border-[var(--line)]"
+                }`}
+              >
+                <div className="mb-1 flex items-center justify-between px-1">
+                  <span className="text-sm font-medium">{tape.symbol}</span>
+                  <Tone value={tape.change15m} />
+                </div>
+                <div className="h-[132px]">
+                  <CandleChart candles={bars[tape.poolAddress] ?? []} />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       {open.length ? <PositionRail positions={open} /> : null}
 
@@ -992,7 +1027,7 @@ function Overview({
         <div className="neon p-3">
           <Label>Pool volume</Label>
           <div className="h-[110px]">
-            <VolumeBars candles={candles} />
+            <VolumeBars candles={focusCandles} />
           </div>
         </div>
       </section>
@@ -1162,12 +1197,17 @@ function BotView({
   busy,
   onControl,
   onOpen,
+  onClose,
 }: {
   desk: DeskPayload;
   busy: boolean;
   onControl: (a: "start" | "stop" | "reset" | "tick" | "flatten") => void;
   onOpen: (t: ResearchThesis) => void;
+  onClose: (id: string) => void;
 }) {
+  const swaps = desk.config.walletSwaps;
+  const open = shownFills(desk.positions, swaps);
+  const closed = shownFills(desk.trades, swaps).filter((trade) => trade.action === "close");
   return (
     <div className="space-y-4">
       <section className="neon p-6">
@@ -1191,7 +1231,11 @@ function BotView({
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-4">
           <Stat label="Ticks" value={desk.bot.ticks} sub={desk.bot.lastTickAt ? new Date(desk.bot.lastTickAt).toLocaleTimeString() : "—"} />
-          <Stat label="Opened / closed" value={`${desk.bot.lastOpened ?? 0} / ${desk.bot.lastClosed ?? 0}`} sub="Last armed tick" />
+          <Stat
+            label="Open / closed"
+            value={`${open.length} / ${closed.length}`}
+            sub={desk.bot.lastTickAt ? `Book now · tick ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Book now"}
+          />
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
           <Stat label="Daily loss cap" value={`${desk.config.dailyLossLimitPct}%`} />
         </div>
@@ -1233,6 +1277,74 @@ function BotView({
             </ul>
           </div>
         ) : null}
+      </section>
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="neon p-5">
+          <div className="flex items-center justify-between">
+            <Label>Open positions</Label>
+            <span className="text-[11px] text-[var(--faint)]">{open.length}</span>
+          </div>
+          {open.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              {swaps
+                ? "No open swap. This list refreshes on every scan, and a signed ticket shows up here with its Solscan link."
+                : "No open ticket. This list refreshes on every scan."}
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {open.map((position) => {
+                const pnl = rowPnl(position);
+                return (
+                  <div key={position.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
+                    <div>
+                      <div className="font-medium">
+                        {position.symbol} <span className="text-[11px] text-[var(--faint)]">{position.side}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--muted)]">
+                        {priceFmt(position.entryPrice)} → {priceFmt(position.markPrice)} · {position.reason}
+                      </div>
+                      <div className="text-[10px]">{txLink(position.signature)}</div>
+                    </div>
+                    <div className="text-right">
+                      <Tone value={pnl}>{usd(pnl)}</Tone>
+                      <button disabled={busy} onClick={() => onClose(position.id)} className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)]">
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="neon p-5">
+          <div className="flex items-center justify-between">
+            <Label>Closed tickets</Label>
+            <span className="text-[11px] text-[var(--faint)]">{closed.length}</span>
+          </div>
+          {closed.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              {swaps ? "No signed close yet. A sell from the trading key lands in this list." : "No closed ticket yet."}
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {closed.slice(0, 12).map((trade) => (
+                <div key={trade.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
+                  <div>
+                    <div className="font-medium">
+                      {trade.symbol} <span className="text-[11px] text-[var(--faint)]">{trade.reason}</span>
+                    </div>
+                    <div className="text-[11px] text-[var(--muted)]">
+                      {new Date(trade.at).toLocaleTimeString()} · {priceFmt(trade.price)}
+                    </div>
+                    <div className="text-[10px]">{txLink(trade.signature)}</div>
+                  </div>
+                  <Tone value={trade.pnlUsd ?? 0}>{trade.pnlUsd === null ? "—" : usd(trade.pnlUsd)}</Tone>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="neon p-5">

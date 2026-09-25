@@ -399,6 +399,13 @@ export interface BookStats {
   maxDrawdownPct: number;
 }
 
+export interface TapeCard {
+  symbol: string;
+  mint: string;
+  poolAddress: string;
+  change15m: number;
+}
+
 export interface DeskPayload {
   regime: MarketRegime;
   research: ResearchThesis[];
@@ -414,6 +421,7 @@ export interface DeskPayload {
   equityCurve: EquityPoint[];
   whatCouldBeWrong: string[];
   tapeDots: TapeDot[];
+  tapes: TapeCard[];
   stats: BookStats;
   learning: LearningReport;
   generatedAt: string;
