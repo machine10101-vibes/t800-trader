@@ -43,7 +43,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     connectBlurb:
       "No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real SOL and USDC and sizes the book from that. A $3 wallet is enough to open.",
     connectFallback: "Connect Solana wallet",
-    installHint: "On a phone, Connect opens this page in the Phantom app. On a computer, install Phantom or Solflare, then reload.",
+    installHint: "On a phone, Connect opens Phantom. Unlock it and approve the connection. This browser then opens the desk. On a computer, install Phantom or Solflare, then reload.",
     armBlurb:
       "Arm signs once. That signature moves spare SOL and USDC onto a trading key in this browser, and that key sends each swap. Tickets list only those signed fills.",
     watchBlurb: "Paste a Solana address. This page shows that wallet's live SOL and USDC, plus signed swaps stored in this browser.",

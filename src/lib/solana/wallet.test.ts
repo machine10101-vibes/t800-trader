@@ -16,6 +16,7 @@ import {
   type InjectedProvider,
   type WalletConnectEnv,
 } from "./wallet";
+import type { PhantomLinkStore } from "./phantomLink";
 
 describe("combineMintReads", () => {
   it("uses a positive balance and treats a total miss as unknown", () => {
@@ -81,6 +82,17 @@ function env(partial: Partial<WalletConnectEnv> & { wallet?: InjectedProvider })
     waitForProvider: partial.waitForProvider,
     markResume: partial.markResume,
     clearResume: partial.clearResume,
+    phantomStore: partial.phantomStore,
+    assign: partial.assign,
+  };
+}
+
+function memoryStore(): PhantomLinkStore {
+  const values = new Map<string, string>();
+  return {
+    get: (key) => values.get(key) ?? null,
+    set: (key, value) => values.set(key, value),
+    remove: (key) => values.delete(key),
   };
 }
 
@@ -172,12 +184,16 @@ describe("phantom mobile connect", () => {
     assert.match(walletConnectFailure(new Error("User rejected the request."), { mobile: true, insidePhantom: true }), /approve it/i);
   });
 
-  it("opens the Phantom app when a phone browser has no wallet injected", async () => {
+  it("opens Phantom connect so the PIN returns to this browser", async () => {
     await assert.rejects(
-      requestWalletAddress(false, env({ mobile: true })),
+      requestWalletAddress(false, env({ mobile: true, phantomStore: memoryStore() })),
       (error: unknown) => {
         assert.ok(error instanceof OpenPhantomApp);
-        assert.match(error.browseUrl, /^https:\/\/phantom\.app\/ul\/browse\//);
+        const url = new URL(error.browseUrl);
+        assert.equal(url.origin + url.pathname, "https://phantom.app/ul/v1/connect");
+        assert.ok(url.searchParams.get("dapp_encryption_public_key"));
+        assert.match(url.searchParams.get("redirect_link") || "", /phantom_return=connect/);
+        assert.equal(url.searchParams.get("cluster"), "mainnet-beta");
         return true;
       },
     );

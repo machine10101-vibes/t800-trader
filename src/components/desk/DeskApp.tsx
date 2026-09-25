@@ -170,6 +170,15 @@ function ChainDesk({
       applyDesk(shellDesk(book));
       setWallet(session);
       setBooting(false);
+      try {
+        const note = sessionStorage.getItem("t800-phantom-sign-note");
+        if (note) {
+          sessionStorage.removeItem("t800-phantom-sign-note");
+          setError(note);
+        }
+      } catch {
+        // The desk is open either way.
+      }
     } catch (e) {
       if (!trusted && isOpenPhantomApp(e)) {
         window.location.assign(e.browseUrl);
@@ -177,7 +186,8 @@ function ChainDesk({
       }
       const message = e instanceof Error ? e.message : "Wallet connect failed";
       const balanceMiss = /balance read|refused the balance/i.test(message);
-      if (!trusted || balanceMiss) setWalletError(message);
+      const phantomBack = /phantom/i.test(message);
+      if (!trusted || balanceMiss || phantomBack) setWalletError(message);
     } finally {
       setWalletBusy(false);
     }
@@ -206,6 +216,21 @@ function ChainDesk({
     const parsed = chain === "cronos" ? parseCronosAddress(query ?? "") : query ? parseWalletAddress(query) : null;
     if (parsed) return;
     void connect(true);
+  }, [chain, connect]);
+
+  useEffect(() => {
+    if (chain !== "solana") return;
+    const resume = () => {
+      if (walletRef.current) return;
+      if (document.visibilityState === "hidden") return;
+      void connect(true);
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pageshow", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", resume);
+    };
   }, [chain, connect]);
 
   useEffect(() => {
@@ -560,6 +585,11 @@ function ChainDesk({
           <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
+          {chain === "solana" && phone && !walletHint ? (
+            <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+              This opens Phantom. Unlock it and approve the connection. This browser then opens the desk.
+            </p>
+          ) : null}
           {chain === "solana" && phone && (resume > 0 || walletHint === "Phantom") ? (
             <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
               Phantom is open. Tap Approve. After you unlock, this desk connects.
@@ -570,9 +600,11 @@ function ChainDesk({
               ? "Waiting on wallet…"
               : chain === "solana" && phone && (resume > 0 || walletHint === "Phantom")
                 ? "Approve in Phantom"
-                : walletHint
-                  ? `Connect ${walletHint}`
-                  : copy.connectFallback}
+                : chain === "solana" && phone && !walletHint
+                  ? "Connect Phantom"
+                  : walletHint
+                    ? `Connect ${walletHint}`
+                    : copy.connectFallback}
           </button>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />

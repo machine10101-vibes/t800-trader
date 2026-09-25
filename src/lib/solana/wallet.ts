@@ -1,6 +1,16 @@
 import { PublicKey } from "@solana/web3.js";
 import { liveSolPrice } from "@/lib/market/marks";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
+import {
+  beginPhantomConnect,
+  browserPhantomStore,
+  clearPhantomLink,
+  loadPhantomLink,
+  phantomLinkProvider,
+  phantomQueryKeys,
+  takePhantomHandoff,
+  type PhantomLinkStore,
+} from "@/lib/solana/phantomLink";
 
 const RPCS = [
   "https://solana.publicnode.com",
@@ -87,6 +97,8 @@ export interface WalletConnectEnv {
   waitForProvider?: (timeoutMs: number) => Promise<InjectedProvider | null>;
   markResume?: (stage: 1 | 2) => void;
   clearResume?: () => void;
+  phantomStore?: PhantomLinkStore;
+  assign?: (url: string) => void;
 }
 
 export function isOpenPhantomApp(error: unknown): error is OpenPhantomApp {
@@ -214,7 +226,24 @@ function browserEnv(): WalletConnectEnv {
     waitForProvider: waitForInjected,
     markResume: stampResume,
     clearResume: clearResumeQuery,
+    phantomStore: browserPhantomStore(),
   };
+}
+
+function stripPhantomQuery(): void {
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const key of phantomQueryKeys()) {
+      if (!url.searchParams.has(key)) continue;
+      url.searchParams.delete(key);
+      changed = true;
+    }
+    if (!changed) return;
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // The session is already stored.
+  }
 }
 
 function clearResumeQuery(): void {
@@ -235,6 +264,7 @@ export function forgetPhantomApproval(): void {
   } catch {
     // Private mode can block storage.
   }
+  clearPhantomLink(browserPhantomStore());
   clearResumeQuery();
 }
 
@@ -517,13 +547,21 @@ export async function requestWalletAddress(
 ): Promise<{ address: string; provider: InjectedProvider }> {
   const resumeStageNow = env.resumeStage ?? 0;
   const trusted = Boolean(env.trusted);
+  const store = env.phantomStore ?? browserPhantomStore();
   let provider = pickInjectedProvider(env);
+  if (!provider) {
+    const saved = loadPhantomLink(store);
+    if (saved) {
+      const assign = env.assign ?? ((url: string) => window.location.assign(url));
+      return { address: saved.address, provider: phantomLinkProvider(saved, env.pageUrl, store, assign) };
+    }
+  }
   if (!provider && onlyIfTrusted && env.waitForProvider && (resumeStageNow > 0 || trusted)) {
     provider = await env.waitForProvider(2_000);
   }
   const sleep = env.sleep ?? delay;
   if (!provider?.connect) {
-    if (!onlyIfTrusted && env.mobile) throw new OpenPhantomApp(phantomBrowseUrl(env.pageUrl));
+    if (!onlyIfTrusted && env.mobile) throw new OpenPhantomApp(beginPhantomConnect(env.pageUrl, store));
     throw new Error("No Solana wallet found. Install Phantom or Solflare, then reload.");
   }
 
@@ -605,7 +643,24 @@ export async function connectWallet(onlyIfTrusted = false): Promise<WalletSessio
         // The page-load attempt missed. The tap still gets its own prompt.
       }
     }
-    const { address, provider } = await requestWalletAddress(onlyIfTrusted, browserEnv());
+    const env = browserEnv();
+    const store = env.phantomStore ?? browserPhantomStore();
+    const handoff = takePhantomHandoff(env.pageUrl, store);
+    stripPhantomQuery();
+    if (handoff.kind === "error") throw new Error(handoff.message);
+    if (handoff.kind === "sign") {
+      try {
+        await broadcastTransaction(handoff.signed);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Phantom signed, but the transaction did not land.";
+        try {
+          sessionStorage.setItem("t800-phantom-sign-note", message);
+        } catch {
+          // The desk still opens on the connected wallet.
+        }
+      }
+    }
+    const { address, provider } = await requestWalletAddress(onlyIfTrusted, env);
     notePhantomApproved();
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -618,6 +673,19 @@ export async function connectWallet(onlyIfTrusted = false): Promise<WalletSessio
       }
     }
     const message = lastError instanceof Error ? lastError.message : "Could not read the wallet balance.";
+    const returned = handoff.kind === "connect" || handoff.kind === "sign";
+    const linkedWithoutInjection = Boolean(loadPhantomLink(store)) && !pickInjectedProvider(env);
+    if (returned || linkedWithoutInjection) {
+      const note = /still armed|access forbidden|\b403\b/i.test(message)
+        ? "Phantom connected, but Solana refused the balance read from this browser. The desk is open — pull to refresh in a moment."
+        : `Phantom connected, but the balance read failed. ${message}`;
+      try {
+        sessionStorage.setItem("t800-phantom-sign-note", note);
+      } catch {
+        // The desk still opens on the connected wallet.
+      }
+      return { address, sol: 0, usdc: 0, solPriceUsd: null, equityUsd: 0, provider };
+    }
     if (/still armed|access forbidden|\b403\b/i.test(message)) {
       throw new Error("Phantom connected, but Solana refused the balance read from this browser. Tap Connect again in a moment.");
     }
