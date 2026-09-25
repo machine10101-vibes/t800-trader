@@ -27,7 +27,7 @@ import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
-import { OpenPhantomApp } from "@/lib/solana/wallet";
+import { isOpenPhantomApp } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -169,11 +169,13 @@ function ChainDesk({
       setWallet(session);
       setBooting(false);
     } catch (e) {
-      if (!trusted && e instanceof OpenPhantomApp) {
+      if (!trusted && isOpenPhantomApp(e)) {
         window.location.assign(e.browseUrl);
         return;
       }
-      if (!trusted) setWalletError(e instanceof Error ? e.message : "Wallet connect failed");
+      const message = e instanceof Error ? e.message : "Wallet connect failed";
+      const balanceMiss = /balance read|refused the balance/i.test(message);
+      if (!trusted || balanceMiss) setWalletError(message);
     } finally {
       setWalletBusy(false);
     }

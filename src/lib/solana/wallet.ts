@@ -32,9 +32,30 @@ export interface InjectedProvider {
   signTransaction?: (tx: unknown) => Promise<{ serialize(): Uint8Array }>;
 }
 
-/** Phantom mobile has no extension. This opens the current page in its in-app browser. */
-export function phantomBrowseUrl(pageUrl: string): string {
+/**
+ * `connect=1` asks the in-app page to prompt once.
+ * `connect=2` means that prompt already opened, so a reload after unlock only resumes.
+ */
+export function resumeStage(pageUrl: string): 0 | 1 | 2 {
+  try {
+    const value = new URL(pageUrl).searchParams.get("connect");
+    if (value === "2") return 2;
+    if (value === "1") return 1;
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function withResumeStage(pageUrl: string, stage: 1 | 2): string {
   const url = new URL(pageUrl);
+  url.searchParams.set("connect", String(stage));
+  return url.toString();
+}
+
+/** Phantom mobile has no extension. This opens the current page in its in-app browser, ready to finish connect. */
+export function phantomBrowseUrl(pageUrl: string): string {
+  const url = new URL(withResumeStage(pageUrl, 1));
   return `https://phantom.app/ul/browse/${encodeURIComponent(url.toString())}?ref=${encodeURIComponent(url.origin)}`;
 }
 
@@ -58,7 +79,31 @@ export interface WalletConnectEnv {
   solflare?: InjectedProvider | null;
   solana?: InjectedProvider | null;
   pageUrl: string;
+  /** 1 = prompt once inside Phantom. 2 = unlock already started, so only resume. */
+  resumeStage?: 0 | 1 | 2;
+  /** This browser already finished a Phantom connect, so a refresh may resume. */
+  trusted?: boolean;
   sleep?: (ms: number) => Promise<void>;
+  waitForProvider?: (timeoutMs: number) => Promise<InjectedProvider | null>;
+  markResume?: (stage: 1 | 2) => void;
+}
+
+export function isOpenPhantomApp(error: unknown): error is OpenPhantomApp {
+  if (error instanceof OpenPhantomApp) return true;
+  if (!error || typeof error !== "object") return false;
+  const branded = error as { name?: unknown; browseUrl?: unknown };
+  return branded.name === "OpenPhantomApp" && typeof branded.browseUrl === "string";
+}
+
+/** Mobile page loads must not call connect() unless Phantom is already mid-approval or trusted. */
+export function shouldResumeSilently(input: {
+  mobile: boolean;
+  resumeStage: 0 | 1 | 2;
+  trusted: boolean;
+  isConnected: boolean;
+}): boolean {
+  if (!input.mobile) return true;
+  return input.resumeStage > 0 || input.trusted || input.isConnected;
 }
 
 function providerAddress(provider: InjectedProvider): string | null {
@@ -115,6 +160,39 @@ export function walletConnectFailure(error: unknown, input: { mobile: boolean; i
   return message || "Wallet connect failed";
 }
 
+const PHANTOM_TRUST_KEY = "t800-phantom-trusted";
+
+function readTrustedFlag(): boolean {
+  try {
+    return localStorage.getItem(PHANTOM_TRUST_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function stampResume(stage: 1 | 2): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("connect", String(stage));
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function waitForInjected(timeoutMs: number): Promise<InjectedProvider | null> {
+  const found = () => {
+    if (typeof window === "undefined") return null;
+    return pickInjectedProvider(browserEnv());
+  };
+  if (found()?.connect) return Promise.resolve(found());
+  return new Promise((resolve) => {
+    const finish = () => {
+      window.removeEventListener("phantom#initialized", finish);
+      window.clearTimeout(timer);
+      resolve(found());
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    window.addEventListener("phantom#initialized", finish, { once: true });
+  });
+}
+
 function browserEnv(): WalletConnectEnv {
   const w = window as Window & {
     phantom?: { solana?: InjectedProvider };
@@ -130,7 +208,28 @@ function browserEnv(): WalletConnectEnv {
     solflare: w.solflare ?? null,
     solana: w.solana ?? null,
     pageUrl: window.location.href,
+    resumeStage: resumeStage(window.location.href),
+    trusted: readTrustedFlag(),
+    waitForProvider: waitForInjected,
+    markResume: stampResume,
   };
+}
+
+/** The approval survived. Drop the one-shot query so the next load only resumes. */
+export function notePhantomApproved(): void {
+  try {
+    localStorage.setItem(PHANTOM_TRUST_KEY, "1");
+  } catch {
+    // Private mode can block storage. The address is still in hand.
+  }
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("connect")) return;
+    url.searchParams.delete("connect");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // The session is already in memory for this page.
+  }
 }
 
 function injected(): InjectedProvider | null {
@@ -353,11 +452,25 @@ function delay(ms: number): Promise<void> {
  * An explicit tap calls connect() with no options. Passing `{ onlyIfTrusted: false }`
  * is what Phantom's in-app browser rejects as "Unexpected error."
  */
+async function pollProviderAddress(provider: InjectedProvider, sleep: (ms: number) => Promise<void>): Promise<string | null> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const address = providerAddress(provider);
+    if (address) return address;
+    await sleep(100);
+  }
+  return providerAddress(provider);
+}
+
 export async function requestWalletAddress(
   onlyIfTrusted: boolean,
   env: WalletConnectEnv,
 ): Promise<{ address: string; provider: InjectedProvider }> {
-  const provider = pickInjectedProvider(env);
+  const resumeStageNow = env.resumeStage ?? 0;
+  const trusted = Boolean(env.trusted);
+  let provider = pickInjectedProvider(env);
+  if (!provider && onlyIfTrusted && env.waitForProvider && (resumeStageNow > 0 || trusted)) {
+    provider = await env.waitForProvider(2_000);
+  }
   const sleep = env.sleep ?? delay;
   if (!provider?.connect) {
     if (!onlyIfTrusted && env.mobile) throw new OpenPhantomApp(phantomBrowseUrl(env.pageUrl));
@@ -370,16 +483,41 @@ export async function requestWalletAddress(
   }
 
   if (onlyIfTrusted) {
-    if (!shouldPromptOnLoad({ mobile: env.mobile, hasPublicKey: Boolean(existing) })) {
-      throw new Error("Wallet is not connected.");
+    const resume = shouldResumeSilently({
+      mobile: env.mobile,
+      resumeStage: resumeStageNow,
+      trusted,
+      isConnected: provider.isConnected === true,
+    });
+    if (!resume) throw new Error("Wallet is not connected.");
+    // First open inside Phantom: the user already tapped Connect. Prompt once.
+    // Stamp stage 2 first so the unlock reload does not open a second sheet.
+    if (env.mobile && provider.isPhantom && resumeStageNow === 1 && !trusted && provider.isConnected !== true) {
+      env.markResume?.(2);
+      const prompted = await provider.connect().catch(async (error: unknown) => {
+        if (!isUnexpectedWalletError(error)) return null;
+        await sleep(CONNECT_RETRY_MS);
+        return provider.connect().catch(() => null);
+      });
+      const address = prompted?.publicKey?.toBase58() || providerAddress(provider);
+      if (!address) throw new Error("Wallet is not connected.");
+      return { address, provider };
     }
-    const res = await provider.connect({ onlyIfTrusted: true });
-    const address = res?.publicKey?.toBase58() || providerAddress(provider);
-    if (!address) throw new Error("Wallet is not connected.");
-    return { address, provider };
+    try {
+      const res = await provider.connect({ onlyIfTrusted: true });
+      const address = res?.publicKey?.toBase58() || providerAddress(provider);
+      if (address) return { address, provider };
+    } catch (error) {
+      if (!env.mobile) throw error instanceof Error ? error : new Error("Wallet is not connected.");
+    }
+    if (!env.mobile) throw new Error("Wallet is not connected.");
+    const polled = await pollProviderAddress(provider, sleep);
+    if (!polled) throw new Error("Wallet is not connected.");
+    return { address: polled, provider };
   }
 
   const insidePhantom = Boolean(provider.isPhantom);
+  if (env.mobile && insidePhantom) env.markResume?.(2);
   const prompt = async () => {
     const res = await provider.connect();
     return res?.publicKey?.toBase58() || providerAddress(provider);
@@ -421,16 +559,22 @@ export async function connectWallet(onlyIfTrusted = false): Promise<WalletSessio
       }
     }
     const { address, provider } = await requestWalletAddress(onlyIfTrusted, browserEnv());
-    try {
-      const balances = await readBalances(address);
-      return { ...balances, provider };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not read the wallet balance.";
-      if (/still armed|access forbidden|\b403\b/i.test(message)) {
-        throw new Error("Phantom connected, but Solana refused the balance read from this browser. Tap Connect again in a moment.");
+    notePhantomApproved();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const balances = await readBalances(address);
+        return { ...balances, provider };
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await delay(400);
       }
-      throw new Error(`The wallet connected, but the balance read failed. ${message}`);
     }
+    const message = lastError instanceof Error ? lastError.message : "Could not read the wallet balance.";
+    if (/still armed|access forbidden|\b403\b/i.test(message)) {
+      throw new Error("Phantom connected, but Solana refused the balance read from this browser. Tap Connect again in a moment.");
+    }
+    throw new Error(`The wallet connected, but the balance read failed. ${message}`);
   };
   const pending = run().finally(() => {
     if (connectInflight === pending) connectInflight = null;

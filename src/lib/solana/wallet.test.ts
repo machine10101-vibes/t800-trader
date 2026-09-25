@@ -9,7 +9,9 @@ import {
   pickInjectedProvider,
   pickRpcError,
   requestWalletAddress,
+  resumeStage,
   shouldPromptOnLoad,
+  shouldResumeSilently,
   walletConnectFailure,
   type InjectedProvider,
   type WalletConnectEnv,
@@ -73,16 +75,24 @@ function env(partial: Partial<WalletConnectEnv> & { wallet?: InjectedProvider })
     solflare: partial.solflare ?? null,
     solana: partial.solana ?? null,
     pageUrl: partial.pageUrl ?? PAGE,
+    resumeStage: partial.resumeStage,
+    trusted: partial.trusted,
     sleep: partial.sleep ?? (async () => {}),
+    waitForProvider: partial.waitForProvider,
+    markResume: partial.markResume,
   };
 }
 
 describe("phantom mobile connect", () => {
   it("builds the in-app browse link for this desk", () => {
+    const target = `${PAGE}?connect=1`;
     assert.equal(
       phantomBrowseUrl(PAGE),
-      `https://phantom.app/ul/browse/${encodeURIComponent(PAGE)}?ref=${encodeURIComponent("https://machine10101-vibes.github.io")}`,
+      `https://phantom.app/ul/browse/${encodeURIComponent(target)}?ref=${encodeURIComponent("https://machine10101-vibes.github.io")}`,
     );
+    assert.equal(resumeStage(`${PAGE}?connect=1`), 1);
+    assert.equal(resumeStage(`${PAGE}?connect=2`), 2);
+    assert.equal(resumeStage(PAGE), 0);
   });
 
   it("treats phones and touch-mac tablets as mobile", () => {
@@ -174,5 +184,68 @@ describe("phantom mobile connect", () => {
 
   it("keeps the install message on a computer with no wallet", async () => {
     await assert.rejects(requestWalletAddress(false, env({ mobile: false })), /Install Phantom or Solflare/);
+  });
+
+  it("resumes after unlock when Phantom reloads the page", async () => {
+    const { wallet, calls } = provider({ isPhantom: true });
+    const session = await requestWalletAddress(true, env({ mobile: true, wallet, resumeStage: 2 }));
+    assert.equal(session.address, KEY);
+    assert.deepEqual(calls, [{ onlyIfTrusted: true }]);
+    assert.equal(shouldResumeSilently({ mobile: true, resumeStage: 2, trusted: false, isConnected: false }), true);
+    assert.equal(shouldResumeSilently({ mobile: true, resumeStage: 0, trusted: false, isConnected: false }), false);
+  });
+
+  it("prompts once inside Phantom, then marks the reload as resume-only", async () => {
+    const marks: number[] = [];
+    const { wallet, calls } = provider({ isPhantom: true });
+    const session = await requestWalletAddress(
+      true,
+      env({
+        mobile: true,
+        wallet,
+        resumeStage: 1,
+        markResume: (stage) => marks.push(stage),
+      }),
+    );
+    assert.equal(session.address, KEY);
+    assert.deepEqual(marks, [2]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0], undefined);
+  });
+
+  it("does not open a second sheet when the unlock reload is already resume-only", async () => {
+    const { wallet, calls } = provider({
+      isPhantom: true,
+      connect: async () => {
+        throw new Error("Unexpected error.");
+      },
+    });
+    await assert.rejects(
+      requestWalletAddress(true, env({ mobile: true, wallet, resumeStage: 2 })),
+      /not connected/i,
+    );
+    assert.deepEqual(calls, [{ onlyIfTrusted: true }]);
+  });
+
+  it("remembers a trusted phone session and resumes it without a sheet", async () => {
+    const { wallet, calls } = provider({ isPhantom: true });
+    const session = await requestWalletAddress(true, env({ mobile: true, wallet, trusted: true }));
+    assert.equal(session.address, KEY);
+    assert.deepEqual(calls, [{ onlyIfTrusted: true }]);
+  });
+
+  it("stamps resume before the explicit Phantom tap so unlock can finish", async () => {
+    const marks: number[] = [];
+    const { wallet, calls } = provider({ isPhantom: true });
+    await requestWalletAddress(
+      false,
+      env({
+        mobile: true,
+        wallet,
+        markResume: (stage) => marks.push(stage),
+      }),
+    );
+    assert.deepEqual(marks, [2]);
+    assert.equal(calls[0], undefined);
   });
 });
