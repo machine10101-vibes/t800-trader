@@ -537,25 +537,27 @@ function ChainDesk({
   if (watchAddress) {
     return (
       <div>
-        <div className="sticky top-0 z-30 flex justify-end border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] px-4 py-2 backdrop-blur-xl">
-          <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
-        </div>
-        <WatchScreen address={watchAddress} chain={chain} onClose={closeWatch} />
+        <WatchScreen
+          address={watchAddress}
+          chain={chain}
+          onClose={closeWatch}
+          toolbar={<ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />}
+        />
       </div>
     );
   }
 
   if (!wallet) {
     return (
-      <div className="min-h-screen overflow-y-auto px-6 py-10">
+      <div className="min-h-screen overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
-        <div className="neon boot-fade w-full max-w-xl p-8 sm:p-10">
+        <div className="neon boot-fade w-full max-w-xl p-5 sm:p-10">
           <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
           <div className="mb-5 flex justify-end">
             <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
           </div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
-          <h1 className="mt-3 text-4xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
+          <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
@@ -643,8 +645,9 @@ function ChainDesk({
         trading={trading}
       />
 
-      <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[228px_1fr]">
-        <aside className="neon h-fit p-3 lg:sticky lg:top-20">
+      <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-4 px-3 py-4 sm:gap-5 sm:px-4 sm:py-5 lg:grid-cols-[228px_1fr]">
+        <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
+          <div className="flex flex-wrap gap-1 lg:block">
           {NAV.map((item) => (
             <button
               key={item.id}
@@ -655,15 +658,16 @@ function ChainDesk({
                 setThesis(null);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              className="nav-item mb-1 flex w-full items-center justify-between px-3 py-3 text-left hover:bg-[rgba(255,255,255,0.03)]"
+              className="nav-item mb-1 flex w-auto items-center justify-between whitespace-nowrap px-3 py-2.5 text-left hover:bg-[rgba(255,255,255,0.03)] lg:w-full lg:py-3"
             >
               <span>
-                <span className="mr-2 text-[11px] text-[var(--faint)]">{item.kicker}</span>
+                <span className="mr-2 hidden text-[11px] text-[var(--faint)] lg:inline">{item.kicker}</span>
                 {item.label}
               </span>
-              {item.id === "bot" && desk?.bot.running ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
+              {item.id === "bot" && desk?.bot.running ? <span className="ml-2 h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
             </button>
           ))}
+          </div>
           <button
             disabled={busy || !desk}
             onClick={() => void control(desk?.bot.running ? "stop" : "start")}
@@ -684,8 +688,8 @@ function ChainDesk({
                 : "Send profits"}
             </button>
           ) : null}
-          {desk?.bot.lastNote ? <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
-          <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--faint)]">
+          {desk?.bot.lastNote ? <p className="mt-3 line-clamp-3 px-2 text-[11px] leading-5 text-[var(--magenta)] lg:line-clamp-none">{desk.bot.lastNote}</p> : null}
+          <p className="mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)]">
             {trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
@@ -759,7 +763,7 @@ function ChainDesk({
             </div>
           )}
           {desk ? (
-            <div className="cmd">
+            <div className="cmd hidden sm:block">
               1–5 tabs · Space arm · R refresh · F flatten · Esc thesis
             </div>
           ) : null}
@@ -813,16 +817,16 @@ function ChainSwitch({
     <button
       type="button"
       onClick={() => onSwitch(id)}
-      className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.16em] ${
+      className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.12em] sm:min-h-0 sm:py-1 sm:tracking-[0.16em] ${
         chain === id ? "bg-[rgba(255,74,216,0.16)] text-[var(--magenta)]" : "text-[var(--faint)]"
       }`}
     >
-      {armed ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--mint)]" /> : null}
+      {armed ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mint)]" /> : null}
       {label}
     </button>
   );
   return (
-    <div className="flex items-center gap-1 rounded-full border border-[var(--line)] p-1">
+    <div className="flex shrink-0 items-center gap-1 rounded-full border border-[var(--line)] p-1">
       {item("solana", "SOL", solArmed)}
       {item("cronos", "CRO", croArmed)}
     </div>
@@ -862,52 +866,55 @@ function Header({
   onWatch: () => void;
   trading: { equityUsd: number } | null;
 }) {
+  const armed = Boolean(desk?.bot.running);
+  const equity = usd(trading ? trading.equityUsd : wallet.equityUsd);
   return (
-    <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.82)] backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1500px] items-center gap-4 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
-            T8
+    <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(5,5,8,0.92)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+      <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[rgba(255,74,216,0.12)] text-sm font-semibold text-[var(--magenta)]">
+              T8
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">T-800 Trader</div>
+              <div className="hidden text-[11px] uppercase tracking-[0.2em] text-[var(--faint)] sm:block">Live stream</div>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-medium">T-800 Trader</div>
-            <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">Live stream</div>
+          <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={onSwitch} />
+          <div className="hidden items-center gap-5 md:flex">
+            <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
+            <Ticker
+              label="BTC"
+              value={desk?.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"}
+              chg={desk?.regime.btc.price ? desk.regime.btc.change24h : undefined}
+            />
+            <Ticker
+              label="ETH"
+              value={desk?.regime.eth.price ? priceFmt(desk.regime.eth.price) : "—"}
+              chg={desk?.regime.eth.price ? desk.regime.eth.change24h : undefined}
+            />
+            {desk?.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
           </div>
-        </div>
-        <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={onSwitch} />
-        <div className="hidden items-center gap-5 md:flex">
-          <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
-          <Ticker
-            label="BTC"
-            value={desk?.regime.btc.price ? priceFmt(desk.regime.btc.price) : "—"}
-            chg={desk?.regime.btc.price ? desk.regime.btc.change24h : undefined}
-          />
-          <Ticker
-            label="ETH"
-            value={desk?.regime.eth.price ? priceFmt(desk.regime.eth.price) : "—"}
-            chg={desk?.regime.eth.price ? desk.regime.eth.change24h : undefined}
-          />
-          {desk?.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
-        </div>
-        <div className="ml-auto flex items-center gap-3 text-sm">
-          <button onClick={onRefresh} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
-            Refresh
-          </button>
-          <button onClick={onWatch} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
-            Watch
-          </button>
-          <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
-          <Pill tone={desk?.bot.running ? "mint" : "default"}>
-            <span className={`pulse-dot ${desk?.bot.running ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
-            {desk?.bot.running ? "Armed" : "Standby"}
-          </Pill>
-          <div className="hidden text-right sm:block">
-            <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
-            <div className="num">{usd(trading ? trading.equityUsd : wallet.equityUsd)}</div>
-          </div>
-          <button onClick={onDisconnect} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
-            Disconnect
-          </button>
+          <div className="ml-auto hidden flex-wrap items-center justify-end gap-3 text-sm sm:flex">
+            <button onClick={onRefresh} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+              Refresh
+            </button>
+            <button onClick={onWatch} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+              Watch
+            </button>
+            <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+            <Pill tone={armed ? "mint" : "default"}>
+              <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
+              {armed ? "Armed" : "Standby"}
+            </Pill>
+            <div className="text-right">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
+              <div className="num">{equity}</div>
+            </div>
+            <button onClick={onDisconnect} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+              Disconnect
+            </button>
             {desk ? (
               <div className="hidden text-right md:block">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Day P&L</div>
@@ -915,6 +922,30 @@ function Header({
               </div>
             ) : null}
             <div className="num hidden text-[var(--muted)] lg:block">{updatedAt ? new Date(updatedAt).toLocaleTimeString() : clock}</div>
+          </div>
+          <span className="ml-auto sm:hidden">
+            <Pill tone={armed ? "mint" : "default"}>
+              <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
+              {armed ? "Armed" : "Standby"}
+            </Pill>
+          </span>
+        </div>
+        <div className="nav-scroll flex w-full min-w-0 items-center gap-3 overflow-x-auto pb-1 text-sm sm:hidden">
+          <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
+          <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+          <div className="shrink-0 text-right">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
+            <div className="num text-xs">{equity}</div>
+          </div>
+          <button onClick={onRefresh} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+            Refresh
+          </button>
+          <button onClick={onWatch} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+            Watch
+          </button>
+          <button onClick={onDisconnect} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+            Disconnect
+          </button>
         </div>
       </div>
     </header>
@@ -1140,7 +1171,7 @@ function Overview({
       </div>
 
       <section className="neon p-3">
-        <div className="mb-2 flex items-center justify-between px-1">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
           <Label>5-minute tapes</Label>
           <span className="text-[11px] text-[var(--faint)]">
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
@@ -1191,9 +1222,9 @@ function Overview({
       </section>
 
       <section className="neon p-3">
-        <div className="mb-2 flex items-center justify-between px-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-2">
           <Label>Live tape</Label>
-          <span className="text-[11px] text-[var(--faint)]">
+          <span className="min-w-0 text-[11px] text-[var(--faint)]">
             Universe {desk.universeSize || "—"} · screened {desk.eliminated || "—"} · scored {desk.candidatesScanned || "—"}
           </span>
         </div>
@@ -1269,7 +1300,7 @@ function Overview({
               ))}
             </div>
           ) : (
-            <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
+            <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto break-words font-mono text-[11px] text-[var(--muted)]">
               {fills.slice(0, 12).map((t) => (
                 <div key={t.id}>
                   {new Date(t.at).toLocaleTimeString()} {t.action} {t.symbol} {t.side} {priceFmt(t.price)} {t.reason}
@@ -1289,15 +1320,15 @@ function Overview({
               <button
                 key={r.id}
                 onClick={() => onOpen(r)}
-                className="flex w-full items-center justify-between rounded-xl border border-[var(--line)] px-3 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
+                className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
               >
-                <span>
+                <span className="min-w-0">
                   {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
                   {r.candidate.apyPct ? (
                     <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
                   ) : null}
                 </span>
-                <span className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
+                <span className="num shrink-0 text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
               </button>
             ))}
           </div>
@@ -1314,7 +1345,35 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
         <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
       </div>
-      <div className="neon desk-scroll overflow-x-auto p-1">
+      <div className="space-y-3 md:hidden">
+        {desk.research.length === 0 ? (
+          <div className="neon p-4 text-sm text-[var(--muted)]">No live finalists this cycle.</div>
+        ) : (
+          desk.research.map((r) => (
+            <button key={r.id} type="button" onClick={() => onOpen(r)} className="neon block w-full p-4 text-left">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium">{r.ticker}</div>
+                  <div className="text-[11px] text-[var(--faint)]">{r.asset} · {venueLabel(venueForDex(r.candidate.dex))}</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="num text-sm">{priceFmt(r.price)}</div>
+                  <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                </div>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r.coreThesis}</p>
+              <p className="mt-2 text-xs leading-5 text-[var(--text)]">{r.keyCatalyst}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{r.biggestRisk}</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--faint)]">
+                <span>{r.sector}</span>
+                <span>MC {usd(r.marketCap)}</span>
+                <span>{r.keyMetric}</span>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+      <div className="neon desk-scroll hidden overflow-x-auto p-1 md:block">
         <table className="w-full min-w-[1080px] text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
             <tr>
@@ -1416,17 +1475,17 @@ function BotView({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? CHAIN_COPY[chain].scanning : "Idle"}</Pill>
-            <h2 className="mt-3 text-3xl font-medium">Wallet-gated ticks. Time-boxed.</h2>
+            <h2 className="mt-3 text-2xl font-medium sm:text-3xl">Wallet-gated ticks. Time-boxed.</h2>
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
               {desk.bot.lastNote ??
                 "One new ticket per tick. Breakouts must clear the prior high. Winners scale at 1R; stops move to breakeven at 0.8R."}
             </p>
           </div>
-          <div className="flex gap-2">
-            <button disabled={busy} onClick={() => onControl(desk.bot.running ? "stop" : "start")} className="btn btn-ink">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            <button disabled={busy} onClick={() => onControl(desk.bot.running ? "stop" : "start")} className="btn btn-ink w-full sm:w-auto">
               {desk.bot.running ? "Disarm" : "Arm"}
             </button>
-            <button disabled={busy} onClick={() => onControl("tick")} className="btn btn-ghost">
+            <button disabled={busy} onClick={() => onControl("tick")} className="btn btn-ghost w-full sm:w-auto">
               Force tick
             </button>
           </div>
@@ -1448,8 +1507,8 @@ function BotView({
             <div className="mt-3 grid gap-2 md:grid-cols-3">
               {desk.learning.edges.map((edge) => (
                 <div key={edge.key} className="rounded-2xl border border-[var(--line)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm">{edge.label}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 text-sm">{edge.label}</span>
                     <Pill tone={edge.bias === "favor" ? "mint" : edge.bias === "fade" ? "crimson" : "amber"}>{edge.bias}</Pill>
                   </div>
                   <p className="mt-1 text-xs text-[var(--faint)]">
@@ -1590,7 +1649,7 @@ function BotView({
             <div className="space-y-3">
               {desk.signals.map((s) => (
                 <div key={s.id} className="rounded-2xl border border-[var(--line)] p-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-medium">
                       {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side}</Pill>
                     </div>
@@ -1612,9 +1671,9 @@ function BotView({
                 <button
                   key={r.id}
                   onClick={() => onOpen(r)}
-                  className="flex w-full items-center justify-between rounded-xl px-2 py-2 hover:bg-[rgba(255,74,216,0.05)]"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl px-2 py-2 text-left hover:bg-[rgba(255,74,216,0.05)]"
                 >
-                  <span>
+                  <span className="min-w-0">
                     {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
                     {r.candidate.apyPct ? (
                       <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
@@ -1623,7 +1682,7 @@ function BotView({
                       <span className="text-[var(--crimson)]"> split</span>
                     ) : null}
                   </span>
-                  <span className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
+                  <span className="num shrink-0 text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
                 </button>
               ))}
             </div>
@@ -1689,13 +1748,13 @@ function Book({
                 : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
             </p>
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto">
             {swaps ? (
-              <button disabled={busy || profit < 1} onClick={onWithdraw} className="btn btn-magenta">
+              <button disabled={busy || profit < 1} onClick={onWithdraw} className="btn btn-magenta w-full sm:w-auto">
                 {profit >= 1 ? `Send ${usd(profit)} profit to my wallet` : "Send profits to my wallet"}
               </button>
             ) : null}
-            <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink">
+            <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink w-full sm:w-auto">
               {swaps ? "Stop wallet swaps" : "Send swaps to my wallet"}
             </button>
           </div>
@@ -1715,13 +1774,52 @@ function Book({
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />
         <Stat label="Expectancy" value={usd(stats.expectancyUsd)} sub={`PF ${stats.profitFactor === null ? "—" : Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"}`} />
       </div>
-      <div className="neon overflow-x-auto">
-        <div className="flex items-center justify-between px-4 pt-4">
+      <div className="neon">
+        <div className="flex items-center justify-between gap-3 px-4 pt-4">
           <Label>Open positions</Label>
-          <button disabled={busy || open.length === 0} onClick={onFlatten} className="btn btn-ghost py-1.5 text-xs">
+          <button disabled={busy || open.length === 0} onClick={onFlatten} className="btn btn-ghost shrink-0 py-1.5 text-xs">
             Flatten book
           </button>
         </div>
+        <div className="space-y-2 px-3 pb-3 md:hidden">
+          {open.length === 0 ? (
+            <p className="px-1 py-3 text-sm text-[var(--muted)]">{swaps ? copy.noOpen : "No open ticket."}</p>
+          ) : (
+            open.map((p) => {
+              const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
+              const pnlUsd = p.qty * p.entryPrice * (pnlPct / 100);
+              return (
+                <div key={p.id} className="rounded-2xl border border-[var(--line)] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium">
+                        {p.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(p.side, p.leverage)}</span>
+                      </div>
+                      <div className="mt-1 break-words text-[11px] text-[var(--muted)]">
+                        {priceFmt(p.entryPrice)} → {priceFmt(p.markPrice)}
+                      </div>
+                    </div>
+                    <Tone value={pnlUsd}>{usd(pnlUsd)}</Tone>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--faint)]">
+                    <span>Stop {priceFmt(p.stopPrice)}</span>
+                    <span>Target {priceFmt(p.targetPrice)}</span>
+                    <span>{usd(p.notional)}</span>
+                    <span>{rMultiple(p).toFixed(2)}R</span>
+                  </div>
+                  <div className="mt-2">{txLink(p.signature, chain)}</div>
+                  <PositionActions
+                    closing={closingId === p.id}
+                    error={closeError?.id === p.id ? closeError.message : null}
+                    onOpen={() => onOpenPosition(p.id)}
+                    onClose={() => onClose(p.id)}
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
             <tr>
@@ -1782,11 +1880,34 @@ function Book({
             )}
           </tbody>
         </table>
+        </div>
       </div>
-      <div className="neon overflow-x-auto">
+      <div className="neon">
         <div className="px-4 pt-4">
           <Label>Tickets</Label>
         </div>
+        <div className="space-y-2 px-3 pb-3 md:hidden">
+          {fills.length === 0 ? (
+            <p className="px-1 py-3 text-sm text-[var(--muted)]">{swaps ? copy.noTickets : "No tickets."}</p>
+          ) : (
+            fills.slice(0, 40).map((t) => (
+              <div key={t.id} className="rounded-2xl border border-[var(--line)] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {t.symbol} <span className="text-[11px] text-[var(--faint)]">{t.action} · {t.side}</span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-[var(--muted)]">{new Date(t.at).toLocaleTimeString()} · {priceFmt(t.price)}</div>
+                  </div>
+                  <div className="shrink-0">{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</div>
+                </div>
+                <p className="mt-2 break-words text-xs leading-5 text-[var(--muted)]">{t.reason}</p>
+                <div className="mt-2">{txLink(t.signature, chain)}</div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
             <tr>
@@ -1823,6 +1944,7 @@ function Book({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -1896,13 +2018,13 @@ function PositionDrawer({
   return (
     <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onDismiss}>
       <aside
-        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-6"
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
             <Pill tone={position.side === "long" ? "mint" : "crimson"}>{sideText(position.side, position.leverage)}</Pill>
-            <h3 className="mt-3 text-3xl font-medium">{position.symbol}</h3>
+            <h3 className="mt-3 text-2xl font-medium sm:text-3xl">{position.symbol}</h3>
             <p className="mt-2 text-sm text-[var(--muted)]">
               {position.reason} · {position.sector ?? "Unknown"} · {rMultiple(position).toFixed(2)}R
             </p>
@@ -1947,16 +2069,16 @@ function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: ()
   return (
     <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onClose}>
       <aside
-        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-6"
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
             <Pill tone="magenta">{thesis.sector}</Pill>
-            <h3 className="mt-3 text-3xl font-medium">
+            <h3 className="mt-3 break-words text-2xl font-medium sm:text-3xl">
               {thesis.asset} <span className="text-[var(--muted)]">{thesis.ticker}</span>
             </h3>
-            <div className="mt-2 flex gap-4 text-sm text-[var(--muted)]">
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--muted)]">
               <span>
                 <Px n={thesis.price} />
               </span>
@@ -1987,7 +2109,7 @@ function ThesisDrawer({ thesis, onClose }: { thesis: ResearchThesis; onClose: ()
           <div className="space-y-2">
             {thesis.catalysts.map((c) => (
               <div key={c.title} className="rounded-2xl border border-[var(--line)] p-3">
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-medium">{c.title}</span>
                   <Pill tone={c.status === "confirmed" ? "mint" : "amber"}>{c.status}</Pill>
                   <span className="text-[var(--faint)]">{c.window}</span>

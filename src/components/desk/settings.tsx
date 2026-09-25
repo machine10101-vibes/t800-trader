@@ -38,18 +38,18 @@ export function SettingsPanel({
               they are. {copy.settingsReset}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button disabled={busy || !dirty} onClick={() => onSave(local)} className="btn btn-ink">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+            <button disabled={busy || !dirty} onClick={() => onSave(local)} className="btn btn-ink w-full sm:w-auto">
               {dirty ? "Save policy" : "Policy saved"}
             </button>
             <button
               disabled={busy}
               onClick={() => setLocal(normalizeConfig({ ...DEFAULT_CONFIG, startingEquity: local.startingEquity }))}
-              className="btn btn-ghost"
+              className="btn btn-ghost w-full sm:w-auto"
             >
               Restore defaults
             </button>
-            <button disabled={busy} onClick={onReset} className="btn btn-ghost">
+            <button disabled={busy} onClick={onReset} className="btn btn-ghost w-full sm:w-auto">
               Reset wallet book
             </button>
           </div>
@@ -456,9 +456,9 @@ function Field({
   const shown = digits === 0 ? String(Math.round(value)) : value.toFixed(digits);
   return (
     <label className={`block rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${disabled ? "opacity-50" : ""}`}>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span>{label}</span>
-        <span className="num text-[var(--magenta)]">
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="min-w-0">{label}</span>
+        <span className="num shrink-0 text-[var(--magenta)]">
           {shown}
           {suffix ?? ""}
         </span>
