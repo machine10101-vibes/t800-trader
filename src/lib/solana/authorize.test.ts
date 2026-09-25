@@ -32,6 +32,13 @@ describe("tradingKeyCoversSpend", () => {
     assert.equal(tradingKeyCoversSpend({ sol: 0.005, usdc: 0, equityUsd: 0 }), false);
     assert.equal(tradingKeyCoversSpend({ sol: 0.02, usdc: 0, equityUsd: 0 }), false);
   });
+
+  it("does not treat a few dollars of SOL as enough to open 5x or 10x", () => {
+    assert.equal(tradingKeyCoversSpend({ sol: 0.05, usdc: 0, equityUsd: 6 }, 0.01, 10), false);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.13, usdc: 0, equityUsd: 15 }, 0.01, 10), true);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.13, usdc: 0, equityUsd: 0 }, 0.01, 10), true);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.02, usdc: 12, equityUsd: 14 }, 0.01, 10), true);
+  });
 });
 
 describe("planProfitWithdrawal", () => {

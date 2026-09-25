@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SOL_MINT, WCRO_MINT, ZBCN_MINT } from "../market/universe";
-import { collateralFor, marginFill, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
+import { collateralFor, collateralRoom, leveragedTicket, marginFill, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
 
 describe("multipliers", () => {
   it("keeps 5x and 10x and drops anything else", () => {
@@ -45,5 +45,22 @@ describe("multipliers", () => {
     assert.equal(small.leverage, 1);
     assert.equal(small.spotFallback, true);
     assert.ok(small.collateralUsd <= 3.5);
+  });
+
+  it("keeps 5x and 10x when the cash cap would have left the room under $10", () => {
+    assert.equal(collateralRoom(15, 0.35, 1), 15 * 0.35);
+    assert.equal(collateralRoom(15, 0.35, 5), 15);
+    assert.equal(collateralRoom(10.5, 0.92, 5), 10.5);
+    assert.ok(collateralRoom(9, 0.92, 5) < 10);
+    const five = leveragedTicket(6, 15, 0.35, 5);
+    assert.equal(five.leverage, 5);
+    assert.equal(five.spotFallback, false);
+    assert.ok(five.collateralUsd >= 10);
+    const ten = leveragedTicket(8, 15, 0.92, 10);
+    assert.equal(ten.leverage, 10);
+    assert.equal(ten.spotFallback, false);
+    const spot = leveragedTicket(6, 8, 0.92, 5);
+    assert.equal(spot.leverage, 1);
+    assert.equal(spot.spotFallback, true);
   });
 });

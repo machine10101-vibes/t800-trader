@@ -9,6 +9,9 @@ export type Multiplier = (typeof MULTIPLIERS)[number];
 /** Jupiter rejects a new perp below this collateral. */
 export const PERP_MIN_COLLATERAL_USD = 10;
 
+/** Left on the trading key for the position account, on top of the network fee. */
+export const PERP_RENT_SOL = 0.015;
+
 const DEFAULT_MULTIPLIERS: Multiplier[] = [5, 10];
 
 export function normalizeMultipliers(value: unknown): Multiplier[] {
@@ -59,6 +62,29 @@ export function marginFill(fill: ChainFill, leverage: number, collateralUsd: num
   const mult = leverage === 10 ? 10 : leverage === 5 ? 5 : 1;
   if (mult === 1) return fill;
   return { ...fill, qty: fill.qty * mult, leverage: mult, collateralUsd };
+}
+
+/**
+ * Spot tickets stay inside the cash-concentration cap.
+ * A 5x or 10x ticket posts collateral from the spendable leg, so that cap cannot
+ * turn a key that can post $10 into a spot buy.
+ */
+export function collateralRoom(cashUsd: number, cashCap: number, leverage: number): number {
+  const cash = Math.max(0, cashUsd);
+  const cap = Number.isFinite(cashCap) ? Math.max(0, cashCap) : 0;
+  if (!(leverage > 1)) return cash * Math.min(0.98, cap);
+  if (cash + 1e-9 >= PERP_MIN_COLLATERAL_USD) return cash;
+  return cash * 0.98;
+}
+
+/** Size a ticket, keeping 5x or 10x whenever the paying leg can post $10. */
+export function leveragedTicket(
+  spotNotional: number,
+  cashUsd: number,
+  cashCap: number,
+  wanted: number,
+): { leverage: number; collateralUsd: number; spotFallback: boolean } {
+  return collateralFor(spotNotional, collateralRoom(cashUsd, cashCap, wanted), wanted);
 }
 
 /**

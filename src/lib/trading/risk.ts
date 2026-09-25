@@ -1,4 +1,5 @@
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
+import { PERP_RENT_SOL } from "./leverage";
 
 /** Smallest marked trading balance the desk will arm and open against. */
 export const MIN_TRADE_USD = 3;
@@ -126,6 +127,17 @@ export interface WalletBudget {
  * A 0.02 SOL arm (~$3–$4) must still have a spendable leg.
  */
 export const SOL_FEE_RESERVE = 0.004;
+
+/**
+ * Dollars a SOL perp can actually post. USDC is used whole. SOL keeps the fee
+ * reserve and the position-account rent, which a spot ticket does not need.
+ */
+export function solPerpPostableUsd(budget: WalletBudget): number {
+  const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
+  const usdc = Math.max(0, budget.usdc);
+  const solLeg = Math.max(0, budget.sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * px;
+  return Math.max(usdc, solLeg);
+}
 
 /** One Jupiter swap spends either USDC or SOL, never a mix of the two. */
 export function payableUsd(budget: WalletBudget): number {

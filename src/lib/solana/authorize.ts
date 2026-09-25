@@ -7,7 +7,8 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { USDC_MINT } from "@/lib/market/universe";
-import { MIN_TRADE_USD } from "@/lib/trading/risk";
+import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
+import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -161,13 +162,25 @@ async function accountExists(address: PublicKey): Promise<boolean> {
 /**
  * The trading account can already pay for swaps. A later refresh or arm must not
  * move more SOL or USDC out of the wallet.
+ * Solana passes the Jupiter $10 floor so a key that cannot open 5x or 10x is topped up.
  */
 export function tradingKeyCoversSpend(
   held: { sol: number; usdc: number; equityUsd: number } | null,
   minNative = BOT_MIN_SOL,
+  minEquityUsd = MIN_TRADE_USD,
 ): boolean {
   if (!held || !(held.sol >= minNative)) return false;
-  return held.equityUsd >= MIN_TRADE_USD || held.usdc >= 1 || held.sol >= minNative * 4;
+  if (!(minEquityUsd > MIN_TRADE_USD)) {
+    return held.equityUsd >= MIN_TRADE_USD || held.usdc >= 1 || held.sol >= minNative * 4;
+  }
+  if (held.usdc + 1e-6 >= minEquityUsd || held.equityUsd + 1e-6 >= minEquityUsd) {
+    const price = held.sol > 0 ? Math.max(0, held.equityUsd - Math.max(0, held.usdc)) / held.sol : 0;
+    if (held.usdc + 1e-6 >= minEquityUsd) return true;
+    if (!(price > 0)) return held.sol + 1e-9 >= 0.13;
+    const postable = Math.max(0, held.sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * price;
+    return postable + 1e-6 >= minEquityUsd;
+  }
+  return !(held.equityUsd > 0) && held.sol + 1e-9 >= 0.13;
 }
 
 async function confirmSignature(signature: string): Promise<void> {
@@ -265,7 +278,7 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     if (!held) {
       throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
     }
-    if (tradingKeyCoversSpend(held)) {
+    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, PERP_MIN_COLLATERAL_USD)) {
       return {
         signature: "already-authorized",
         botAddress: existing.publicKey.toBase58(),
@@ -286,7 +299,7 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     plan = planAuthorization(sol, usdc);
   } catch (error) {
     const held = await readBalances(botAddress).catch(() => null);
-    if (tradingKeyCoversSpend(held)) {
+    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, PERP_MIN_COLLATERAL_USD)) {
       return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
     }
     throw error;

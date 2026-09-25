@@ -1,7 +1,7 @@
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { SOL_MINT } from "@/lib/market/universe";
 import type { ChainFill, ChainOrder } from "@/lib/types";
-import { PERP_MIN_COLLATERAL_USD } from "@/lib/trading/leverage";
+import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { baseUnits } from "./swap";
@@ -11,8 +11,6 @@ const PERPS_URL = "https://perps-api.jup.ag/v1";
 const MIN_SOL = 0.005;
 /** Extra margin so Jupiter's own mark still clears the $10 floor. */
 const COLLATERAL_CUSHION = 1.25;
-/** Left on the key for the position account and the network fee. */
-const RENT_SOL = 0.015;
 
 export interface PerpIncreasePlan {
   asset: "SOL";
@@ -85,7 +83,7 @@ export function planPerpIncrease(
     };
   }
   if (!(order.solPriceUsd > 0)) throw new Error("USDC does not cover this margin, and the SOL price is missing.");
-  const capSol = order.sol - SOL_FEE_RESERVE - RENT_SOL;
+  const capSol = order.sol - SOL_FEE_RESERVE - PERP_RENT_SOL;
   const capUsd = capSol * order.solPriceUsd;
   const post = Math.min(cushioned, capUsd);
   if (!(post + 1e-6 >= PERP_MIN_COLLATERAL_USD)) {

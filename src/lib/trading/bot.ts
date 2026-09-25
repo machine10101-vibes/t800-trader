@@ -19,6 +19,7 @@ import {
   MIN_TICKET_USD,
   MIN_TRADE_USD,
   payableUsd,
+  solPerpPostableUsd,
   walletMarkUsd,
   rollSession,
   shouldFlattenMeme,
@@ -29,7 +30,7 @@ import {
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
-import { PERP_MIN_COLLATERAL_USD, collateralFor, multiplierFor, orderForPosition } from "./leverage";
+import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition } from "./leverage";
 import { reentryBlocked } from "./close";
 import type { MakerDesk } from "./quote";
 
@@ -364,15 +365,22 @@ export async function tickBot(
               })
             : { qty: 0, notional: 0 };
           const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
-          const room = risk.portfolio.cashUsd * Math.min(0.98, cashCap);
-          const wanted = multiplierFor(next.config.multipliers, learned.confidence, learned.reason, learned.symbol, learned.mint);
-          const ticket = collateralFor(sized.notional * advice.sizeMul, room, wanted);
+          const wanted = multiplierFor(
+            next.config.multipliers,
+            Math.max(signal.confidence, learned.confidence),
+            learned.reason,
+            learned.symbol,
+            learned.mint,
+          );
+          const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
+          const paying = wanted > 1 && solPerp && priced ? solPerpPostableUsd(priced) : risk.portfolio.cashUsd;
+          const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wanted);
           const leverage = ticket.leverage;
           const collateralUsd = ticket.collateralUsd;
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
           if (ticket.spotFallback) {
             blocked.push(
-              `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} collateral, so this ticket stays a spot buy`,
+              `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
             );
           }
           if (!token) {

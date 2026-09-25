@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, spendableUsd, walletRiskBook } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -522,6 +522,9 @@ describe("risk", () => {
 describe("walletRiskBook", () => {
   it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
     assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 19.6) < 1e-6);
+    const perp = solPerpPostableUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 });
+    assert.ok(perp >= 10, `0.13 SOL should still post a 5x or 10x, got ${perp}`);
+    assert.equal(solPerpPostableUsd({ usdc: 12, sol: 0.02, solPriceUsd: 200 }), 12);
     const smallSol = spendableUsd({ usdc: 0, sol: 0.02, solPriceUsd: 190 });
     assert.ok(smallSol >= 3, `0.02 SOL at $190 should still spend about $3, got ${smallSol}`);
     const paper = {
