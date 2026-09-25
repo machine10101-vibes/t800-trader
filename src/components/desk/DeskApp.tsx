@@ -27,7 +27,7 @@ import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
-import { isOpenPhantomApp } from "@/lib/solana/wallet";
+import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -107,6 +107,8 @@ function ChainDesk({
   const [focusMint, setFocusMint] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [walletHint, setWalletHint] = useState<string | null>(null);
+  const [resume, setResume] = useState<0 | 1 | 2>(0);
+  const [phone, setPhone] = useState(false);
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
   const [watchAddress, setWatchAddress] = useState<string | null>(null);
   const [watchDraft, setWatchDraft] = useState("");
@@ -182,6 +184,7 @@ function ChainDesk({
   }, [applyDesk, chain]);
 
   const disconnect = useCallback(async () => {
+    if (chain === "solana") forgetPhantomApproval();
     await disconnectDesk(chain, wallet);
     detachWallet(chain);
     setWallet(null);
@@ -194,6 +197,8 @@ function ChainDesk({
 
   useEffect(() => {
     setWalletHint(detectedDeskWallet(chain));
+    setResume(chain === "solana" ? resumeStage(window.location.href) : 0);
+    setPhone(/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia("(max-width: 639px)").matches);
   }, [chain]);
 
   useEffect(() => {
@@ -201,6 +206,24 @@ function ChainDesk({
     const parsed = chain === "cronos" ? parseCronosAddress(query ?? "") : query ? parseWalletAddress(query) : null;
     if (parsed) return;
     void connect(true);
+  }, [chain, connect]);
+
+  useEffect(() => {
+    if (chain !== "solana") return;
+    let cancelled = false;
+    const id = window.setInterval(() => {
+      if (cancelled || walletRef.current) return;
+      if (!injectedSolanaAddress()) return;
+      cancelled = true;
+      window.clearInterval(id);
+      void connect(true);
+    }, 400);
+    const stop = window.setTimeout(() => window.clearInterval(id), 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.clearTimeout(stop);
+    };
   }, [chain, connect]);
 
   useEffect(() => {
@@ -526,7 +549,7 @@ function ChainDesk({
 
   if (!wallet) {
     return (
-      <div className="min-h-screen overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
+      <div className="min-h-dvh overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
         <div className="neon boot-fade w-full max-w-xl p-5 sm:p-10">
           <div className="orb mb-6 grid place-items-center text-lg font-semibold text-black">T8</div>
@@ -536,15 +559,26 @@ function ChainDesk({
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
           <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
+          {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
+          {chain === "solana" && phone && (resume > 0 || walletHint === "Phantom") ? (
+            <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+              Phantom is open. Tap Approve. After you unlock, this desk connects.
+            </p>
+          ) : null}
+          <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
+            {walletBusy
+              ? "Waiting on wallet…"
+              : chain === "solana" && phone && (resume > 0 || walletHint === "Phantom")
+                ? "Approve in Phantom"
+                : walletHint
+                  ? `Connect ${walletHint}`
+                  : copy.connectFallback}
+          </button>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
             <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
             <GateChip label="Live swaps" hint={copy.swapHint} />
           </div>
-          {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
-          <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
-            {walletBusy ? "Waiting on wallet…" : walletHint ? `Connect ${walletHint}` : copy.connectFallback}
-          </button>
           <form
             className="mt-6 border-t border-[var(--line)] pt-5"
             onSubmit={(event) => {
@@ -603,7 +637,7 @@ function ChainDesk({
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
         <Header
         desk={desk}
         wallet={wallet}
@@ -673,7 +707,7 @@ function ChainDesk({
                   desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
                 }`}
           </p>
-          <button onClick={() => void disconnect()} className="mt-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
+          <button onClick={() => void disconnect()} className="mt-2 min-h-11 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
           </button>
         </aside>
@@ -907,7 +941,7 @@ function Header({
             </Pill>
           </span>
         </div>
-        <div className="nav-scroll flex w-full min-w-0 items-center gap-3 overflow-x-auto pb-1 text-sm sm:hidden">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm sm:hidden">
           <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
           <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
           <div className="shrink-0 text-right">

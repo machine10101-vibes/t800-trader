@@ -80,6 +80,7 @@ function env(partial: Partial<WalletConnectEnv> & { wallet?: InjectedProvider })
     sleep: partial.sleep ?? (async () => {}),
     waitForProvider: partial.waitForProvider,
     markResume: partial.markResume,
+    clearResume: partial.clearResume,
   };
 }
 
@@ -195,22 +196,23 @@ describe("phantom mobile connect", () => {
     assert.equal(shouldResumeSilently({ mobile: true, resumeStage: 0, trusted: false, isConnected: false }), false);
   });
 
-  it("prompts once inside Phantom, then marks the reload as resume-only", async () => {
+  it("does not call connect from a page load inside Phantom", async () => {
     const marks: number[] = [];
     const { wallet, calls } = provider({ isPhantom: true });
-    const session = await requestWalletAddress(
-      true,
-      env({
-        mobile: true,
-        wallet,
-        resumeStage: 1,
-        markResume: (stage) => marks.push(stage),
-      }),
+    await assert.rejects(
+      requestWalletAddress(
+        true,
+        env({
+          mobile: true,
+          wallet,
+          resumeStage: 1,
+          markResume: (stage) => marks.push(stage),
+        }),
+      ),
+      /not connected/i,
     );
-    assert.equal(session.address, KEY);
-    assert.deepEqual(marks, [2]);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0], undefined);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(marks, []);
   });
 
   it("does not open a second sheet when the unlock reload is already resume-only", async () => {

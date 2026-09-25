@@ -86,6 +86,7 @@ export interface WalletConnectEnv {
   sleep?: (ms: number) => Promise<void>;
   waitForProvider?: (timeoutMs: number) => Promise<InjectedProvider | null>;
   markResume?: (stage: 1 | 2) => void;
+  clearResume?: () => void;
 }
 
 export function isOpenPhantomApp(error: unknown): error is OpenPhantomApp {
@@ -212,7 +213,36 @@ function browserEnv(): WalletConnectEnv {
     trusted: readTrustedFlag(),
     waitForProvider: waitForInjected,
     markResume: stampResume,
+    clearResume: clearResumeQuery,
   };
+}
+
+function clearResumeQuery(): void {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("connect")) return;
+    url.searchParams.delete("connect");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // The connect screen stays usable without the query.
+  }
+}
+
+/** Disconnect should not silently connect again on the next refresh. */
+export function forgetPhantomApproval(): void {
+  try {
+    localStorage.removeItem(PHANTOM_TRUST_KEY);
+  } catch {
+    // Private mode can block storage.
+  }
+  clearResumeQuery();
+}
+
+/** A key Phantom already exposed. This never calls connect(). */
+export function injectedSolanaAddress(): string | null {
+  if (typeof window === "undefined") return null;
+  const provider = pickInjectedProvider(browserEnv());
+  return provider ? providerAddress(provider) : null;
 }
 
 /** The approval survived. Drop the one-shot query so the next load only resumes. */
@@ -452,8 +482,28 @@ function delay(ms: number): Promise<void> {
  * An explicit tap calls connect() with no options. Passing `{ onlyIfTrusted: false }`
  * is what Phantom's in-app browser rejects as "Unexpected error."
  */
-async function pollProviderAddress(provider: InjectedProvider, sleep: (ms: number) => Promise<void>): Promise<string | null> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("The wallet did not answer. Tap Connect again.")), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function pollProviderAddress(
+  provider: InjectedProvider,
+  sleep: (ms: number) => Promise<void>,
+  attempts: number,
+): Promise<string | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const address = providerAddress(provider);
     if (address) return address;
     await sleep(100);
@@ -490,36 +540,31 @@ export async function requestWalletAddress(
       isConnected: provider.isConnected === true,
     });
     if (!resume) throw new Error("Wallet is not connected.");
-    // First open inside Phantom: the user already tapped Connect. Prompt once.
-    // Stamp stage 2 first so the unlock reload does not open a second sheet.
-    if (env.mobile && provider.isPhantom && resumeStageNow === 1 && !trusted && provider.isConnected !== true) {
-      env.markResume?.(2);
-      const prompted = await provider.connect().catch(async (error: unknown) => {
-        if (!isUnexpectedWalletError(error)) return null;
-        await sleep(CONNECT_RETRY_MS);
-        return provider.connect().catch(() => null);
-      });
-      const address = prompted?.publicKey?.toBase58() || providerAddress(provider);
-      if (!address) throw new Error("Wallet is not connected.");
-      return { address, provider };
+    // A page load must not call connect(). That call has no tap, Phantom answers
+    // "Unexpected error", and the unlock reload lands on the connect screen again.
+    if (env.mobile) {
+      const revealed = await pollProviderAddress(provider, sleep, resumeStageNow === 2 ? 15 : 5);
+      if (revealed) return { address: revealed, provider };
     }
+    const silentAllowed = !env.mobile || resumeStageNow === 2 || provider.isConnected === true || trusted;
+    if (!silentAllowed) throw new Error("Wallet is not connected.");
     try {
-      const res = await provider.connect({ onlyIfTrusted: true });
+      const res = await withTimeout(provider.connect({ onlyIfTrusted: true }), 8_000);
       const address = res?.publicKey?.toBase58() || providerAddress(provider);
       if (address) return { address, provider };
     } catch (error) {
       if (!env.mobile) throw error instanceof Error ? error : new Error("Wallet is not connected.");
     }
-    if (!env.mobile) throw new Error("Wallet is not connected.");
-    const polled = await pollProviderAddress(provider, sleep);
-    if (!polled) throw new Error("Wallet is not connected.");
-    return { address: polled, provider };
+    env.clearResume?.();
+    const after = await pollProviderAddress(provider, sleep, 5);
+    if (!after) throw new Error("Wallet is not connected.");
+    return { address: after, provider };
   }
 
   const insidePhantom = Boolean(provider.isPhantom);
   if (env.mobile && insidePhantom) env.markResume?.(2);
   const prompt = async () => {
-    const res = await provider.connect();
+    const res = await withTimeout(provider.connect(), 45_000);
     return res?.publicKey?.toBase58() || providerAddress(provider);
   };
 
@@ -529,6 +574,7 @@ export async function requestWalletAddress(
     return { address, provider };
   } catch (error) {
     if (!isUnexpectedWalletError(error)) {
+      env.clearResume?.();
       throw new Error(walletConnectFailure(error, { mobile: env.mobile, insidePhantom }));
     }
     await sleep(CONNECT_RETRY_MS);
@@ -537,6 +583,7 @@ export async function requestWalletAddress(
       if (!address) throw new Error("Wallet connected but did not return a public key.");
       return { address, provider };
     } catch (retryError) {
+      env.clearResume?.();
       if (env.mobile && !insidePhantom && !provider.isSolflare) {
         throw new OpenPhantomApp(phantomBrowseUrl(env.pageUrl));
       }

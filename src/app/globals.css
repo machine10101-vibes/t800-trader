@@ -342,6 +342,10 @@ input[type="range"] {
     font-size: 16px;
   }
 
+  .btn {
+    min-height: 44px;
+  }
+
   .toast-stack {
     left: 12px;
     right: 12px;
