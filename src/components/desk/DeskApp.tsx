@@ -237,31 +237,37 @@ export function DeskApp() {
   }, []);
 
   useEffect(() => {
-    const session = walletRef.current;
-    if (!session || !desk?.bot.running) return;
-    const seconds = Math.max(6, desk.config.scanSeconds);
+    if (!walletRef.current) return;
+    const seconds = Math.max(6, desk?.config.scanSeconds ?? 8);
     let cancel = false;
     let inflight = false;
     const run = async () => {
       const current = walletRef.current;
-      if (!current || cancel || inflight || busyRef.current) return;
+      if (!current || cancel || inflight || busyRef.current) return false;
       inflight = true;
       try {
         const next = await controlBot("tick", current);
         if (!cancel) applyDesk(next);
+        return true;
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
+        return false;
       } finally {
         inflight = false;
       }
     };
-    void run();
-    const id = setInterval(() => void run(), seconds * 1000);
+    const first = window.setInterval(() => {
+      if (cancel || busyRef.current) return;
+      window.clearInterval(first);
+      void run();
+    }, 300);
+    const id = window.setInterval(() => void run(), seconds * 1000);
     return () => {
       cancel = true;
-      clearInterval(id);
+      window.clearInterval(first);
+      window.clearInterval(id);
     };
-  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, wallet?.address]);
+  }, [applyDesk, desk?.config.scanSeconds, wallet?.address]);
 
   useEffect(() => {
     const session = walletRef.current;
@@ -1127,11 +1133,19 @@ function Overview({
         <div className="neon p-5">
           <Label>Execution log</Label>
           {fills.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">
-              {swaps
-                ? "No signed swaps yet. An armed bot sends the next rising SOL or Zebec long from the trading key. The row appears here with a Solscan link once that swap confirms."
-                : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
-            </p>
+            <div className="space-y-2 text-sm text-[var(--muted)]">
+              <p>
+                {swaps
+                  ? "No signed swaps yet. An armed bot sends the next rising SOL or Zebec long from the trading key. The row appears here with a Solscan link once that swap confirms."
+                  : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
+              </p>
+              {desk.bot.lastNote ? <p className="text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
+              {desk.signals.slice(0, 4).map((s) => (
+                <p key={s.id} className="font-mono text-[11px]">
+                  SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
+                </p>
+              ))}
+            </div>
           ) : (
             <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto font-mono text-[11px] text-[var(--muted)]">
               {fills.slice(0, 12).map((t) => (
@@ -1140,13 +1154,12 @@ function Overview({
                   {t.signature ? ` ${t.signature.slice(0, 8)}` : ""}
                 </div>
               ))}
-              {swaps
-                ? null
-                : desk.signals.slice(0, 8).map((s) => (
-                    <div key={s.id}>
-                      SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
-                    </div>
-                  ))}
+              {desk.signals.slice(0, 8).map((s) => (
+                <div key={s.id}>
+                  SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
+                </div>
+              ))}
+              {desk.bot.lastNote ? <div>{desk.bot.lastNote}</div> : null}
             </div>
           )}
           <div className="mt-4 space-y-2">
@@ -1436,8 +1449,21 @@ function BotView({
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="neon p-5">
           <Label>Signals this cycle</Label>
+          <p className="text-[11px] leading-5 text-[var(--magenta)]">
+            {desk.bot.lastNote ?? "The first scan starts as soon as the wallet is connected."}
+          </p>
           {desk.signals.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No live signal this cycle.</p>
+            <div className="mt-3 text-sm text-[var(--muted)]">
+              {(desk.bot.blocked ?? []).length ? (
+                <ul className="space-y-1">
+                  {(desk.bot.blocked ?? []).map((line) => (
+                    <li key={line}>— {line}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No long on this scan. A red 15-minute tape stays in cash.</p>
+              )}
+            </div>
           ) : (
             <div className="space-y-3">
               {desk.signals.map((s) => (

@@ -91,7 +91,7 @@ export async function tickBot(
       let closed = 0;
       const blocked: string[] = [];
 
-      if (market.regime.stance === "defensive") {
+      if (next.bot.running && market.regime.stance === "defensive") {
         for (const pos of [...next.positions]) {
           if (shouldFlattenMeme(pos, market.regime.stance)) {
             const before = next.positions.length;
@@ -101,7 +101,7 @@ export async function tickBot(
         }
       }
 
-      for (const pos of [...next.positions]) {
+      if (next.bot.running) for (const pos of [...next.positions]) {
         const plan = managePosition(pos, Date.now(), next.config);
         if (plan.exit) {
           const before = next.positions.length;
@@ -128,7 +128,7 @@ export async function tickBot(
           }
         }
       }
-      for (const pos of [...next.positions]) {
+      if (next.bot.running) for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint);
         if (next.config.scratchEnabled === false) continue;
         if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
@@ -142,7 +142,7 @@ export async function tickBot(
       let opened = 0;
       let quoteNote = "";
       let quoteOwned = false;
-      if (maker && next.config.walletSwaps && next.bot.resting) {
+      if (next.bot.running && maker && next.config.walletSwaps && next.bot.resting) {
         const resting = next.bot.resting;
         try {
           const looked = await maker.lookup(resting);
@@ -179,12 +179,12 @@ export async function tickBot(
         }
       }
       const risk = walletRiskBook(next.portfolio, next.positions, next.trades, budget, next.config.walletSwaps);
-      if (next.bot.running && !dayLossBreached(risk.portfolio, next.config)) {
+      if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config);
         next = studyTape(next, research.candidates, market.regime.stance);
         const spendable = budget ? payableUsd(budget) : 0;
         const marked = budget ? walletMarkUsd(budget) : 0;
-        const bookTooSmall = next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
+        const bookTooSmall = Boolean(budget) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
           blocked.push(
             `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much SOL or USDC before a swap is sent`,
@@ -234,6 +234,10 @@ export async function tickBot(
         );
         if (pauseOpens) blocked.push("Signature was declined — the next wallet prompt waits about a minute");
         for (const signal of signals) {
+          if (!next.bot.running) {
+            shown.push(signal);
+            continue;
+          }
           const advice = advise(signal, next.memory, market.regime.stance);
           const learned: Signal = {
             ...signal,
@@ -443,9 +447,8 @@ export async function tickBot(
         next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
           ? " · scanning — SOL goes out at 5x or 10x once the key has $10, Zebec stays spot"
           : "";
-      const note = next.bot.running
-        ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${quoted}${hunting}${held}`
-        : `Standby · closed ${closed} · ${market.regime.stance}${mode}${held}`;
+      const idle = next.bot.running ? "" : " · arm the bot to send a ticket";
+      const note = `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${quoted}${hunting}${held}${idle}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
       next.bot = {

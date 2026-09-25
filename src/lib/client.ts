@@ -64,7 +64,8 @@ export async function controlBot(
   const maker = session ? makerDesk(session) : null;
   if (action === "tick") {
     const state = await loadState();
-    await tickBot(executor, state.config.walletSwaps ? await budgetFor(session) : null, state.config.walletSwaps ? maker : null);
+    const live = state.config.walletSwaps && state.bot.running;
+    await tickBot(executor, live ? await budgetFor(session) : null, live ? maker : null);
     return buildDesk();
   }
   if ((action === "stop" || action === "flatten" || action === "reset") && maker) {
