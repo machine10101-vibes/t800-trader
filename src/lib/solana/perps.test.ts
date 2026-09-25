@@ -28,6 +28,7 @@ describe("perp planner", () => {
   it("spends SOL collateral for a 5x long and USDC when that covers the margin", () => {
     const sol = planPerpIncrease({ ...order(), usdc: 0, sol: 0.2, solPriceUsd: 200 });
     assert.equal(sol.leverage, "5");
+    assert.equal(sol.priorityFeeMicroLamports, "250000");
     assert.equal(sol.inputToken, "SOL");
     assert.equal(sol.inputTokenAmount, "62500000");
     assert.ok(sol.collateralUsd >= 12);

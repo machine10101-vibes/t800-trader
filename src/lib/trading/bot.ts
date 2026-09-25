@@ -116,7 +116,9 @@ export async function tickBot(
         }
         if (plan.nextStop) next = updateStop(next, pos.id, plan.nextStop);
         if (plan.scale) {
-          const fraction = Math.min(0.75, Math.max(0.25, (next.config.scaleFractionPct ?? 50) / 100));
+          const saved = (next.config.scaleFractionPct ?? 50) / 100;
+          const bank = (pos.leverage ?? 1) >= 5 ? Math.max(saved, 0.6) : saved;
+          const fraction = Math.min(0.75, Math.max(0.25, bank));
           if (next.config.walletSwaps && pos.signature && pos.side === "long") {
             if (!executor) {
               blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);

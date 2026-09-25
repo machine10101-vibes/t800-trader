@@ -240,7 +240,7 @@ const researchCache: Record<ChainId, { at: number; key: string; value: ResearchV
   cronos: null,
 };
 
-const RESEARCH_CACHE_MS = 20_000;
+const RESEARCH_CACHE_MS = 6_000;
 
 function structureFor(candidate: TokenCandidate): TechnicalSnapshot {
   const candles = cachedOhlcv(candidate.poolAddress);

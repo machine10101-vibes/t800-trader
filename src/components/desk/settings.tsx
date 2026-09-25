@@ -143,9 +143,9 @@ export function SettingsPanel({
       <Section title="Cadence" hint="How often the bot looks, and how many new tickets a single scan may add.">
         <Field
           label="Scan every"
-          hint="The armed bot wakes on this interval. Shorter scans see the tape sooner."
+          hint="The armed bot wakes on this interval. An open ticket is checked every 4 seconds so a stop or a winner is not left sitting."
           suffix="s"
-          min={6}
+          min={4}
           max={60}
           step={1}
           value={local.scanSeconds}

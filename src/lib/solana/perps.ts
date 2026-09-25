@@ -11,6 +11,8 @@ const PERPS_URL = "https://perps-api.jup.ag/v1";
 const MIN_SOL = 0.005;
 /** Extra margin so Jupiter's own mark still clears the $10 floor. */
 const COLLATERAL_CUSHION = 1.25;
+/** Compute-unit price so a 5x or 10x transaction is not left at the back of the queue. */
+const PRIORITY_FEE_MICRO_LAMPORTS = "250000" as const;
 
 export interface PerpIncreasePlan {
   asset: "SOL";
@@ -19,6 +21,7 @@ export interface PerpIncreasePlan {
   side: "long";
   leverage: "5" | "10";
   maxSlippageBps: "100";
+  priorityFeeMicroLamports: "250000";
   collateralUsd: number;
 }
 
@@ -26,6 +29,7 @@ export interface PerpDecreasePlan {
   positionPubkey: string;
   receiveToken: "SOL";
   maxSlippageBps: "100";
+  priorityFeeMicroLamports: "250000";
   entirePosition: boolean;
   sizeUsdDelta?: string;
 }
@@ -59,6 +63,7 @@ export function planPerpIncrease(
   if (order.sol < MIN_SOL) throw new Error("Need at least 0.005 SOL in the wallet to pay the network fee.");
   const side = "long" as const;
   const maxSlippageBps = "100" as const;
+  const priorityFeeMicroLamports = PRIORITY_FEE_MICRO_LAMPORTS;
   const cushioned = collateral * COLLATERAL_CUSHION;
   if (order.usdc + 1e-6 >= cushioned) {
     return {
@@ -68,6 +73,7 @@ export function planPerpIncrease(
       side,
       leverage: String(leverage) as "5" | "10",
       maxSlippageBps,
+      priorityFeeMicroLamports,
       collateralUsd: cushioned,
     };
   }
@@ -79,6 +85,7 @@ export function planPerpIncrease(
       side,
       leverage: String(leverage) as "5" | "10",
       maxSlippageBps,
+      priorityFeeMicroLamports,
       collateralUsd: order.usdc,
     };
   }
@@ -98,6 +105,7 @@ export function planPerpIncrease(
     side,
     leverage: String(leverage) as "5" | "10",
     maxSlippageBps,
+    priorityFeeMicroLamports,
     collateralUsd: post,
   };
 }
@@ -105,13 +113,20 @@ export function planPerpIncrease(
 export function planPerpDecrease(order: ChainOrder): PerpDecreasePlan {
   if (!order.positionPubkey) throw new Error("This leveraged ticket has no position account, so it cannot be closed.");
   if (order.kind === "close") {
-    return { positionPubkey: order.positionPubkey, receiveToken: "SOL", maxSlippageBps: "100", entirePosition: true };
+    return {
+      positionPubkey: order.positionPubkey,
+      receiveToken: "SOL",
+      maxSlippageBps: "100",
+      priorityFeeMicroLamports: PRIORITY_FEE_MICRO_LAMPORTS,
+      entirePosition: true,
+    };
   }
   if (!(order.notionalUsd > 0)) throw new Error("Nothing to scale out of this multiplier.");
   return {
     positionPubkey: order.positionPubkey,
     receiveToken: "SOL",
     maxSlippageBps: "100",
+    priorityFeeMicroLamports: PRIORITY_FEE_MICRO_LAMPORTS,
     entirePosition: false,
     sizeUsdDelta: baseUnits(order.notionalUsd, 6),
   };
@@ -204,15 +219,6 @@ async function findPosition(wallet: string, side: string): Promise<string | null
   return hit?.positionPubkey ?? null;
 }
 
-async function waitForPosition(wallet: string, side: string): Promise<string | null> {
-  for (let i = 0; i < 4; i++) {
-    const found = await findPosition(wallet, side).catch(() => null);
-    if (found) return found;
-    await new Promise((resolve) => setTimeout(resolve, 700));
-  }
-  return null;
-}
-
 export async function settlePerp(session: WalletSession, order: ChainOrder): Promise<ChainFill> {
   const signer = tradingKeypair(session.address);
   if (!signer) throw new Error("Arm the bot and approve the wallet signature before a multiplier can be sent.");
@@ -238,6 +244,7 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
           side: plan.side,
           leverage: plan.leverage,
           maxSlippageBps: plan.maxSlippageBps,
+          priorityFeeMicroLamports: plan.priorityFeeMicroLamports,
           walletAddress: trader,
         },
       );
@@ -256,7 +263,7 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
     }
     if (!opened.serializedTxBase64 || !opened.quote) throw new Error("Jupiter did not return a 5x or 10x transaction.");
     const signature = await submit(opened.serializedTxBase64, signer, "increase-position");
-    const positionPubkey = opened.positionPubkey || (await waitForPosition(trader, plan.side));
+    const positionPubkey = opened.positionPubkey || (await findPosition(trader, plan.side).catch(() => null));
     return fillFromIncrease(opened.quote, positionPubkey, signature);
   }
 

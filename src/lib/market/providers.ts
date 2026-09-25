@@ -115,7 +115,7 @@ function fillActiveBook(rows: TokenCandidate[], chain: ChainId): TokenCandidate[
   return out;
 }
 
-const CACHE_MS = 20_000;
+const CACHE_MS = 6_000;
 
 function mintFromGtId(id: string | undefined): string {
   if (!id) return "";

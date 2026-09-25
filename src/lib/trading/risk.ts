@@ -267,6 +267,14 @@ export function unrealizedPnl(position: Position): { usd: number; pct: number } 
   return { usd, pct };
 }
 
+/** 5x and 10x give the move back faster than a spot ticket, so they are managed on a shorter clock. */
+function leverageHurry(leverage: number | undefined): number {
+  const lev = leverage ?? 1;
+  if (lev >= 10) return 0.45;
+  if (lev >= 5) return 0.6;
+  return 1;
+}
+
 export function exitReason(
   position: Position,
   nowMs = Date.now(),
@@ -276,15 +284,16 @@ export function exitReason(
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
   const fallback = (position.sector ?? "Unknown") === "Meme" ? POLICY.memeTimeCapMin : POLICY.timeCapMin;
   const timeCap = policyNum(timeCapMin, fallback);
+  const trailFrac = (position.leverage ?? 1) >= 5 ? 0.35 : 0.55;
   if (position.side === "long") {
     if (position.markPrice <= position.stopPrice) return "stop";
     if (position.markPrice >= position.targetPrice) return "target";
-    const locked = position.entryPrice + (position.targetPrice - position.entryPrice) * 0.55;
+    const locked = position.entryPrice + (position.targetPrice - position.entryPrice) * trailFrac;
     if (usd > 0 && position.highWater >= locked && position.markPrice < locked) return "trail";
   } else {
     if (position.markPrice >= position.stopPrice) return "stop";
     if (position.markPrice <= position.targetPrice) return "target";
-    const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * 0.55;
+    const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * trailFrac;
     if (usd > 0 && position.lowWater <= locked && position.markPrice > locked) return "trail";
   }
   if (ageMin > timeCap) return "time";
@@ -305,7 +314,9 @@ export function rollSession(portfolio: Portfolio, now = new Date()): Portfolio {
 
 export function shouldScratch(position: Position, m5: number, m15: number): boolean {
   if (position.side !== "long") return false;
-  if (rMultiple(position) >= 0.25) return false;
+  const r = rMultiple(position);
+  if ((position.leverage ?? 1) >= 5 && r < 0.35 && m5 <= -0.8) return true;
+  if (r >= 0.25) return false;
   return m15 <= -1.2 && m5 <= -0.6;
 }
 
@@ -334,16 +345,19 @@ export function managePosition(
   const staleMin = meme
     ? policyNum(config?.memeStaleMin, POLICY.memeStaleMin)
     : policyNum(config?.staleMin, POLICY.staleMin);
-  const hard = exitReason(position, nowMs, timeCap);
+  const speed = leverageHurry(position.leverage);
+  const hurriedCap = timeCap * (speed < 1 ? Math.max(speed, 0.5) : 1);
+  const hurriedStale = staleMin * speed;
+  const hard = exitReason(position, nowMs, hurriedCap);
   if (hard && hard !== "time") return { exit: hard };
   const r = rMultiple(position);
   const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
-  if (ageMin >= staleMin && r < 0.15) return { exit: "time" };
+  if (ageMin >= hurriedStale && r < 0.15) return { exit: "time" };
   if (hard) return { exit: hard };
 
-  const beR = policyNum(config?.beR, POLICY.beR);
-  const scaleAt = policyNum(config?.scaleAtR, POLICY.scaleAtR);
-  const lockAt = policyNum(config?.lockAtR, POLICY.lockAtR);
+  const beR = policyNum(config?.beR, POLICY.beR) * speed;
+  const scaleAt = policyNum(config?.scaleAtR, POLICY.scaleAtR) * speed;
+  const lockAt = policyNum(config?.lockAtR, POLICY.lockAtR) * (speed < 1 ? Math.min(speed + 0.2, 1) : 1);
   const lockProfit = policyNum(config?.lockProfitR, POLICY.lockProfitR);
   const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
   const lockR = r >= lockAt ? lockProfit : 0.05;

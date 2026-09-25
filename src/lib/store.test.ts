@@ -48,7 +48,8 @@ describe("store", () => {
     const next = normalizeConfig({ startingEquity: 6, maxPositions: 2, scanSeconds: 4 });
     assert.equal(next.startingEquity, 6);
     assert.equal(next.maxPositions, 2);
-    assert.equal(next.scanSeconds, 6);
+    assert.equal(next.scanSeconds, 4);
+    assert.equal(normalizeConfig({ scanSeconds: 2 }).scanSeconds, 4);
     assert.equal(next.oneTicketPerTick, true);
     assert.equal(next.minConfidence, 58);
     assert.equal(next.autoCash, true);

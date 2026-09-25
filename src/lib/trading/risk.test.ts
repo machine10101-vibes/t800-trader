@@ -391,6 +391,37 @@ describe("risk", () => {
     assert.equal(shouldScratch({ ...pos, markPrice: 101.2, highWater: 101.2 }, -0.8, -1.4), false);
   });
 
+  it("banks a 5x winner before a spot ticket would, and cuts it when the 5m dumps", () => {
+    const base = {
+      id: "p",
+      mint: "m",
+      symbol: "SOL",
+      poolAddress: "x",
+      sector: "L1" as const,
+      side: "long" as const,
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 101.2,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "reclaim" as const,
+      researchScore: 70,
+      highWater: 101.2,
+      lowWater: 100,
+      notional: 101.2,
+      initialStop: 98,
+      scaled: false,
+    };
+    assert.equal(managePosition(base).scale, undefined);
+    const levered = managePosition({ ...base, leverage: 5 });
+    assert.equal(levered.scale, true);
+    assert.ok((levered.nextStop ?? 0) > 98);
+    assert.equal(shouldScratch({ ...base, leverage: 5, markPrice: 100, highWater: 100 }, -0.9, 0.4), true);
+    assert.equal(shouldScratch(base, -0.9, 0.4), false);
+  });
+
   it("rolls yesterday's loss cap so a new session can trade", () => {
     const rolled = rollSession(
       { ...portfolio({ equityUsd: 6, dayStartEquity: 10, dayPnlUsd: -4 }), sessionDay: "2020-01-01" },

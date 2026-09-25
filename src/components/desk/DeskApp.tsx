@@ -333,13 +333,16 @@ function ChainDesk({
     return () => clearInterval(id);
   }, []);
 
-  const scanSecondsRef = useRef(8);
-  scanSecondsRef.current = Math.max(6, desk?.config.scanSeconds ?? 8);
+  const scanSecondsRef = useRef(5);
+  const positionOpenRef = useRef(false);
+  scanSecondsRef.current = Math.max(4, desk?.config.scanSeconds ?? 5);
+  positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
     if (!walletRef.current) return;
     let cancel = false;
     let inflight = false;
+    let timer = 0;
     const run = async () => {
       const current = walletRef.current;
       if (!current || cancel || inflight || busyRef.current) return false;
@@ -355,16 +358,25 @@ function ChainDesk({
         inflight = false;
       }
     };
-    const first = window.setInterval(() => {
-      if (cancel || busyRef.current) return;
-      window.clearInterval(first);
-      void run();
-    }, 300);
-    const id = window.setInterval(() => void run(), scanSecondsRef.current * 1000);
+    const delayMs = () => {
+      const configured = Math.max(4, scanSecondsRef.current) * 1000;
+      return positionOpenRef.current ? Math.min(configured, 4_000) : configured;
+    };
+    const arm = (delay: number) => {
+      timer = window.setTimeout(() => {
+        void (async () => {
+          if (cancel) return;
+          const started = Date.now();
+          if (!busyRef.current) await run();
+          if (cancel) return;
+          arm(Math.max(1_000, delayMs() - (Date.now() - started)));
+        })();
+      }, delay);
+    };
+    arm(300);
     return () => {
       cancel = true;
-      window.clearInterval(first);
-      window.clearInterval(id);
+      window.clearTimeout(timer);
     };
   }, [applyDesk, chain, wallet?.address]);
 
