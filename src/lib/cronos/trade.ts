@@ -1,5 +1,5 @@
 import type { ArmAuth, TradingSnap } from "@/lib/solana/authorize";
-import { planProfitWithdrawal } from "@/lib/solana/authorize";
+import { planProfitWithdrawal, tradingKeyCoversSpend } from "@/lib/solana/authorize";
 import { marginFill } from "@/lib/trading/leverage";
 import { sellQty } from "@/lib/solana/swap";
 import type { WalletBudget } from "@/lib/trading/risk";
@@ -277,18 +277,21 @@ export async function cronosBudget(session?: CronosSession | null): Promise<Wall
 }
 
 export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> {
-  const account = loadOrCreateCronosKey(session.address);
-  const before = await readCronosBalances(account.address).catch(() => null);
-  const reused = Boolean(before && (before.usdc >= 1 || before.sol >= BOT_MIN_CRO));
-  if (reused && before && before.sol >= BOT_MIN_CRO) {
+  const existing = cronosTradingAccount(session.address);
+  const before = existing ? await readCronosBalances(existing.address).catch(() => null) : null;
+  if (existing && !before) {
+    throw new Error("Could not read the trading account, so no more CRO or USDC was moved.");
+  }
+  if (tradingKeyCoversSpend(before, BOT_MIN_CRO)) {
     return {
       signature: "reused",
-      botAddress: account.address,
+      botAddress: existing?.address ?? "",
       reused: true,
-      equityUsd: before.equityUsd,
+      equityUsd: before?.equityUsd ?? 0,
       depositedUsd: 0,
     };
   }
+  const account = loadOrCreateCronosKey(session.address);
   const live = await readCronosBalances(session.address);
   const plan = planCronosArm(live.sol, live.usdc);
   let signature = "";

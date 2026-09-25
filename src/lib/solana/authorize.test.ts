@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planAuthorization, planProfitWithdrawal } from "./authorize";
+import { planAuthorization, planProfitWithdrawal, tradingKeyCoversSpend } from "./authorize";
 
 describe("planAuthorization", () => {
   it("moves USDC and spare SOL, and leaves a fee reserve in the wallet", () => {
@@ -18,6 +18,19 @@ describe("planAuthorization", () => {
   it("refuses a wallet that cannot pay the swap fees", () => {
     assert.throws(() => planAuthorization(0.01, 40), /0\.025 SOL/);
     assert.throws(() => planAuthorization(0.03, 0), /0\.04 SOL/);
+  });
+});
+
+describe("tradingKeyCoversSpend", () => {
+  it("keeps a funded SOL balance in place", () => {
+    assert.equal(tradingKeyCoversSpend({ sol: 0.13, usdc: 0, equityUsd: 15 }), true);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.13, usdc: 0, equityUsd: 0 }), true);
+  });
+
+  it("still needs a first funding transfer when the trading account is empty", () => {
+    assert.equal(tradingKeyCoversSpend(null), false);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.005, usdc: 0, equityUsd: 0 }), false);
+    assert.equal(tradingKeyCoversSpend({ sol: 0.02, usdc: 0, equityUsd: 0 }), false);
   });
 });
 

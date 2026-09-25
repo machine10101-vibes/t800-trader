@@ -158,8 +158,16 @@ async function accountExists(address: PublicKey): Promise<boolean> {
   return Boolean(acc.value);
 }
 
-function botCanTrade(held: { sol: number; usdc: number; equityUsd: number } | null): boolean {
-  return Boolean(held && held.sol >= BOT_MIN_SOL && (held.equityUsd >= MIN_TRADE_USD || held.usdc >= 1));
+/**
+ * The trading account can already pay for swaps. A later refresh or arm must not
+ * move more SOL or USDC out of the wallet.
+ */
+export function tradingKeyCoversSpend(
+  held: { sol: number; usdc: number; equityUsd: number } | null,
+  minNative = BOT_MIN_SOL,
+): boolean {
+  if (!held || !(held.sol >= minNative)) return false;
+  return held.equityUsd >= MIN_TRADE_USD || held.usdc >= 1 || held.sol >= minNative * 4;
 }
 
 async function confirmSignature(signature: string): Promise<void> {
@@ -251,6 +259,22 @@ export function authorizeTrading(session: WalletSession): Promise<ArmAuth> {
 }
 
 async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
+  const existing = tradingKeypair(session.address);
+  if (existing) {
+    const held = await readBalances(existing.publicKey.toBase58()).catch(() => null);
+    if (!held) {
+      throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
+    }
+    if (tradingKeyCoversSpend(held)) {
+      return {
+        signature: "already-authorized",
+        botAddress: existing.publicKey.toBase58(),
+        reused: true,
+        equityUsd: held.equityUsd,
+        depositedUsd: 0,
+      };
+    }
+  }
   const bot = loadOrCreateTradingKey(session.address);
   const botAddress = bot.publicKey.toBase58();
   const owner = new PublicKey(session.address);
@@ -262,7 +286,7 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     plan = planAuthorization(sol, usdc);
   } catch (error) {
     const held = await readBalances(botAddress).catch(() => null);
-    if (botCanTrade(held)) {
+    if (tradingKeyCoversSpend(held)) {
       return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
     }
     throw error;

@@ -115,7 +115,6 @@ function ChainDesk({
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const busyRef = useRef(false);
-  const armEnsure = useRef<string | null>(null);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
@@ -311,34 +310,6 @@ function ChainDesk({
     };
   }, [applyDesk, chain, wallet?.address]);
 
-  useEffect(() => {
-    const session = walletRef.current;
-    if (!session || !desk?.bot.running || !desk.config.walletSwaps) return;
-    if (trading && trading.equityUsd >= MIN_TRADE_USD) {
-      armEnsure.current = session.address;
-      return;
-    }
-    if (armEnsure.current === session.address) return;
-    armEnsure.current = session.address;
-    let cancel = false;
-    void (async () => {
-      try {
-        const fresh = await refreshDesk(chain, session);
-        if (cancel) return;
-        setWallet(fresh);
-        const next = await controlBot("start", fresh, chain);
-        if (cancel) return;
-        applyDesk(next);
-        setTrading(await tradingSnapshot(fresh.address, chain).catch(() => null));
-      } catch (e) {
-        if (!cancel) setError(e instanceof Error ? e.message : "Arm signature failed");
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
-  }, [applyDesk, chain, desk?.bot.running, desk?.config.walletSwaps, trading, wallet?.address]);
-
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;
   useEffect(() => {
@@ -406,7 +377,6 @@ function ChainDesk({
     }
     busyRef.current = true;
     setBusy(true);
-    if (action === "start") armEnsure.current = wallet.address;
     try {
       if (action === "start" || action === "reset") {
         const session = await refreshDesk(chain, wallet);

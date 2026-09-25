@@ -157,7 +157,7 @@ export async function controlBot(
       if (principalAfter == null) return next;
       return { ...next, bot: { ...next.bot, swapPrincipalUsd: principalAfter } };
     }
-    const short = auth.reused ? "trading key already funded" : `signed ${auth.signature.slice(0, 8)}…`;
+    const short = auth.reused ? "trading account already holds the balance, so nothing else was moved" : `signed ${auth.signature.slice(0, 8)}…`;
     const prior = next.bot.swapPrincipalUsd;
     let swapPrincipalUsd = prior;
     if (prior == null) {
