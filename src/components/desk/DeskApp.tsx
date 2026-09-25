@@ -810,13 +810,10 @@ function BootSkeleton({ address }: { address: string }) {
       <div className="text-sm text-[var(--muted)]">
         Pulling live tape for <span className="num text-[var(--text)]">{shortAddress(address)}</span> — no demo payload.
       </div>
-      <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="neon h-44 p-5">
           <div className="skel h-3 w-16" />
           <div className="skel mt-6 h-10 w-32" />
-        </div>
-        <div className="neon h-44 p-3">
-          <div className="skel h-full w-full" />
         </div>
         <div className="neon h-44 p-5">
           <div className="skel h-3 w-24" />
@@ -965,7 +962,7 @@ function Overview({
   const unrealized = swaps ? open.reduce((sum, position) => sum + rowPnl(position), 0) : desk.portfolio.unrealizedPnlUsd;
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[220px_1fr_240px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <section className="neon p-5">
           <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
             <span>{focus ? focus.ticker : "NO FINALIST"}</span>
@@ -999,15 +996,6 @@ function Overview({
           </button>
           {desk.bot.lastNote ? <p className="mt-3 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
         </section>
-        <section className="neon p-3">
-          <div className="flex items-center justify-between px-1">
-            <Label>{focusTape ? `${focusTape.symbol} 5m` : "5-minute tapes"}</Label>
-            <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">EMA9 · EMA21 · VWAP</span>
-          </div>
-          <div className="h-[168px]">
-            <CandleChart candles={focusCandles} />
-          </div>
-        </section>
         <section className="neon p-5">
           <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]"># trades · live stream</div>
           <div className="mt-3 flex items-end justify-between">
@@ -1028,7 +1016,7 @@ function Overview({
         {desk.tapes.length === 0 ? (
           <p className="px-1 pb-2 text-sm text-[var(--muted)]">SOL and Zebec 5-minute charts load with the tape.</p>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {desk.tapes.map((tape) => (
               <button
                 key={tape.poolAddress}
