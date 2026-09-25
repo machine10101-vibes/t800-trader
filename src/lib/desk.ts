@@ -1,5 +1,5 @@
 import { invalidateMarketCache } from "@/lib/market/providers";
-import { WATCHLIST } from "@/lib/market/universe";
+import { WATCH_TAPE_LIMIT, WATCHLIST } from "@/lib/market/universe";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
 import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
@@ -42,7 +42,7 @@ export function watchlistTapes(candidates: TokenCandidate[]): TapeCard[] {
   }
   return [...best.values()]
     .sort((a, b) => (rank.get(a.mint) ?? 99) - (rank.get(b.mint) ?? 99))
-    .slice(0, 12)
+    .slice(0, WATCH_TAPE_LIMIT)
     .map((candidate) => ({
       symbol: candidate.symbol,
       mint: candidate.mint,

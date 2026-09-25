@@ -12,6 +12,10 @@ export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 export const JITO_SOL_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
 export const JLP_MINT = "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4";
+export const ZBCN_MINT = "ZBCNpuD7YMXzTHB2fhGkGi78MNsHGLRXUhRewNRm9RU";
+
+/** Watchlist names whose pools and 5-minute charts are loaded. Includes Zebec. */
+export const WATCH_TAPE_LIMIT = 13;
 
 /** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
 export const SOL_USDC_POOLS = [
@@ -32,6 +36,7 @@ export const WATCHLIST: WatchToken[] = [
   { symbol: "MNDE", name: "Marinade", mint: "MNDEFzGvMt87ueuHvVU9VcTQSQB6XND51pVSJD1YJXB", sector: "LST" },
   { symbol: "HNT", name: "Helium", mint: "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrE3XEbKcP", sector: "DePIN" },
   { symbol: "RENDER", name: "Render", mint: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", sector: "DePIN" },
+  { symbol: "ZBCN", name: "Zebec Network", mint: ZBCN_MINT, sector: "Payments" },
   { symbol: "W", name: "Wormhole", mint: "85VBFQZC9TZkfaptBWtv8W11s6tJy3Dg6ZEr3GUeA6S", sector: "Infra" },
   { symbol: "TNSR", name: "Tensor", mint: "TNSRxcUxoT9xBG3de7PiWmgQhEQ1e6bwS4P8Cdgx31A", sector: "Infra" },
   { symbol: "BONK", name: "Bonk", mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", sector: "Meme" },

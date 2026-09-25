@@ -3,7 +3,7 @@ import { fetchJson, hoursSince, mapPool, num, nullableNum, sleep, uniqueBy } fro
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
-import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
+import { classifySector, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCH_TAPE_LIMIT, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -146,7 +146,7 @@ async function gtPools(path: string, source: string): Promise<TokenCandidate[]> 
 }
 
 async function watchlistPools(): Promise<TokenCandidate[]> {
-  const results = await mapPool(WATCHLIST.slice(0, 12), 3, async (t) => {
+  const results = await mapPool(WATCHLIST.slice(0, WATCH_TAPE_LIMIT), 3, async (t) => {
     try {
       const pools = await gtPools(
         `networks/solana/tokens/${t.mint}/pools?page=1`,

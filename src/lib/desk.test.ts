@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WATCHLIST } from "./market/universe";
+import { WATCH_TAPE_LIMIT, WATCHLIST } from "./market/universe";
 import { armButton, shellDesk, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
 import type { TokenCandidate } from "./types";
@@ -55,5 +55,10 @@ describe("watchlistTapes", () => {
       ["SOL", "JUP"],
     );
     assert.equal(tapes[1]?.poolAddress, "jup-deep");
+    const zbcn = WATCHLIST.find((token) => token.symbol === "ZBCN");
+    assert.ok(zbcn);
+    assert.ok(WATCHLIST.indexOf(zbcn) < WATCH_TAPE_LIMIT);
+    const withZebec = watchlistTapes([row(sol, "sol-pool", 50_000), row(zbcn, "zbcn-sol", 150_000)]);
+    assert.equal(withZebec.some((tape) => tape.symbol === "ZBCN" && tape.poolAddress === "zbcn-sol"), true);
   });
 });
