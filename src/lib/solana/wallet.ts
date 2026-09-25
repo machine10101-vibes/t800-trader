@@ -5,7 +5,8 @@ import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 const RPCS = [
   "https://solana.publicnode.com",
   "https://solana-rpc.publicnode.com",
-  "https://api.mainnet-beta.solana.com",
+  "https://public.rpc.solanavibestation.com",
+  "https://rpc.solanatracker.io/public",
 ];
 
 export interface WalletSession {
@@ -59,6 +60,19 @@ interface RpcResult<T> {
 
 const RPC_TIMEOUT_MS = 4_000;
 
+export function isForbiddenRpc(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /access forbidden|\b403\b/i.test(message);
+}
+
+/** The official public RPC answers "Access forbidden" and must not cover a real failure. */
+export function pickRpcError(errors: unknown[]): Error {
+  const real = errors.find((error) => error && !isForbiddenRpc(error));
+  if (real instanceof Error) return real;
+  if (typeof real === "string" && real) return new Error(real);
+  return new Error("Solana refused this browser. The bot is still armed — try disarm again.");
+}
+
 async function rpcOnce<T>(url: string, method: string, params: unknown[], signal: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -82,7 +96,7 @@ export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T
   try {
     return await new Promise<T>((resolve, reject) => {
       let pending = RPCS.length;
-      let last: unknown;
+      const errors: unknown[] = [];
       for (const url of RPCS) {
         rpcOnce<T>(url, method, params, ctrl.signal)
           .then((result) => {
@@ -90,11 +104,9 @@ export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T
             resolve(result);
           })
           .catch((error) => {
-            last = error;
+            errors.push(error);
             pending -= 1;
-            if (pending === 0) {
-              reject(last instanceof Error ? last : new Error("Solana RPC could not read this wallet"));
-            }
+            if (pending === 0) reject(pickRpcError(errors));
           });
       }
     });
@@ -112,7 +124,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 /** One endpoint at a time. A broadcast must not race, or three RPCs each try to land it. */
 export async function broadcastTransaction(bytes: Uint8Array): Promise<string> {
   const raw = bytesToBase64(bytes);
-  let last: unknown;
+  const errors: unknown[] = [];
   for (const url of RPCS) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12_000);
@@ -124,12 +136,12 @@ export async function broadcastTransaction(bytes: Uint8Array): Promise<string> {
         ctrl.signal,
       );
     } catch (error) {
-      last = error;
+      errors.push(error);
     } finally {
       clearTimeout(timer);
     }
   }
-  throw last instanceof Error ? last : new Error("Solana rejected the transaction");
+  throw pickRpcError(errors);
 }
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
