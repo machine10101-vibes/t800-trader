@@ -179,49 +179,58 @@ export async function readBalances(address: string): Promise<Omit<WalletSession,
   return { address: pk.toBase58(), sol, usdc, solPriceUsd, equityUsd };
 }
 
-const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-interface MintAccountList {
-  value?: {
-    account?: {
-      data?: {
-        parsed?: {
-          info?: { mint?: string; tokenAmount?: { uiAmount?: number | null } };
-        };
-      };
-    };
-  }[];
+function associated(owner: PublicKey, mint: PublicKey, program: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), program.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM,
+  )[0];
 }
 
-/** Sum of this mint on the trading key, including Token-2022 accounts such as Zebec. */
-export async function readMintBalance(owner: string, mint: string): Promise<number> {
+/**
+ * A positive read wins. Zero from every program means the key is flat.
+ * A failed read with no positive balance is unknown, so the caller keeps the booked size.
+ */
+export function combineMintReads(amounts: Array<number | null>): number | null {
+  let known = 0;
+  let unknown = false;
+  for (const amt of amounts) {
+    if (amt === null) unknown = true;
+    else known += amt;
+  }
+  if (known > 0) return known;
+  if (unknown) return null;
+  return 0;
+}
+
+async function readTokenUi(address: string): Promise<number | null> {
+  try {
+    const acc = await solanaRpc<{
+      value?: {
+        data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
+      } | null;
+    }>("getAccountInfo", [address, { encoding: "jsonParsed" }]);
+    if (!acc.value) return 0;
+    const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
+    return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+  } catch {
+    return null;
+  }
+}
+
+/** This mint on the trading key. Null when the lookup itself failed. */
+export async function readMintBalance(owner: string, mint: string): Promise<number | null> {
   if (mint === SOL_MINT) {
     const live = await readBalances(owner);
     return live.sol;
   }
-  const programs = [TOKEN_PROGRAM.toBase58(), TOKEN_2022];
-  let total = 0;
-  let reads = 0;
-  for (const programId of programs) {
-    try {
-      const listed = await solanaRpc<MintAccountList>("getTokenAccountsByOwner", [
-        owner,
-        { programId },
-        { encoding: "jsonParsed" },
-      ]);
-      reads += 1;
-      for (const row of listed.value ?? []) {
-        const info = row.account?.data?.parsed?.info;
-        if (info?.mint !== mint) continue;
-        const amt = info.tokenAmount?.uiAmount;
-        if (typeof amt === "number" && Number.isFinite(amt)) total += amt;
-      }
-    } catch {
-      // The other token program may still hold the mint.
-    }
-  }
-  if (reads === 0) throw new Error("Could not read the trading key token balance");
-  return total;
+  const ownerPk = new PublicKey(owner);
+  const mintPk = new PublicKey(mint);
+  const amounts = await Promise.all(
+    [TOKEN_PROGRAM, TOKEN_2022].map((program) => readTokenUi(associated(ownerPk, mintPk, program).toBase58())),
+  );
+  return combineMintReads(amounts);
 }
 
 export async function connectWallet(onlyIfTrusted = false): Promise<WalletSession> {

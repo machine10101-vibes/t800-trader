@@ -136,10 +136,8 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   const balances = await readBalances(trader);
   let sized = order;
   if (order.kind !== "open") {
-    const held =
-      order.mint === SOL_MINT
-        ? Math.max(0, balances.sol - FEE_SOL)
-        : await readMintBalance(trader, order.mint);
+    const looked = order.mint === SOL_MINT ? Math.max(0, balances.sol - FEE_SOL) : await readMintBalance(trader, order.mint);
+    const held = looked === null ? order.qty : looked;
     const qty = sellQty(order.qty, held);
     if (!(qty > 0)) throw new Error("ALREADY_FLAT: trading key does not hold this token");
     sized = { ...order, qty };
