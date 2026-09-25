@@ -1,8 +1,9 @@
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
-import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
+import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
+import { withCandleTape } from "./tape";
 import { BOOK_POOLS, classifySector, isActiveBook, isQuote, isStable, SOL_MINT, SOL_USDC_POOLS, watchMeta, WATCHLIST } from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
@@ -162,26 +163,36 @@ async function poolsForMint(mint: string, symbol: string): Promise<TokenCandidat
   return pools.filter((p) => p.mint === mint).map((p) => stampWatch(p, mint));
 }
 
+async function pinnedPool(mint: string, symbol: string, pin: string): Promise<TokenCandidate | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const row = await gtPool(pin, `geckoterminal:pool:${symbol}`);
+      if (row && row.mint === mint) return stampWatch(row, mint);
+      return null;
+    } catch {
+      if (attempt === 0) await sleep(400);
+    }
+  }
+  return null;
+}
+
 async function watchlistPools(): Promise<TokenCandidate[]> {
   const book = WATCHLIST.filter((token) => isActiveBook(token.mint));
   const pins = new Map(BOOK_POOLS.map((pin) => [pin.mint, pin.pool]));
-  const results = await mapPool(book, 2, async (t) => {
+  const pools: TokenCandidate[] = [];
+  for (const t of book) {
     const pin = pins.get(t.mint);
-    if (pin) {
-      try {
-        const row = await gtPool(pin, `geckoterminal:pool:${t.symbol}`);
-        if (row && row.mint === t.mint) return [stampWatch(row, t.mint)];
-      } catch {
-        // The pin missed. The token's pool list is the backup.
-      }
+    const row = pin ? await pinnedPool(t.mint, t.symbol, pin) : null;
+    if (row) {
+      pools.push(row);
+      continue;
     }
     try {
-      return await poolsForMint(t.mint, t.symbol);
+      pools.push(...(await poolsForMint(t.mint, t.symbol)));
     } catch {
-      return [] as TokenCandidate[];
+      // This name waits for the next tick.
     }
-  });
-  const pools = results.flat();
+  }
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
     const key = `${p.mint}:${venueForDex(p.dex)}`;
@@ -463,7 +474,9 @@ export async function loadMarket(force = false): Promise<{
 }
 
 async function warmBookCandles(poolAddresses: string[]): Promise<void> {
-  await Promise.all(poolAddresses.map((pool) => fetchOhlcv(pool, 48).catch(() => [] as Candle[])));
+  for (const pool of poolAddresses) {
+    await fetchOhlcv(pool, 48).catch(() => [] as Candle[]);
+  }
 }
 
 async function loadMarketOnce(): Promise<{
@@ -471,8 +484,8 @@ async function loadMarketOnce(): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
-  const regimePromise = fetchRegime();
   const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
+  const regimePromise = fetchRegime();
   const merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint));
   const candlePools = uniqueBy(
     merged.filter((candidate) => candidate.poolAddress),
@@ -483,7 +496,7 @@ async function loadMarketOnce(): Promise<{
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
     warmBookCandles(candlePools),
   ]);
-  const candidates = crossed.candidates;
+  const candidates = crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress)));
   const stamped = withYields(regime, crossed.yields);
   cache = { at: Date.now(), candidates, regime: stamped };
   return { candidates, regime: stamped, scanned: candidates.length };

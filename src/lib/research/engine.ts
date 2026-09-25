@@ -1,5 +1,6 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { isActiveBook } from "@/lib/market/universe";
+import { tapeRead } from "@/lib/market/tape";
+import { isActiveBook, SOL_MINT, ZBCN_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
@@ -100,13 +101,20 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
   missing.push("Holder concentration and insider wallets");
   missing.push("Audited token utility beyond pool tape");
 
-  const coreThesis = c.watchlist
-    ? `${c.name} is a liquid Solana ${c.sector.toLowerCase()} name. The desk is looking for short-horizon dislocation between live usage (volume, unique takers, reserves) and the last 24h price, not a multi-year venture story.`
-    : `${c.symbol} screened into the book from live Solana pool data. The only claim we can defend is that current liquidity and flow are strong enough to study — not that the token is fundamentally cheap.`;
+  const path =
+    c.mint === SOL_MINT
+      ? "A confirmed long is a Jupiter perp at 5x, or 10x when the signal is strong, once the key has $10. Below that it is a spot bid."
+      : c.mint === ZBCN_MINT
+        ? "A confirmed long is a spot bid. Zebec has no on-chain perp on this desk."
+        : "A confirmed long is a spot bid.";
+  const coreThesis = `${tapeRead(c.symbol, c.flows.m5.priceChangePct, c.flows.m15.priceChangePct, c.flows.h1.priceChangePct)} ${techLine(c)} ${path} Reserves ${usd(c.liquidityUsd)}, 24h volume ${usd(c.volume24hUsd)}.`;
 
-  const whyMispriced = c.watchlist
-    ? `Majors often get ignored when tape chases new launches. If usage is intact while 24h performance is ${c.flows.h24.priceChangePct.toFixed(1)}%, the short-term market may be treating it as leftover beta instead of a functioning venue.`
-    : `New or mid-cap Solana names are usually priced as lottery tickets. ${c.symbol} only stays on the desk if reserves (${usd(c.liquidityUsd)}) and 24h volume (${usd(c.volume24hUsd)}) are real. That still does not mean the float is clean.`;
+  const m15Now = c.flows.m15.priceChangePct;
+  const fifteen = m15Now < 0 ? "red" : m15Now < 0.1 ? "flat" : "green";
+  const whyMispriced =
+    fifteen === "green"
+      ? `${c.symbol} has ${usd(c.volume24hUsd)} of 24h volume while the 15m is already green. The long is that continuation with a stop. It is not a claim that the token is cheap versus a model.`
+      : `${c.symbol} still has ${usd(c.liquidityUsd)} in reserves and ${usd(c.volume24hUsd)} of 24h volume, and the 15m tape is ${fifteen}. A red or flat chart is not a discount. The book waits for a green 15m.`;
 
   const fundamental = [
     `Pool on ${venueLabel(venueForDex(c.dex))} (${c.dex}), quoted vs ${c.quoteSymbol}.`,
@@ -148,11 +156,9 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     ? `${c.name} competes with other Solana ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
     : `${c.symbol} has no demonstrated moat in this dataset. Competitors are every other launch with deeper liquidity or a more credible float.`;
 
-  const bull = c.watchlist
-    ? `Usage stays elevated, SOL beta remains constructive (${regime.stance}), and the token holds value capture optionality. Short-term: trend-following longs work with defined stops.`
-    : `Liquidity does not vanish after the move, unique takers stay two-sided, and price mean-reverts or trends cleanly enough to scalp.`;
-  const base = `Choppy two-sided tape. The bot takes small, time-boxed trades and skips if spreads or slippage blow out.`;
-  const bear = `Reserves drain, unique sellers dominate, or the 24h move was wash/incentive flow. Token goes to zero optionality; paper book stops out.`;
+  const bull = `${c.symbol} 15m stays green, the 5m holds its short average, and reserves stay near ${usd(c.liquidityUsd)}. Regime is ${regime.stance}. ${path}`;
+  const base = `The 15m chops around flat. The bot skips until that window is green and the 5m agrees, then takes one ticket.`;
+  const bear = `The 15m stays red, or reserves fall under $${Math.max(80_000, c.liquidityUsd * 0.45).toFixed(0)}. No new long. An open ticket scratches when the 5m and the 15m both flip.`;
 
   return {
     id: c.mint,
@@ -208,7 +214,9 @@ function techLine(c: ScoredCandidate): string {
   const t = c.technical;
   const bits = [
     t.rsi14 !== null ? `RSI14 ${t.rsi14.toFixed(1)}` : null,
-    t.ema9 !== null && t.ema21 !== null ? `EMA9/21 ${t.ema9 > t.ema21 ? "bull" : "bear"}` : null,
+    t.ema9 !== null && t.ema21 !== null
+      ? `EMA9/21 ${t.ema9 > t.ema21 ? "bull" : t.ema9 < t.ema21 ? "bear" : "flat"}`
+      : null,
     t.extensionPct !== null ? `VWAP ext ${t.extensionPct.toFixed(2)}%` : null,
     t.atrPct !== null ? `ATR ${t.atrPct.toFixed(2)}%` : null,
   ].filter(Boolean);

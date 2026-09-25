@@ -1351,7 +1351,7 @@ function BotView({
         ) : null}
         {(desk.bot.blocked ?? []).length ? (
           <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
-            <Label>Blocked this tick</Label>
+            <Label>This tick</Label>
             <ul className="space-y-1">
               {(desk.bot.blocked ?? []).map((b) => (
                 <li key={b}>— {b}</li>

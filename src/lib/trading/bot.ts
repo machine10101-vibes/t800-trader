@@ -1,4 +1,5 @@
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
+import { tickPass } from "@/lib/market/tape";
 import { ACTIVE_BOOK, isActiveBook, watchMeta } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
@@ -223,6 +224,7 @@ export async function tickBot(
             tapeCtx,
           );
           signals.push(...found);
+          if (!found.length) blocked.push(tickPass(token.symbol, token.flows.m15.priceChangePct));
         }
 
         signals.sort((a, b) => b.confidence - a.confidence);
