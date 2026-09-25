@@ -1,7 +1,7 @@
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
 import { rememberClose } from "./learn";
-import { MIN_TICKET_USD, markPosition, rMultiple, unrealizedPnl } from "./risk";
+import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl } from "./risk";
 
 const SLIP_BPS = 8;
 
@@ -12,11 +12,19 @@ export function fillPrice(signalPrice: number, side: "long" | "short", action: "
 }
 
 export function positionValue(position: Position): number {
-  if (position.side === "long") return position.qty * position.markPrice;
-  return position.qty * (2 * position.entryPrice - position.markPrice);
+  return positionEquity(position);
 }
 
-export function exitProceeds(position: Pick<Position, "side" | "qty" | "entryPrice">, fill: number, pnlUsd: number): number {
+export function exitProceeds(
+  position: Pick<Position, "side" | "qty" | "entryPrice" | "leverage" | "collateralUsd">,
+  fill: number,
+  pnlUsd: number,
+): number {
+  const lev = position.leverage ?? 1;
+  if (lev > 1 && position.side === "long") {
+    const margin = position.collateralUsd ?? (position.qty * position.entryPrice) / lev;
+    return Math.max(0, margin + pnlUsd);
+  }
   if (position.side === "long") return position.qty * fill;
   return position.qty * position.entryPrice + pnlUsd;
 }
@@ -43,16 +51,21 @@ export function openPosition(
   stance?: MarketRegime["stance"],
   stamp?: ChainFill,
 ): AppState {
-  const price = stamp?.price ?? fillPrice(signal.price, signal.side, "open");
+  const signed = Boolean(stamp?.signature);
+  const price = signed && stamp ? stamp.price : fillPrice(signal.price, signal.side, "open");
   const room = state.portfolio.cashUsd * 0.98;
-  let filledQty = stamp?.qty ?? qty;
-  let notional = filledQty * price;
-  if (!stamp && notional > room) {
+  const leverage = stamp?.leverage && stamp.leverage > 1 ? stamp.leverage : 1;
+  let filledQty = signed && stamp ? stamp.qty : qty;
+  let exposure = filledQty * price;
+  let collateral = leverage > 1 ? (stamp?.collateralUsd ?? exposure / leverage) : exposure;
+  if (!signed && collateral > room) {
     if (room < MIN_TICKET_USD) return state;
-    filledQty = room / price;
-    notional = filledQty * price;
+    collateral = room;
+    exposure = collateral * leverage;
+    filledQty = price > 0 ? exposure / price : 0;
   }
   qty = filledQty;
+  const notional = exposure;
 
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
@@ -82,8 +95,11 @@ export function openPosition(
     notional,
     initialStop: stop,
     scaled: false,
-    signature: stamp?.signature,
+    signature: stamp?.signature || undefined,
     tokenDecimals: stamp?.tokenDecimals,
+    leverage: leverage > 1 ? leverage : undefined,
+    collateralUsd: leverage > 1 ? collateral : undefined,
+    positionPubkey: stamp?.positionPubkey,
   };
 
   const trade: Trade = {
@@ -98,15 +114,15 @@ export function openPosition(
     pnlPct: null,
     reason: signal.reason,
     at: new Date().toISOString(),
-    note: stamp ? `${signal.thesis} Wallet tx ${stamp.signature}.` : signal.thesis,
-    signature: stamp?.signature,
+    note: `${leverage > 1 ? `${leverage}x ` : ""}${stamp?.signature ? `${signal.thesis} Wallet tx ${stamp.signature}.` : signal.thesis}`,
+    signature: stamp?.signature || undefined,
   };
 
   return syncBook({
     ...state,
     portfolio: {
       ...state.portfolio,
-      cashUsd: state.portfolio.cashUsd - notional,
+      cashUsd: state.portfolio.cashUsd - collateral,
       tradeCount: state.portfolio.tradeCount + 1,
     },
     positions: [position, ...state.positions],
@@ -205,7 +221,10 @@ export function scaleOut(
   const price = fillPriceOverride ?? (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close"));
   const marked = markPosition({ ...pos, markPrice: price, qty }, price);
   const pnl = unrealizedPnl(marked);
-  const proceeds = exitProceeds({ ...pos, qty }, price, pnl.usd);
+  const lev = pos.leverage ?? 1;
+  const fullMargin = lev > 1 ? (pos.collateralUsd ?? (pos.qty * pos.entryPrice) / lev) : 0;
+  const proceeds =
+    lev > 1 && pos.side === "long" ? Math.max(0, fullMargin * fraction + pnl.usd) : exitProceeds({ ...pos, qty }, price, pnl.usd);
   const remain = pos.qty - qty;
   const trade: Trade = {
     id: id("tr"),
@@ -235,7 +254,14 @@ export function scaleOut(
     },
     positions: state.positions.map((p) =>
       p.id === positionId
-        ? { ...p, qty: remain, notional: remain * p.markPrice, scaled: true, lastUpdate: new Date().toISOString() }
+        ? {
+            ...p,
+            qty: remain,
+            notional: remain * p.markPrice,
+            collateralUsd: lev > 1 ? fullMargin * (1 - fraction) : p.collateralUsd,
+            scaled: true,
+            lastUpdate: new Date().toISOString(),
+          }
         : p,
     ),
     trades: [trade, ...state.trades].slice(0, 250),

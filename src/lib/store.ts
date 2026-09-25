@@ -1,6 +1,7 @@
 import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
+import { normalizeMultipliers } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -18,6 +19,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   venues: [...DEFAULT_VENUES],
   walletSwaps: true,
   liveTradesRev: 1,
+  multipliers: [5, 10],
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -66,6 +68,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     memeStaleMin: clampNum(src.memeStaleMin, POLICY.memeStaleMin, 8, 120, true),
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
+    multipliers: normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers),
     ...liveSwapChoice(input, src),
   };
 }

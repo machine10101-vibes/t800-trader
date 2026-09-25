@@ -201,6 +201,12 @@ export interface Position {
   /** Set when a wallet signed the open. Missing means the ticket never left this browser. */
   signature?: string;
   tokenDecimals?: number;
+  /** Jupiter perp multiplier. Missing or 1 is a spot swap. */
+  leverage?: number;
+  /** Margin posted for a perp. Spot tickets leave this empty and lock the full notional. */
+  collateralUsd?: number;
+  /** Jupiter perp position account, required to close a 5x or 10x ticket. */
+  positionPubkey?: string;
 }
 
 export interface Trade {
@@ -256,6 +262,11 @@ export interface BotConfig {
   /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
   walletSwaps: boolean;
   /**
+   * Jupiter perp multipliers for SOL. 10x is used when the signal is strong.
+   * An empty list keeps every ticket a spot swap. Zebec has no perp.
+   */
+  multipliers: number[];
+  /**
    * Books saved before live swaps were the default have no rev and are switched on once.
    * After that, an explicit off stays off.
    */
@@ -272,6 +283,10 @@ export interface ChainOrder {
   price: number;
   tokenDecimals?: number;
   venues?: string[];
+  /** 5 or 10 sends a Jupiter SOL perp. Missing keeps the ticket a spot swap. */
+  leverage?: number;
+  collateralUsd?: number;
+  positionPubkey?: string;
 }
 
 export interface ChainFill {
@@ -279,6 +294,9 @@ export interface ChainFill {
   qty: number;
   price: number;
   tokenDecimals: number;
+  leverage?: number;
+  collateralUsd?: number;
+  positionPubkey?: string;
 }
 
 export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;

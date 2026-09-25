@@ -64,6 +64,30 @@ describe("paper", () => {
     assert.ok(Math.abs(closed.portfolio.equityUsd - closed.portfolio.cashUsd) < 1e-6);
   });
 
+  it("posts margin for a 5x long and books the leveraged PnL", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 20 });
+    const opened = openPosition(state, signal({ price: 100 }), 0.5, "risk-on", {
+      signature: "sig",
+      qty: 0.5,
+      price: 100,
+      tokenDecimals: 9,
+      leverage: 5,
+      collateralUsd: 10,
+      positionPubkey: "pos",
+    });
+    const pos = opened.positions[0]!;
+    assert.equal(pos.leverage, 5);
+    assert.equal(pos.collateralUsd, 10);
+    assert.equal(pos.positionPubkey, "pos");
+    assert.ok(Math.abs(opened.portfolio.cashUsd - 10) < 1e-6);
+    assert.ok(Math.abs(opened.portfolio.equityUsd - 20) < 1e-6);
+    const marked = markBook(opened, new Map([[pos.mint, 102]]));
+    assert.ok(Math.abs(marked.portfolio.equityUsd - 21) < 1e-6);
+    const closed = closePosition(marked, pos.id, 102, "target", "sig2");
+    assert.equal(closed.positions.length, 0);
+    assert.ok(Math.abs(closed.portfolio.cashUsd - 21) < 1e-6);
+  });
+
   it("refreshes equity on a manual close and counts a scale-out", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ price: 100 }), 1);

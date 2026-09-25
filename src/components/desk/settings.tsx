@@ -59,6 +59,7 @@ export function SettingsPanel({
           {" · "}
           {venueSummary(local.venues)}
           {local.walletSwaps ? " · wallet swaps" : " · simulated fills"}
+          {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n}x`).join(" ")}` : " · spot only"}
         </p>
       </div>
 
@@ -71,6 +72,30 @@ export function SettingsPanel({
           hint="On: Arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain."
           checked={local.walletSwaps}
           onChange={(v) => set({ walletSwaps: v })}
+        />
+      </Section>
+
+      <Section
+        title="Multiplier"
+        hint="Solana can open a Jupiter perpetual at 5x or 10x. A new perp needs at least $10 of SOL or USDC as collateral. Below that, the same signal stays a spot buy. A stronger signal uses 10x when both are on. Zebec has no on-chain perp, so it stays a spot swap. Shorts stay off-chain."
+      >
+        <Toggle
+          label="5x Solana"
+          hint="Posts collateral and takes five times that exposure on the SOL perp."
+          checked={local.multipliers.includes(5)}
+          onChange={(on) => {
+            const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
+            set({ multipliers: next });
+          }}
+        />
+        <Toggle
+          label="10x Solana"
+          hint="Used when the signal is a breakout or confidence is 72 or higher. Ten times the collateral, so a smaller adverse move liquidates it."
+          checked={local.multipliers.includes(10)}
+          onChange={(on) => {
+            const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
+            set({ multipliers: next });
+          }}
         />
       </Section>
 

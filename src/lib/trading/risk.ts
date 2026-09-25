@@ -158,7 +158,7 @@ export function walletRiskBook(
   const livePositions = positions.filter((p) => Boolean(p.signature));
   const liveTrades = trades.filter((t) => Boolean(t.signature));
   const cashUsd = payableUsd(budget);
-  const signedValue = livePositions.reduce((acc, p) => acc + Math.max(0, p.qty * p.markPrice), 0);
+  const signedValue = livePositions.reduce((acc, p) => acc + positionEquity(p), 0);
   const equityUsd = walletMarkUsd(budget) + signedValue;
   const hasChainFill = liveTrades.length > 0;
   return {
@@ -222,6 +222,17 @@ export function canOpen(args: {
   const need = signal.sector === "Meme" || signal.sector === "Unknown" ? floor + 4 : floor;
   if (signal.confidence < need) return "Confidence below the quality floor";
   return null;
+}
+
+/** Cash value of a ticket. A perp contributes margin plus PnL, not the full exposure. */
+export function positionEquity(position: Position): number {
+  const lev = position.leverage ?? 1;
+  if (lev > 1 && position.side === "long") {
+    const margin = position.collateralUsd ?? (position.qty * position.entryPrice) / lev;
+    return Math.max(0, margin + unrealizedPnl(position).usd);
+  }
+  if (position.side === "long") return Math.max(0, position.qty * position.markPrice);
+  return Math.max(0, position.qty * (2 * position.entryPrice - position.markPrice));
 }
 
 export function markPosition(position: Position, price: number): Position {

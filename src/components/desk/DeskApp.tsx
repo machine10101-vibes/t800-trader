@@ -780,6 +780,10 @@ function shownFills<T extends { signature?: string }>(rows: T[], walletSwaps: bo
   return walletSwaps ? rows.filter((row) => Boolean(row.signature)) : rows;
 }
 
+function sideText(side: string, leverage?: number): string {
+  return leverage && leverage > 1 ? `${side} ${leverage}x` : side;
+}
+
 function rowPnl(position: Position): number {
   const pnlPct = ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * (position.side === "long" ? 1 : -1);
   return position.qty * position.entryPrice * (pnlPct / 100);
@@ -794,7 +798,7 @@ function PositionRail({ positions }: { positions: Position[] }) {
           <div key={p.id} className="neon p-4">
             <div className="flex items-center justify-between">
               <div className="font-medium">
-                {p.symbol} <span className="text-[11px] text-[var(--faint)]">{p.side}</span>
+                {p.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(p.side, p.leverage)}</span>
               </div>
               <Tone value={pnlPct} />
             </div>
@@ -1298,7 +1302,7 @@ function BotView({
                   <div key={position.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
                     <div>
                       <div className="font-medium">
-                        {position.symbol} <span className="text-[11px] text-[var(--faint)]">{position.side}</span>
+                        {position.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(position.side, position.leverage)}</span>
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
                         {priceFmt(position.entryPrice)} → {priceFmt(position.markPrice)} · {position.reason}
@@ -1511,7 +1515,7 @@ function Book({
                       {p.symbol} <span className="text-[11px] text-[var(--faint)]">{p.sector ?? ""}</span>
                       <div className="text-[10px]">{txLink(p.signature)}</div>
                     </td>
-                    <td>{p.side}</td>
+                    <td>{sideText(p.side, p.leverage)}</td>
                     <td className="num">{priceFmt(p.entryPrice)}</td>
                     <td className="num">{priceFmt(p.markPrice)}</td>
                     <td className="num">{priceFmt(p.stopPrice)}</td>

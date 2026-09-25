@@ -26,6 +26,7 @@ import {
 } from "./risk";
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
+import { PERP_MIN_COLLATERAL_USD, collateralFor, multiplierFor, orderForPosition } from "./leverage";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
 function huntRank(token: ScoredCandidate): number {
@@ -57,17 +58,7 @@ async function walletExit(
     return state;
   }
   try {
-    const fill = await executor({
-      kind: "close",
-      side: pos.side,
-      mint: pos.mint,
-      symbol: pos.symbol,
-      notionalUsd: pos.qty * pos.markPrice,
-      qty: pos.qty,
-      price: pos.markPrice,
-      tokenDecimals: pos.tokenDecimals,
-      venues: state.config.venues,
-    });
+    const fill = await executor(orderForPosition(pos, "close", state.config.venues));
     return closePosition(state, pos.id, fill.price, reason, fill.signature);
   } catch (error) {
     blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet sell failed"}`);
@@ -116,17 +107,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
               blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);
             } else {
               try {
-                const fill = await executor({
-                  kind: "scale",
-                  side: pos.side,
-                  mint: pos.mint,
-                  symbol: pos.symbol,
-                  notionalUsd: pos.qty * fraction * pos.markPrice,
-                  qty: pos.qty * fraction,
-                  price: pos.markPrice,
-                  tokenDecimals: pos.tokenDecimals,
-                  venues: next.config.venues,
-                });
+                const fill = await executor(orderForPosition(pos, "scale", next.config.venues, fraction));
                 next = scaleOut(next, pos.id, fraction, fill.signature, fill.price);
               } catch (error) {
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
@@ -243,13 +224,20 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
             : { qty: 0, notional: 0 };
           const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
           const room = risk.portfolio.cashUsd * Math.min(0.98, cashCap);
-          const qty = learned.price > 0 ? Math.min(sized.qty * advice.sizeMul, room / learned.price) : 0;
+          const wanted = multiplierFor(next.config.multipliers, learned.confidence, learned.reason, learned.symbol, learned.mint);
+          const ticket = collateralFor(sized.notional * advice.sizeMul, room, wanted);
+          const leverage = ticket.leverage;
+          const collateralUsd = ticket.collateralUsd;
+          const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
+          if (ticket.spotFallback) {
+            blocked.push(
+              `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} collateral, so this ticket stays a spot buy`,
+            );
+          }
           if (!token) {
             blocked.push(`${learned.symbol}: missing live mark`);
-          } else if (sized.notional < MIN_TICKET_USD || sized.qty <= 0) {
-            blocked.push(`${learned.symbol}: size ${sized.notional.toFixed(2)} too small`);
-          } else if (qty * learned.price < MIN_TICKET_USD) {
-            blocked.push(`${learned.symbol}: would concentrate more than ${(cashCap * 100).toFixed(0)}% cash`);
+          } else if (collateralUsd < MIN_TICKET_USD || qty <= 0) {
+            blocked.push(`${learned.symbol}: size ${collateralUsd.toFixed(2)} too small`);
           } else if (pauseOpens) {
             continue;
           } else if (bookTooSmall) {
@@ -271,6 +259,8 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
                   qty,
                   price: learned.price,
                   venues: next.config.venues,
+                  leverage: leverage > 1 ? leverage : undefined,
+                  collateralUsd: leverage > 1 ? collateralUsd : undefined,
                 });
               } catch (error) {
                 const message = error instanceof Error ? error.message : "wallet swap failed";
@@ -290,7 +280,13 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
               continue;
             }
             const before = next.positions.length;
-            next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, stamp);
+            const fill =
+              stamp?.signature
+                ? stamp
+                : leverage > 1
+                  ? { signature: "", qty, price: learned.price, tokenDecimals: 9, leverage, collateralUsd }
+                  : undefined;
+            next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, fill);
             if (next.positions.length > before) opened += 1;
             else blocked.push(`${learned.symbol}: cash could not fill the ticket`);
           }
@@ -306,7 +302,7 @@ export async function tickBot(executor?: ChainExecutor, budget?: WalletBudget | 
       const held = opened === 0 && blocked[0] ? ` · ${blocked[0]}` : "";
       const hunting =
         next.bot.running && opened === 0 && signals.length === 0 && !blocked[0]
-          ? " · scanning — the next rising SOL or Zebec long is sent from the trading key"
+          ? " · scanning — SOL goes out at 5x or 10x once the key has $10, Zebec stays spot"
           : "";
       const note = next.bot.running
         ? `Tick ${next.bot.ticks + 1} · ${signals.length} signal${signals.length === 1 ? "" : "s"} · opened ${opened} · closed ${closed} · ${market.regime.stance}${mode}${hunting}${held}`

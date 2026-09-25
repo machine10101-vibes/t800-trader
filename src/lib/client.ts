@@ -9,6 +9,7 @@ import {
   tradingSnapshot,
 } from "@/lib/solana/authorize";
 import { executorFor } from "@/lib/solana/swap";
+import { orderForPosition } from "@/lib/trading/leverage";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
@@ -31,17 +32,7 @@ async function sellSignedPositions(executor: ChainExecutor): Promise<void> {
     await mutateState(async (current) => {
       const still = current.positions.find((p) => p.id === pos.id);
       if (!still?.signature || still.side !== "long") return current;
-      const fill = await executor({
-        kind: "close",
-        side: still.side,
-        mint: still.mint,
-        symbol: still.symbol,
-        notionalUsd: still.qty * still.markPrice,
-        qty: still.qty,
-        price: still.markPrice,
-        tokenDecimals: still.tokenDecimals,
-        venues: current.config.venues,
-      });
+      const fill = await executor(orderForPosition(still, "close", current.config.venues));
       return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
     });
   }
@@ -185,17 +176,7 @@ export async function closeTicket(positionId: string, session?: WalletSession | 
     if (!pos) return state;
     if (state.config.walletSwaps && pos.signature && pos.side === "long") {
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
-      const fill = await executor({
-        kind: "close",
-        side: pos.side,
-        mint: pos.mint,
-        symbol: pos.symbol,
-        notionalUsd: pos.qty * pos.markPrice,
-        qty: pos.qty,
-        price: pos.markPrice,
-        tokenDecimals: pos.tokenDecimals,
-        venues: state.config.venues,
-      });
+      const fill = await executor(orderForPosition(pos, "close", state.config.venues));
       return pushEquity(closePosition(state, pos.id, fill.price, "manual", fill.signature));
     }
     return pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));

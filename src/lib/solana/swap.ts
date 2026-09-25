@@ -184,5 +184,10 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
 }
 
 export function executorFor(session: WalletSession): ChainExecutor {
-  return (order) => settleSpot(session, order);
+  return (order) => {
+    if ((order.leverage ?? 1) > 1) {
+      return import("./perps").then((mod) => mod.settlePerp(session, order));
+    }
+    return settleSpot(session, order);
+  };
 }
