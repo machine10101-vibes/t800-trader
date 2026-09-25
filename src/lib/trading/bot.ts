@@ -1,9 +1,10 @@
-import type { ChainId } from "@/lib/chain";
+import { sameMint, type ChainId } from "@/lib/chain";
+import { GAS_CRO } from "@/lib/cronos/constants";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { tickHeadline, tickPass } from "@/lib/market/tape";
-import { bookMints, headlineFor, isActiveBook, watchMeta } from "@/lib/market/universe";
+import { tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
-import { screenCandidate } from "@/lib/research/scoring";
+import { bookScreen, screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 import { emptyState, mutateState } from "@/lib/store";
@@ -26,11 +27,11 @@ import {
   walletRiskBook,
   type WalletBudget,
 } from "./risk";
-import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
+import { closePosition, flattenBook, markBook, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, collateralFor, multiplierFor, orderForPosition } from "./leverage";
 import { reentryBlocked } from "./close";
-import { LIMIT_MIN_USD, shouldReplace, type MakerDesk } from "./quote";
+import type { MakerDesk } from "./quote";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
 function huntRank(token: ScoredCandidate): number {
@@ -91,6 +92,7 @@ export async function tickBot(
         next = { ...next, bot: { ...next.bot, skipReentry: null } };
       }
       let closed = 0;
+      let croAlreadyLive = false;
       const blocked: string[] = [];
 
       if (next.bot.running && market.regime.stance === "defensive") {
@@ -130,8 +132,18 @@ export async function tickBot(
           }
         }
       }
+      if (next.bot.running) {
+        croAlreadyLive = next.positions.some((pos) => sameMint(pos.mint, WCRO_MINT) && Boolean(pos.signature));
+      }
       if (next.bot.running) for (const pos of [...next.positions]) {
-        const live = byMint.get(pos.mint);
+        const live = byMint.get(pos.mint) ?? [...byMint.values()].find((row) => sameMint(row.mint, pos.mint));
+        const cashTape = Boolean(live && tapeInCash(live.flows.m15.priceChangePct));
+        if (cashTape) {
+          const before = next.positions.length;
+          next = await walletExit(next, pos, "fade", executor, blocked);
+          if (next.positions.length < before) closed += 1;
+          continue;
+        }
         if (next.config.scratchEnabled === false) continue;
         if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
         const before = next.positions.length;
@@ -143,7 +155,6 @@ export async function tickBot(
       const signals: Signal[] = [];
       let opened = 0;
       let quoteNote = "";
-      let quoteOwned = false;
       if (next.bot.running && maker && next.config.walletSwaps && next.bot.resting) {
         const resting = next.bot.resting;
         try {
@@ -180,31 +191,75 @@ export async function tickBot(
           blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
         }
       }
-      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, budget, next.config.walletSwaps);
+      const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
+      const nativeMark = marks.find((row) => sameMint(row.mint, nativeMint))?.price ?? 0;
+      const priced =
+        budget && !(budget.solPriceUsd > 0) && nativeMark > 0 ? { ...budget, solPriceUsd: nativeMark } : budget;
+      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps);
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
         next = studyTape(next, research.candidates, market.regime.stance);
-        const spendable = budget ? payableUsd(budget) : 0;
-        const marked = budget ? walletMarkUsd(budget) : 0;
-        const bookTooSmall = Boolean(budget) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
+        const spendable = priced ? payableUsd(priced) : 0;
+        const marked = priced ? walletMarkUsd(priced) : 0;
+        const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
           blocked.push(
             `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${chain === "cronos" ? "CRO" : "SOL"} or USDC before a swap is sent`,
           );
         }
+        const screen = bookScreen(next.config, chain);
+        if (
+          chain === "cronos" &&
+          next.bot.running &&
+          next.config.walletSwaps &&
+          executor &&
+          priced &&
+          !croAlreadyLive
+        ) {
+          const cro = byMint.get(WCRO_MINT) ?? [...byMint.values()].find((row) => sameMint(row.mint, WCRO_MINT));
+          const qty = Math.max(0, priced.sol - GAS_CRO);
+          const price = cro?.priceUsd || priced.solPriceUsd;
+          if (cro && tapeInCash(cro.flows.m15.priceChangePct) && price > 0 && qty * price >= MIN_TRADE_USD) {
+            try {
+              const fill = await executor({
+                kind: "close",
+                side: "long",
+                mint: WCRO_MINT,
+                symbol: "CRO",
+                notionalUsd: qty * price,
+                qty,
+                price,
+                venues: ["vvs"],
+                tokenDecimals: 18,
+              });
+              next = recordCashSale(next, {
+                mint: WCRO_MINT,
+                symbol: "CRO",
+                qty: fill.qty,
+                price: fill.price,
+                signature: fill.signature,
+                note: "CRO 15m is red or flat, so the trading key sold CRO to USDC on VVS.",
+              });
+              closed += 1;
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "wallet sell failed";
+              if (!/ALREADY_FLAT/i.test(message)) blocked.push(`CRO: ${message}`);
+            }
+          }
+        }
         const focus = research.candidates
-          .filter((c) => isActiveBook(c.mint, chain) && !screenCandidate(c, next.config))
+          .filter((c) => isActiveBook(c.mint, chain) && !screenCandidate(c, screen))
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
         for (const mint of bookMints(chain)) {
           if (focus.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) continue;
           const symbol = watchMeta(mint, chain)?.symbol ?? "Asset";
-          const live = byMint.get(mint) ?? research.candidates.find((token) => token.mint === mint);
+          const live = byMint.get(mint) ?? research.candidates.find((token) => sameMint(token.mint, mint));
           if (!live) {
             blocked.push(`${symbol}: pool tape has not arrived`);
             continue;
           }
-          blocked.push(`${symbol}: ${screenCandidate(live, next.config) ?? "not offered on this tick"}`);
+          blocked.push(`${symbol}: ${screenCandidate(live, screen) ?? "not offered on this tick"}`);
         }
 
         const tapeCtx = {
@@ -224,7 +279,7 @@ export async function tickBot(
             token.researchScore,
             next.config.allowShorts,
             tapeCtx,
-          );
+          ).filter(() => !tapeInCash(token.flows.m15.priceChangePct));
           signals.push(...found);
           if (!found.length) blocked.push(tickPass(token.symbol, token.flows.m15.priceChangePct));
         }
@@ -235,6 +290,15 @@ export async function tickBot(
           next.config.walletSwaps && next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now(),
         );
         if (pauseOpens) blocked.push("Signature was declined — the next wallet prompt waits about a minute");
+        if (maker && next.bot.resting) {
+          try {
+            await maker.cancel(next.bot.resting.orderKey);
+            next = { ...next, bot: { ...next.bot, resting: undefined } };
+            quoteNote = " · pulled the resting bid";
+          } catch (error) {
+            blocked.push(`limit: ${error instanceof Error ? error.message : "could not cancel the resting bid"}`);
+          }
+        }
         for (const signal of signals) {
           if (!next.bot.running) {
             shown.push(signal);
@@ -269,9 +333,10 @@ export async function tickBot(
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
           });
           if (gate) {
+            const native = chain === "cronos" ? "CRO" : "SOL";
             const why =
               gate === "Insufficient cash" && next.config.walletSwaps
-                ? `need at least $${MIN_TICKET_USD} in USDC or in SOL after the fee reserve. One swap cannot spend both`
+                ? `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`
                 : gate;
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
@@ -302,64 +367,6 @@ export async function tickBot(
             blocked.push(
               `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} collateral, so this ticket stays a spot buy`,
             );
-          }
-          const resting = next.bot.resting;
-          const quoteNotional = Math.max(collateralUsd, resting && resting.mint === learned.mint ? resting.notionalUsd : 0);
-          if (
-            maker &&
-            next.config.walletSwaps &&
-            leverage === 1 &&
-            learned.side === "long" &&
-            quoteNotional >= LIMIT_MIN_USD &&
-            !pauseOpens &&
-            !bookTooSmall
-          ) {
-            quoteOwned = true;
-            if (resting && resting.mint === learned.mint && !shouldReplace(resting.limitPrice, learned.price)) {
-              quoteNote = ` · ${learned.symbol} limit bid resting`;
-              continue;
-            }
-            try {
-              if (resting) {
-                await maker.cancel(resting.orderKey);
-                next = { ...next, bot: { ...next.bot, resting: undefined } };
-              }
-              const placed = await maker.place({
-                mint: learned.mint,
-                symbol: learned.symbol,
-                mid: learned.price,
-                notionalUsd: quoteNotional,
-              });
-              next = {
-                ...next,
-                bot: {
-                  ...next.bot,
-                  resting: {
-                    orderKey: placed.orderKey,
-                    signature: placed.signature,
-                    mint: learned.mint,
-                    symbol: learned.symbol,
-                    poolAddress: learned.poolAddress,
-                    sector: learned.sector,
-                    side: "long",
-                    reason: learned.reason,
-                    confidence: learned.confidence,
-                    researchScore: learned.researchScore,
-                    stopPct: learned.stopPct,
-                    targetPct: learned.targetPct,
-                    thesis: learned.thesis,
-                    limitPrice: placed.limitPrice,
-                    notionalUsd: quoteNotional,
-                    outputDecimals: placed.outputDecimals,
-                    placedAt: new Date().toISOString(),
-                  },
-                },
-              };
-              quoteNote = ` · ${learned.symbol} limit bid sent`;
-            } catch (error) {
-              blocked.push(`${learned.symbol}: ${error instanceof Error ? error.message : "limit bid failed"}`);
-            }
-            continue;
           }
           if (!token) {
             blocked.push(`${learned.symbol}: missing live mark`);
@@ -419,7 +426,7 @@ export async function tickBot(
           }
         }
         signals.splice(0, signals.length, ...shown);
-        if (maker && next.bot.resting && !quoteOwned) {
+        if (maker && next.bot.resting) {
           try {
             await maker.cancel(next.bot.resting.orderKey);
             next = { ...next, bot: { ...next.bot, resting: undefined } };
@@ -443,7 +450,8 @@ export async function tickBot(
       next = markBook(next, priceMap(next, marks));
       next = pushEquity(next);
       const fills = opened || closed ? ` · opened ${opened} · closed ${closed}` : "";
-      const note = `${tickHeadline(next.bot.ticks + 1, signals, blocked, next.bot.running, headlineFor(chain))}${quoteNote}${fills}`;
+      const stuck = !opened && !closed && blocked[0] ? ` · ${blocked[0]}` : "";
+      const note = `${tickHeadline(next.bot.ticks + 1, signals, blocked, next.bot.running, headlineFor(chain))}${quoteNote}${fills}${stuck}`;
       const hold =
         next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now() ? next.bot.swapHoldUntil : null;
       next.bot = {

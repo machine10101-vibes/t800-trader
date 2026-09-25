@@ -1,5 +1,5 @@
 import { encodeFunctionData, type Hex } from "viem";
-import { USDC, VVS_ROUTER, WCRO } from "./constants";
+import { GAS_CRO, USDC, VVS_ROUTER, WCRO } from "./constants";
 
 const routerAbi = [
   {
@@ -67,6 +67,22 @@ export function planVvsBuy(spendUsd: number, usdc: number, cro: number): VvsSwap
   throw new Error(
     `Buying CRO on VVS needs USDC in the trading key. This key has ${usdc.toFixed(2)} USDC and ${cro.toFixed(3)} CRO.`,
   );
+}
+
+export type CronosOpen = { kind: "swap"; swap: VvsSwap } | { kind: "held"; qty: number; price: number };
+
+/**
+ * Spend USDC to buy CRO when the key has it.
+ * A key funded in CRO is already long — that bag is the ticket, and a red 15m sells it on VVS.
+ */
+export function planCronosOpen(spendUsd: number, usdc: number, cro: number, price: number): CronosOpen {
+  if (usdc + 1e-6 >= spendUsd && spendUsd > 0) {
+    return { kind: "swap", swap: planVvsBuy(spendUsd, usdc, cro) };
+  }
+  const held = Math.max(0, cro - GAS_CRO);
+  const heldUsd = held * (price > 0 ? price : 0);
+  if (held > 0 && heldUsd >= 3 && price > 0) return { kind: "held", qty: held, price };
+  return { kind: "swap", swap: planVvsBuy(spendUsd, usdc, cro) };
 }
 
 /** A CRO sell pays the VVS router. Wrapped CRO uses the token path. Native CRO is the payable path. */

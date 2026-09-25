@@ -1704,6 +1704,13 @@ function BotView({
                   <p className="mt-2 text-sm text-[var(--muted)]">{s.thesis}</p>
                 </div>
               ))}
+              {(desk.bot.blocked ?? []).length ? (
+                <ul className="space-y-1 text-sm text-[var(--muted)]">
+                  {(desk.bot.blocked ?? []).map((line) => (
+                    <li key={line}>— {line}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
         </div>
@@ -1998,6 +2005,9 @@ function Book({
 
 function txLink(signature: string | undefined, chain: ChainId = "solana") {
   if (!signature) return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Simulated</span>;
+  if (signature === "held") {
+    return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Held in the trading key</span>;
+  }
   const short = signature.length > 10 ? `${signature.slice(0, 4)}…${signature.slice(-4)}` : signature;
   return (
     <a className="num text-[11px] text-[var(--mint)]" href={txUrl(chain, signature)} target="_blank" rel="noreferrer">

@@ -36,6 +36,11 @@ export function tapeRead(symbol: string, m5: number, m15: number, h1: number): s
   return `${head} 5m ${m5.toFixed(2)}%, 1h ${h1.toFixed(2)}%.`;
 }
 
+/** Red or flat 15m stays in cash. A long needs the same 0.1% green bar the tape names. */
+export function tapeInCash(m15: number): boolean {
+  return !(m15 >= 0.1);
+}
+
 export function tickPass(symbol: string, m15: number): string {
   if (m15 < 0) return `${symbol}: 15m is red (${m15.toFixed(2)}%), staying in cash`;
   if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), staying in cash`;

@@ -9,7 +9,7 @@ import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 
 import { cronos } from "viem/chains";
 import { minOut, planCronosArm } from "./arm";
 import { BOT_MIN_CRO, GAS_CRO, USDC, VVS_ROUTER } from "./constants";
-import { buildVvsCall, planVvsBuy, planVvsSell, type VvsSwap } from "./vvs";
+import { buildVvsCall, planCronosOpen, planVvsSell, type VvsSwap } from "./vvs";
 import { cronosClient, readCronosBalances, readWcroBalance, type CronosSession, type EthereumProvider } from "./wallet";
 
 const quoteAbi = [
@@ -175,8 +175,13 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   if (order.kind === "open") {
     const collateral = leverage > 1 ? (order.collateralUsd ?? order.notionalUsd / Math.max(leverage, 1)) : order.notionalUsd;
     const balances = await readCronosBalances(account.address);
-    const plan = planVvsBuy(collateral, balances.usdc, balances.sol);
-    const fill = await sendVvsSwap(account, plan, order.price || balances.solPriceUsd || 0);
+    const price = order.price || balances.solPriceUsd || 0;
+    const plan = planCronosOpen(collateral, balances.usdc, balances.sol, price);
+    if (plan.kind === "held") {
+      const fill = { signature: "held", qty: plan.qty, price: plan.price, tokenDecimals: 18 };
+      return leverage > 1 ? marginFill(fill, leverage, Math.min(collateral, plan.qty * plan.price)) : fill;
+    }
+    const fill = await sendVvsSwap(account, plan.swap, price);
     return leverage > 1 ? marginFill(fill, leverage, collateral) : fill;
   }
 

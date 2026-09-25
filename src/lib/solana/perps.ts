@@ -212,7 +212,15 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
     const opened = await perps<{ serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote }>(
       "/positions/increase",
       "POST",
-      { ...plan, walletAddress: trader },
+      {
+        asset: plan.asset,
+        inputToken: plan.inputToken,
+        inputTokenAmount: plan.inputTokenAmount,
+        side: plan.side,
+        leverage: plan.leverage,
+        maxSlippageBps: plan.maxSlippageBps,
+        walletAddress: trader,
+      },
     );
     if (!opened.serializedTxBase64 || !opened.quote) throw new Error("Jupiter did not return a 5x or 10x transaction.");
     const signature = await submit(opened.serializedTxBase64, signer, "increase-position");

@@ -203,7 +203,8 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
 export function executorFor(session: WalletSession): ChainExecutor {
   return async (order) => {
     const leverage = order.leverage ?? 1;
-    if (leverage > 1 && (order.symbol === "SOL" || order.mint === SOL_MINT)) {
+    const solLong = order.symbol === "SOL" || order.mint === SOL_MINT;
+    if (leverage > 1 && solLong) {
       const { settlePerp } = await import("./perps");
       return settlePerp(session, order);
     }
@@ -212,6 +213,15 @@ export function executorFor(session: WalletSession): ChainExecutor {
       const spot = await settleSpot(session, { ...order, notionalUsd: collateral, leverage: undefined, collateralUsd: undefined });
       return marginFill(spot, leverage, collateral);
     }
-    return settleSpot(session, order);
+    try {
+      return await settleSpot(session, order);
+    } catch (error) {
+      if (order.kind !== "open" || !solLong) throw error;
+      const message = error instanceof Error ? error.message : "";
+      if (!/needs USDC/i.test(message)) throw error;
+      const { settlePerp } = await import("./perps");
+      const collateral = Math.max(order.collateralUsd ?? order.notionalUsd, 10);
+      return settlePerp(session, { ...order, leverage: 5, collateralUsd: collateral });
+    }
   };
 }

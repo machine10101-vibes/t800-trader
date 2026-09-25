@@ -162,7 +162,7 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string,
   if (quoteSymbol && !isQuote(quoteSymbol)) return null;
   if (mint === SOL_MINT && !quoteMint) return null;
 
-  const watch = watchMeta(mint);
+  const watch = watchMeta(mint, chain);
   const name = watch?.name || base?.attributes.name || symbol;
   const created = pool.attributes.pool_created_at;
 

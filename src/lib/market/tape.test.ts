@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 300, open: close, high: close, low: close, close, volume: 1 };
@@ -40,6 +40,10 @@ describe("candle tape", () => {
     assert.match(tapeRead("SOL", 0.4, 0.8, 1), /green at 0.80%.*long is eligible/);
     assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), staying in cash/);
     assert.match(tickPass("SOL", -0.4), /red \(-0.40%\), staying in cash/);
+    assert.equal(tapeInCash(-0.4), true);
+    assert.equal(tapeInCash(0), true);
+    assert.equal(tapeInCash(0.09), true);
+    assert.equal(tapeInCash(0.1), false);
   });
 
   it("names SOL and Zebec on every tick", () => {

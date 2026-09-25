@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData } from "viem";
 import { USDC, VVS_ROUTER, WCRO } from "./constants";
-import { buildVvsCall, planVvsBuy, planVvsSell } from "./vvs";
+import { buildVvsCall, planCronosOpen, planVvsBuy, planVvsSell } from "./vvs";
 
 const RECIPIENT = "0x1111111111111111111111111111111111111111" as const;
 
@@ -48,6 +48,14 @@ describe("VVS routing", () => {
 
   it("does not treat a CRO balance as a VVS buy", () => {
     assert.throws(() => planVvsBuy(12, 0, 200), /Buying CRO on VVS needs USDC/);
+  });
+
+  it("keeps a CRO-funded key as the long until a red tape sells it", () => {
+    const held = planCronosOpen(12, 0, 200, 0.1);
+    assert.equal(held.kind, "held");
+    if (held.kind === "held") assert.ok(held.qty > 190);
+    const bought = planCronosOpen(12, 20, 4, 0.1);
+    assert.equal(bought.kind, "swap");
   });
 
   it("sells native CRO through the VVS router", () => {

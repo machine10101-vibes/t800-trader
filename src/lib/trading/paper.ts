@@ -272,6 +272,33 @@ export function flattenBook(state: AppState, reason: Trade["reason"] = "manual")
   return state.positions.reduce((acc, pos) => closePosition(acc, pos.id, pos.markPrice, reason), state);
 }
 
+/** A red or flat 15m sold the native bag to USDC. There was no open row to close. */
+export function recordCashSale(
+  state: AppState,
+  args: { mint: string; symbol: string; qty: number; price: number; signature: string; note: string },
+): AppState {
+  const trade: Trade = {
+    id: id("tr"),
+    mint: args.mint,
+    symbol: args.symbol,
+    side: "long",
+    action: "close",
+    qty: args.qty,
+    price: args.price,
+    pnlUsd: null,
+    pnlPct: null,
+    reason: "risk-off",
+    at: new Date().toISOString(),
+    note: args.note,
+    signature: args.signature,
+  };
+  return {
+    ...state,
+    portfolio: { ...state.portfolio, tradeCount: state.portfolio.tradeCount + 1 },
+    trades: [trade, ...state.trades].slice(0, 250),
+  };
+}
+
 export function pushEquity(state: AppState): AppState {
   const point = { t: new Date().toISOString(), equity: state.portfolio.equityUsd };
   const curve = [...state.equityCurve, point];

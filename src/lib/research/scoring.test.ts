@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { TokenCandidate } from "../types";
-import { scoreCandidate, screenCandidate } from "./scoring";
+import { bookScreen, scoreCandidate, screenCandidate } from "./scoring";
 
 function token(over: Partial<TokenCandidate> = {}): TokenCandidate {
   const flow = { buys: 100, sells: 95, buyers: 80, sellers: 78, volumeUsd: 40_000, priceChangePct: 2 };
@@ -102,6 +102,20 @@ describe("screenCandidate", () => {
       venues: ["raydium"],
     });
     assert.equal(reason, null);
+  });
+
+  it("lets the Cronos book through on VVS even when the saved venues are Solana's", () => {
+    const cro = token({ symbol: "CRO", name: "Cronos", dex: "vvs", chain: "cronos" });
+    const saved = {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium", "orca", "meteora", "jupiter", "pump", "other"],
+    };
+    assert.equal(screenCandidate(cro, saved), "Venue VVS Finance is off");
+    assert.equal(screenCandidate(cro, bookScreen(saved, "cronos")), null);
+    assert.equal(screenCandidate(token({ dex: "vvs" }), bookScreen(saved, "solana")), "Venue VVS Finance is off");
   });
 
   it("passes liquid watchlist names", () => {

@@ -1,3 +1,4 @@
+import type { ChainId } from "@/lib/chain";
 import type { ScoredCandidate, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { isForeignOrWrapped } from "@/lib/market/universe";
 import { venueAllowed, venueForDex, venueLabel } from "@/lib/market/venues";
@@ -9,6 +10,12 @@ export interface ScreenConfig {
   minAgeHours: number;
   allowMemes: boolean;
   venues?: string[];
+}
+
+/** Cronos only trades the VVS pool. The saved Solana venue list must not blank that book. */
+export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
+  if (chain !== "cronos") return cfg;
+  return { ...cfg, venues: ["vvs"] };
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
