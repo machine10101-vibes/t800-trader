@@ -222,8 +222,17 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
 
   let pubkey = order.positionPubkey;
   if (!pubkey) pubkey = (await findPosition(trader, order.side)) ?? undefined;
+  if (!pubkey) throw new Error("ALREADY_FLAT: no open multiplier on the trading key");
   const plan = planPerpDecrease({ ...order, positionPubkey: pubkey });
-  const closed = await perps<{ serializedTxBase64?: string | null }>("/positions/decrease", "POST", plan);
+  let closed: { serializedTxBase64?: string | null };
+  try {
+    closed = await perps<{ serializedTxBase64?: string | null }>("/positions/decrease", "POST", plan);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "close failed";
+    const live = await findPosition(trader, order.side).catch(() => "unknown");
+    if (live === null) throw new Error(`ALREADY_FLAT: ${message}`);
+    throw error;
+  }
   if (!closed.serializedTxBase64) throw new Error("Jupiter did not return a close for this multiplier.");
   const signature = await submit(closed.serializedTxBase64, signer, "decrease-position");
   return {

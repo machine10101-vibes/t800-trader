@@ -27,6 +27,7 @@ import {
 import { closePosition, flattenBook, markBook, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, collateralFor, multiplierFor, orderForPosition } from "./leverage";
+import { reentryBlocked } from "./close";
 import { LIMIT_MIN_USD, shouldReplace, type MakerDesk } from "./quote";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
@@ -83,6 +84,9 @@ export async function tickBot(
 
       let next = markBook(state, priceMap(state, marks));
       next = { ...next, portfolio: rollSession(next.portfolio) };
+      if (next.bot.skipReentry && !reentryBlocked(next.bot.skipReentry, next.bot.skipReentry.mint)) {
+        next = { ...next, bot: { ...next.bot, skipReentry: null } };
+      }
       let closed = 0;
       const blocked: string[] = [];
 
@@ -225,6 +229,10 @@ export async function tickBot(
             thesis: advice.note ? `${signal.thesis} Learned: ${advice.note}.` : signal.thesis,
           };
           shown.push(learned);
+          if (reentryBlocked(next.bot.skipReentry, learned.mint)) {
+            blocked.push(`${learned.symbol}: closed by hand — the next ticket waits a few minutes`);
+            continue;
+          }
           if (opened && next.config.oneTicketPerTick !== false) {
             blocked.push(`${learned.symbol}: passed over — one new ticket per tick`);
             continue;

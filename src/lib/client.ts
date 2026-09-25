@@ -15,6 +15,7 @@ import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
+import { isAlreadyFlat, reentryHold } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 
@@ -175,19 +176,70 @@ export async function withdrawTradingProfit(session: WalletSession): Promise<Des
   return buildDesk();
 }
 
+function withHandClose<T extends { bot: { lastNote: string | null; skipReentry?: { mint: string; until: string } | null } }>(
+  state: T,
+  mint: string,
+  note: string,
+): T {
+  return {
+    ...state,
+    bot: { ...state.bot, lastNote: note, skipReentry: reentryHold(mint) },
+  };
+}
+
 export async function closeTicket(positionId: string, session?: WalletSession | null): Promise<DeskPayload> {
   const executor = session ? executorFor(session) : undefined;
-  await mutateState(async (state) => {
+  const saved = await mutateState(async (state) => {
     const pos = state.positions.find((p) => p.id === positionId);
     if (!pos) return state;
     if (state.config.walletSwaps && pos.signature && pos.side === "long") {
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
-      const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-      return pushEquity(closePosition(state, pos.id, fill.price, "manual", fill.signature));
+      try {
+        const fill = await executor(orderForPosition(pos, "close", state.config.venues));
+        const closed = pushEquity(closePosition(state, pos.id, fill.price, "manual", fill.signature));
+        return withHandClose(closed, pos.mint, `Closed ${pos.symbol} by hand`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Close failed";
+        if (!isAlreadyFlat(message)) throw error;
+        const closed = pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
+        return withHandClose(closed, pos.mint, `Closed ${pos.symbol} — the trading key was already flat`);
+      }
     }
-    return pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
+    const closed = pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
+    return withHandClose(closed, pos.mint, `Closed ${pos.symbol} by hand`);
   });
-  return buildDesk();
+  try {
+    return await buildDesk();
+  } catch {
+    return shellDesk(saved);
+  }
+}
+
+/** Pull a resting limit bid. A filled bid is left for the next scan to book. */
+export async function cancelResting(session: WalletSession): Promise<DeskPayload> {
+  const maker = makerDesk(session);
+  const saved = await mutateState(async (state) => {
+    const resting = state.bot.resting;
+    if (!resting) return state;
+    try {
+      await maker.cancel(resting.orderKey);
+    } catch (error) {
+      const looked = await maker.lookup(resting).catch(() => "open" as const);
+      if (looked === "open") throw error;
+      if (looked !== "gone") {
+        throw new Error("That bid already filled. It will show as an open position on the next scan.");
+      }
+    }
+    return {
+      ...state,
+      bot: { ...state.bot, resting: null, lastNote: `Cancelled the ${resting.symbol} limit bid` },
+    };
+  });
+  try {
+    return await buildDesk();
+  } catch {
+    return shellDesk(saved);
+  }
 }
 
 export async function configureBot(config: Partial<BotConfig>): Promise<DeskPayload> {

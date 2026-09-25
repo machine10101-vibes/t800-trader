@@ -179,6 +179,51 @@ export async function readBalances(address: string): Promise<Omit<WalletSession,
   return { address: pk.toBase58(), sol, usdc, solPriceUsd, equityUsd };
 }
 
+const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+interface MintAccountList {
+  value?: {
+    account?: {
+      data?: {
+        parsed?: {
+          info?: { mint?: string; tokenAmount?: { uiAmount?: number | null } };
+        };
+      };
+    };
+  }[];
+}
+
+/** Sum of this mint on the trading key, including Token-2022 accounts such as Zebec. */
+export async function readMintBalance(owner: string, mint: string): Promise<number> {
+  if (mint === SOL_MINT) {
+    const live = await readBalances(owner);
+    return live.sol;
+  }
+  const programs = [TOKEN_PROGRAM.toBase58(), TOKEN_2022];
+  let total = 0;
+  let reads = 0;
+  for (const programId of programs) {
+    try {
+      const listed = await solanaRpc<MintAccountList>("getTokenAccountsByOwner", [
+        owner,
+        { programId },
+        { encoding: "jsonParsed" },
+      ]);
+      reads += 1;
+      for (const row of listed.value ?? []) {
+        const info = row.account?.data?.parsed?.info;
+        if (info?.mint !== mint) continue;
+        const amt = info.tokenAmount?.uiAmount;
+        if (typeof amt === "number" && Number.isFinite(amt)) total += amt;
+      }
+    } catch {
+      // The other token program may still hold the mint.
+    }
+  }
+  if (reads === 0) throw new Error("Could not read the trading key token balance");
+  return total;
+}
+
 export async function connectWallet(onlyIfTrusted = false): Promise<WalletSession> {
   const provider = injected();
   if (!provider?.connect) {

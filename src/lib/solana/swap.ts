@@ -4,7 +4,7 @@ import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
-import { broadcastTransaction, mintDecimals, readBalances, type WalletSession } from "./wallet";
+import { broadcastTransaction, mintDecimals, readBalances, readMintBalance, type WalletSession } from "./wallet";
 
 export const SLIPPAGE_BPS = 80;
 const FEE_SOL = SOL_FEE_RESERVE;
@@ -28,6 +28,14 @@ export function baseUnits(amount: number, decimals: number): string {
   const units = `${whole}${digits}`.replace(/^0+/, "") || "0";
   if (units === "0") throw new Error("Ticket is smaller than one base unit");
   return units;
+}
+
+/** Sell at most what the key holds. A full balance is haircut so rounding cannot overshoot. */
+export function sellQty(wanted: number, held: number): number {
+  if (!(wanted > 0) || !(held > 0)) return 0;
+  const room = held * (1 - 1 / 10_000);
+  const qty = Math.min(wanted, room);
+  return qty > 1e-12 ? qty : 0;
 }
 
 export function planSpotOrder(
@@ -126,10 +134,20 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   if (!signer) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
   const trader = signer.publicKey.toBase58();
   const balances = await readBalances(trader);
+  let sized = order;
+  if (order.kind !== "open") {
+    const held =
+      order.mint === SOL_MINT
+        ? Math.max(0, balances.sol - FEE_SOL)
+        : await readMintBalance(trader, order.mint);
+    const qty = sellQty(order.qty, held);
+    if (!(qty > 0)) throw new Error("ALREADY_FLAT: trading key does not hold this token");
+    sized = { ...order, qty };
+  }
   const tokenDecimals =
-    order.tokenDecimals ?? (order.kind === "open" ? undefined : await mintDecimals(order.mint));
+    sized.tokenDecimals ?? (sized.kind === "open" ? undefined : await mintDecimals(sized.mint));
   const plan = planSpotOrder({
-    ...order,
+    ...sized,
     tokenDecimals,
     usdc: balances.usdc,
     sol: balances.sol,

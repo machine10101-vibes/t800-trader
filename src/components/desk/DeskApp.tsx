@@ -8,6 +8,7 @@ import {
   armButton,
   attachWallet,
   baselineTradingPrincipal,
+  cancelResting,
   closeTicket,
   configureBot,
   controlBot,
@@ -58,6 +59,10 @@ export function DeskApp() {
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(false);
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<{ id: string; message: string } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [clock, setClock] = useState("");
   const [focusMint, setFocusMint] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -290,6 +295,7 @@ export function DeskApp() {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Escape") {
         setThesis(null);
+        setDetailId(null);
         return;
       }
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -416,14 +422,38 @@ export function DeskApp() {
   };
 
   const closePos = async (positionId: string) => {
-    if (!wallet) return;
-    setBusy(true);
+    if (!wallet) {
+      setCloseError({ id: positionId, message: "Connect the wallet on this page to close this ticket." });
+      return;
+    }
+    setClosingId(positionId);
+    setCloseError(null);
+    busyRef.current = true;
     try {
       applyDesk(await closeTicket(positionId, wallet));
+      setDetailId((cur) => (cur === positionId ? null : cur));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Close failed");
+      setCloseError({ id: positionId, message: e instanceof Error ? e.message : "Close failed" });
     } finally {
-      setBusy(false);
+      busyRef.current = false;
+      setClosingId(null);
+    }
+  };
+
+  const cancelBid = async () => {
+    if (!wallet) {
+      setError("Connect the wallet on this page to cancel the bid.");
+      return;
+    }
+    setCancelling(true);
+    busyRef.current = true;
+    try {
+      applyDesk(await cancelResting(wallet));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not cancel the limit bid");
+    } finally {
+      busyRef.current = false;
+      setCancelling(false);
     }
   };
 
@@ -438,6 +468,7 @@ export function DeskApp() {
     return t ? (desk.portfolio.winCount / t) * 100 : 0;
   }, [desk]);
 
+  const detail = desk?.positions.find((position) => position.id === detailId) ?? null;
   const solRow = desk?.research.find((r) => r.ticker === "SOL");
   const solPx = desk?.regime.sol.price || solRow?.price || wallet?.solPriceUsd || 0;
   const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : solRow?.candidate.flows.h24.priceChangePct;
@@ -620,7 +651,18 @@ export function DeskApp() {
               ) : null}
               {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
               {tab === "bot" ? (
-                <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} onClose={(id) => void closePos(id)} />
+                <BotView
+                  desk={desk}
+                  busy={busy}
+                  closingId={closingId}
+                  closeError={closeError}
+                  cancelling={cancelling}
+                  onControl={control}
+                  onOpen={setThesis}
+                  onOpenPosition={setDetailId}
+                  onClose={(id) => void closePos(id)}
+                  onCancelResting={() => void cancelBid()}
+                />
               ) : null}
               {tab === "book" ? (
                 <Book
@@ -629,6 +671,9 @@ export function DeskApp() {
                   trading={trading}
                   winRate={winRate}
                   busy={busy}
+                  closingId={closingId}
+                  closeError={closeError}
+                  onOpenPosition={setDetailId}
                   onClose={closePos}
                   onFlatten={() => void control("flatten")}
                   onWalletSwaps={(on) => void saveConfig({ walletSwaps: on })}
@@ -647,6 +692,15 @@ export function DeskApp() {
       </div>
 
       {thesis ? <ThesisDrawer thesis={thesis} onClose={() => setThesis(null)} /> : null}
+      {detail ? (
+        <PositionDrawer
+          position={detail}
+          closing={closingId === detail.id}
+          error={closeError?.id === detail.id ? closeError.message : null}
+          onDismiss={() => setDetailId(null)}
+          onExit={() => void closePos(detail.id)}
+        />
+      ) : null}
       {toasts.length ? (
         <div className="toast-stack">
           {toasts.map((t) => (
@@ -1199,15 +1253,25 @@ function Radar({ desk, onOpen }: { desk: DeskPayload; onOpen: (t: ResearchThesis
 function BotView({
   desk,
   busy,
+  closingId,
+  closeError,
+  cancelling,
   onControl,
   onOpen,
+  onOpenPosition,
   onClose,
+  onCancelResting,
 }: {
   desk: DeskPayload;
   busy: boolean;
+  closingId: string | null;
+  closeError: { id: string; message: string } | null;
+  cancelling: boolean;
   onControl: (a: "start" | "stop" | "reset" | "tick" | "flatten") => void;
   onOpen: (t: ResearchThesis) => void;
+  onOpenPosition: (id: string) => void;
   onClose: (id: string) => void;
+  onCancelResting: () => void;
 }) {
   const swaps = desk.config.walletSwaps;
   const open = shownFills(desk.positions, swaps);
@@ -1272,9 +1336,19 @@ function BotView({
           ) : null}
         </div>
         {desk.bot.resting ? (
-          <p className="mt-4 text-sm text-[var(--muted)]">
-            {desk.bot.resting.symbol} limit bid at {priceFmt(desk.bot.resting.limitPrice)} · waiting for a taker · {txLink(desk.bot.resting.signature)}
-          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--line)] px-3 py-2">
+            <p className="text-sm text-[var(--muted)]">
+              {desk.bot.resting.symbol} limit bid at {priceFmt(desk.bot.resting.limitPrice)} · waiting for a taker · {txLink(desk.bot.resting.signature)}
+            </p>
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={onCancelResting}
+              className="rounded-lg border border-[rgba(255,59,74,0.4)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
+            >
+              {cancelling ? "Cancelling…" : "Cancel bid"}
+            </button>
+          </div>
         ) : null}
         {(desk.bot.blocked ?? []).length ? (
           <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
@@ -1305,20 +1379,25 @@ function BotView({
                 const pnl = rowPnl(position);
                 return (
                   <div key={position.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
-                    <div>
-                      <div className="font-medium">
-                        {position.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(position.side, position.leverage)}</span>
-                      </div>
-                      <div className="text-[11px] text-[var(--muted)]">
-                        {priceFmt(position.entryPrice)} → {priceFmt(position.markPrice)} · {position.reason}
-                      </div>
+                    <div className="min-w-0 flex-1">
+                      <button type="button" onClick={() => onOpenPosition(position.id)} className="text-left">
+                        <div className="font-medium">
+                          {position.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(position.side, position.leverage)}</span>
+                        </div>
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {priceFmt(position.entryPrice)} → {priceFmt(position.markPrice)} · {position.reason}
+                        </div>
+                      </button>
                       <div className="text-[10px]">{txLink(position.signature)}</div>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <Tone value={pnl}>{usd(pnl)}</Tone>
-                      <button disabled={busy} onClick={() => onClose(position.id)} className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)]">
-                        Close
-                      </button>
+                      <PositionActions
+                        closing={closingId === position.id}
+                        error={closeError?.id === position.id ? closeError.message : null}
+                        onOpen={() => onOpenPosition(position.id)}
+                        onClose={() => onClose(position.id)}
+                      />
                     </div>
                   </div>
                 );
@@ -1414,6 +1493,9 @@ function Book({
   trading,
   winRate,
   busy,
+  closingId,
+  closeError,
+  onOpenPosition,
   onClose,
   onFlatten,
   onWalletSwaps,
@@ -1424,6 +1506,9 @@ function Book({
   trading: { address: string; sol: number; usdc: number; equityUsd: number } | null;
   winRate: number;
   busy: boolean;
+  closingId: string | null;
+  closeError: { id: string; message: string } | null;
+  onOpenPosition: (id: string) => void;
   onClose: (id: string) => void;
   onFlatten: () => void;
   onWalletSwaps: (on: boolean) => void;
@@ -1534,9 +1619,12 @@ function Book({
                       <RangeBar position={p} />
                     </td>
                     <td className="pr-3">
-                      <button disabled={busy} onClick={() => onClose(p.id)} className="text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)]">
-                        Close
-                      </button>
+                      <PositionActions
+                        closing={closingId === p.id}
+                        error={closeError?.id === p.id ? closeError.message : null}
+                        onOpen={() => onOpenPosition(p.id)}
+                        onClose={() => onClose(p.id)}
+                      />
                     </td>
                   </tr>
                 );
@@ -1599,6 +1687,106 @@ function txLink(signature?: string) {
     <a className="num text-[11px] text-[var(--mint)]" href={`https://solscan.io/tx/${signature}`} target="_blank" rel="noreferrer">
       {short}
     </a>
+  );
+}
+
+function PositionActions({
+  closing,
+  error,
+  onOpen,
+  onClose,
+}: {
+  closing: boolean;
+  error: string | null;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-col items-end gap-1">
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-lg border border-[var(--line)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text)]"
+        >
+          Open
+        </button>
+        <button
+          type="button"
+          disabled={closing}
+          onClick={onClose}
+          className="rounded-lg border border-[rgba(255,59,74,0.45)] bg-[rgba(255,59,74,0.08)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
+        >
+          {closing ? "Closing…" : "Close"}
+        </button>
+      </div>
+      {error ? <p className="max-w-[200px] text-right text-[10px] leading-4 text-[var(--crimson)]">{error}</p> : null}
+    </div>
+  );
+}
+
+function PositionDrawer({
+  position,
+  closing,
+  error,
+  onDismiss,
+  onExit,
+}: {
+  position: Position;
+  closing: boolean;
+  error: string | null;
+  onDismiss: () => void;
+  onExit: () => void;
+}) {
+  const pnl = rowPnl(position);
+  const pnlPct = position.entryPrice ? ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * (position.side === "long" ? 1 : -1) : 0;
+  return (
+    <div className="drawer-scrim fixed inset-0 z-40 flex justify-end bg-black/55 backdrop-blur-sm" onClick={onDismiss}>
+      <aside
+        className="drawer-panel desk-scroll h-full w-full max-w-xl overflow-y-auto border-l border-[var(--line)] bg-[#09090f] p-6"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Pill tone={position.side === "long" ? "mint" : "crimson"}>{sideText(position.side, position.leverage)}</Pill>
+            <h3 className="mt-3 text-3xl font-medium">{position.symbol}</h3>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {position.reason} · {position.sector ?? "Unknown"} · {rMultiple(position).toFixed(2)}R
+            </p>
+          </div>
+          <button type="button" onClick={onDismiss} className="text-sm text-[var(--muted)]">
+            Back
+          </button>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <Stat label="Entry" value={priceFmt(position.entryPrice)} />
+          <Stat label="Mark" value={priceFmt(position.markPrice)} />
+          <Stat label="Stop" value={priceFmt(position.stopPrice)} />
+          <Stat label="Target" value={priceFmt(position.targetPrice)} />
+          <Stat label="Notional" value={usd(position.notional)} />
+          <Stat label="P&L" value={<Tone value={pnl}>{usd(pnl)}</Tone>} sub={pct(pnlPct)} />
+        </div>
+        <div className="mt-4">
+          <RangeBar position={position} />
+        </div>
+        <div className="mt-4 text-[11px] text-[var(--muted)]">{txLink(position.signature)}</div>
+        {position.leverage && position.leverage > 1 ? (
+          <p className="mt-3 text-sm text-[var(--muted)]">
+            {position.leverage}x · collateral {usd(position.collateralUsd ?? 0)}
+            {position.positionPubkey ? ` · ${position.positionPubkey.slice(0, 4)}…${position.positionPubkey.slice(-4)}` : ""}
+          </p>
+        ) : null}
+        {error ? <p className="mt-4 text-sm text-[var(--crimson)]">{error}</p> : null}
+        <button
+          type="button"
+          disabled={closing}
+          onClick={onExit}
+          className="btn mt-6 w-full bg-[rgba(255,59,74,0.14)] text-[var(--crimson)] disabled:opacity-60"
+        >
+          {closing ? "Closing…" : "Close position"}
+        </button>
+      </aside>
+    </div>
   );
 }
 

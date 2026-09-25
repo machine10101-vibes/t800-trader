@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SOL_MINT, USDC_MINT } from "../market/universe";
 import { DEFAULT_VENUES } from "../market/venues";
-import { baseUnits, planSpotOrder } from "./swap";
+import { baseUnits, planSpotOrder, sellQty } from "./swap";
 import { dexesForVenues } from "../market/venues";
 
 const order = {
@@ -18,6 +18,14 @@ const order = {
   solPriceUsd: 100,
   venues: [...DEFAULT_VENUES],
 };
+
+describe("sellQty", () => {
+  it("sells the position size when the key holds more, and never more than the balance", () => {
+    assert.equal(sellQty(1, 2), 1);
+    assert.ok(Math.abs(sellQty(2, 1) - 0.9999) < 1e-12);
+    assert.equal(sellQty(1, 0), 0);
+  });
+});
 
 describe("baseUnits", () => {
   it("converts a decimal amount without floating dust", () => {

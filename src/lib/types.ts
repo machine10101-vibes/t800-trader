@@ -333,6 +333,8 @@ export interface BotState {
   blocked: string[];
   /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
   swapHoldUntil?: string | null;
+  /** A hand close. The scan will not reopen this mint until `until`. */
+  skipReentry?: { mint: string; until: string } | null;
   /** A Jupiter limit bid waiting for a taker. The position is booked only after it fills. */
   resting?: RestingQuote | null;
   /** Signature of the arm transaction that funded the browser trading key. */
