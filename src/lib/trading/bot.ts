@@ -18,8 +18,8 @@ import {
   managePosition,
   MIN_TICKET_USD,
   MIN_TRADE_USD,
+  marginCashUsd,
   payableUsd,
-  solPerpPostableUsd,
   walletMarkUsd,
   rollSession,
   shouldFlattenMeme,
@@ -375,7 +375,7 @@ export async function tickBot(
             learned.mint,
           );
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
-          const paying = wanted > 1 && solPerp && priced ? solPerpPostableUsd(priced) : risk.portfolio.cashUsd;
+          const paying = wanted > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wanted);
           const leverage = ticket.leverage;
           const collateralUsd = ticket.collateralUsd;

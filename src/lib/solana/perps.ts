@@ -13,6 +13,8 @@ const MIN_SOL = 0.005;
 const COLLATERAL_CUSHION = 1.25;
 /** Compute-unit price so a 5x or 10x transaction is not left at the back of the queue. */
 const PRIORITY_FEE_MICRO_LAMPORTS = "250000" as const;
+/** Tighter rent haircut used only when the normal reserve would drop a post under $10. */
+const TIGHT_RENT_SOL = 0.008;
 
 export interface PerpIncreasePlan {
   asset: "SOL";
@@ -20,6 +22,7 @@ export interface PerpIncreasePlan {
   inputTokenAmount: string;
   side: "long";
   leverage: "5" | "10";
+  sizeUsdDelta: string;
   maxSlippageBps: "100";
   priorityFeeMicroLamports: "250000";
   collateralUsd: number;
@@ -61,52 +64,54 @@ export function planPerpIncrease(
     throw new Error(`A ${leverage}x position needs at least $${PERP_MIN_COLLATERAL_USD} of collateral.`);
   }
   if (order.sol < MIN_SOL) throw new Error("Need at least 0.005 SOL in the wallet to pay the network fee.");
-  const side = "long" as const;
-  const maxSlippageBps = "100" as const;
-  const priorityFeeMicroLamports = PRIORITY_FEE_MICRO_LAMPORTS;
   const cushioned = collateral * COLLATERAL_CUSHION;
-  if (order.usdc + 1e-6 >= cushioned) {
-    return {
-      asset: "SOL",
-      inputToken: "USDC",
-      inputTokenAmount: baseUnits(cushioned, 6),
-      side,
-      leverage: String(leverage) as "5" | "10",
-      maxSlippageBps,
-      priorityFeeMicroLamports,
-      collateralUsd: cushioned,
-    };
+  const usdc = Math.max(0, order.usdc);
+  if (usdc + 1e-6 >= cushioned || (usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD && usdc + 1e-6 >= collateral)) {
+    const post = usdc + 1e-6 >= cushioned ? cushioned : usdc;
+    return increasePlan("USDC", post, 6, leverage, post);
   }
-  if (order.usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD && order.usdc + 1e-6 >= collateral) {
-    return {
-      asset: "SOL",
-      inputToken: "USDC",
-      inputTokenAmount: baseUnits(order.usdc, 6),
-      side,
-      leverage: String(leverage) as "5" | "10",
-      maxSlippageBps,
-      priorityFeeMicroLamports,
-      collateralUsd: order.usdc,
-    };
+  const solPost = solCollateralUsd(order.sol, order.solPriceUsd, cushioned);
+  if (solPost + 1e-6 >= PERP_MIN_COLLATERAL_USD && order.solPriceUsd > 0) {
+    return increasePlan("SOL", solPost / order.solPriceUsd, 9, leverage, solPost);
+  }
+  if (usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD) {
+    return increasePlan("USDC", usdc, 6, leverage, usdc);
   }
   if (!(order.solPriceUsd > 0)) throw new Error("USDC does not cover this margin, and the SOL price is missing.");
-  const capSol = order.sol - SOL_FEE_RESERVE - PERP_RENT_SOL;
-  const capUsd = capSol * order.solPriceUsd;
-  const post = Math.min(cushioned, capUsd);
-  if (!(post + 1e-6 >= PERP_MIN_COLLATERAL_USD)) {
-    throw new Error(
-      `A ${leverage}x position needs at least $${PERP_MIN_COLLATERAL_USD} of collateral. The trading key does not cover that after the fee reserve.`,
-    );
-  }
+  throw new Error(
+    `A ${leverage}x position needs at least $${PERP_MIN_COLLATERAL_USD} of collateral. The trading key does not cover that after the fee reserve.`,
+  );
+}
+
+/** SOL that can be posted. Rent is kept when it still clears $10; otherwise a tighter reserve, then the fee-only balance. */
+function solCollateralUsd(sol: number, price: number, cushioned: number): number {
+  if (!(price > 0)) return 0;
+  const afterFee = Math.max(0, sol - SOL_FEE_RESERVE) * price;
+  const afterRent = Math.max(0, sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * price;
+  const afterTight = Math.max(0, sol - SOL_FEE_RESERVE - TIGHT_RENT_SOL) * price;
+  let capUsd = afterRent;
+  if (!(capUsd + 1e-6 >= PERP_MIN_COLLATERAL_USD) && afterTight + 1e-6 >= PERP_MIN_COLLATERAL_USD) capUsd = afterTight;
+  else if (!(capUsd + 1e-6 >= PERP_MIN_COLLATERAL_USD) && afterFee + 1e-6 >= PERP_MIN_COLLATERAL_USD) capUsd = afterFee;
+  return Math.min(cushioned, capUsd);
+}
+
+function increasePlan(
+  inputToken: "SOL" | "USDC",
+  amountUi: number,
+  decimals: number,
+  leverage: 5 | 10,
+  collateralUsd: number,
+): PerpIncreasePlan {
   return {
     asset: "SOL",
-    inputToken: "SOL",
-    inputTokenAmount: baseUnits(post / order.solPriceUsd, 9),
-    side,
+    inputToken,
+    inputTokenAmount: baseUnits(amountUi, decimals),
+    side: "long",
     leverage: String(leverage) as "5" | "10",
-    maxSlippageBps,
-    priorityFeeMicroLamports,
-    collateralUsd: post,
+    sizeUsdDelta: baseUnits(collateralUsd * leverage, 6),
+    maxSlippageBps: "100",
+    priorityFeeMicroLamports: PRIORITY_FEE_MICRO_LAMPORTS,
+    collateralUsd,
   };
 }
 
@@ -139,19 +144,66 @@ interface IncreaseQuote {
   leverage?: string;
 }
 
-export function fillFromIncrease(quote: IncreaseQuote, positionPubkey: string | null, signature: string): ChainFill {
+function multiplierBand(value: number): 5 | 10 | 1 | 0 {
+  if (!(value > 0) || !Number.isFinite(value)) return 0;
+  if (value >= 7.5 && value <= 12.5) return 10;
+  if (value >= 3.5 && value <= 6.5) return 5;
+  if (value >= 0.5 && value <= 1.5) return 1;
+  return 0;
+}
+
+function formatMultiplier(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/**
+ * The quote must be a real 5x or 10x before the transaction is signed.
+ * A missing leverage and a missing size accept the requested multiplier.
+ * An explicit 1x quote is refused. A 10x request that Jupiter priced at 5x is booked at 5x.
+ */
+export function quotedMultiplier(quote: IncreaseQuote, requested: 5 | 10): 5 | 10 {
+  const statedRaw = quote.leverage != null && String(quote.leverage).trim() !== "" ? Number(quote.leverage) : NaN;
+  const collateral = perpUsd(quote.collateralUsdDelta);
+  const size = perpUsd(quote.sizeUsdDelta);
+  const implied = collateral > 0 && size > 0 ? size / collateral : NaN;
+  const stated = multiplierBand(statedRaw);
+  const ratio = multiplierBand(implied);
+  if (stated === 1 || ratio === 1) {
+    const shown = stated === 1 && Number.isFinite(statedRaw) ? statedRaw : implied;
+    throw new Error(
+      `Jupiter quoted this long at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
+    );
+  }
+  if (ratio === 5 || ratio === 10) return ratio;
+  if (stated === 5 || stated === 10) return stated;
+  const statedMissing = !Number.isFinite(statedRaw) || !(statedRaw > 0);
+  const sizeMissing = !Number.isFinite(implied);
+  if (statedMissing && sizeMissing) return requested;
+  const shown = Number.isFinite(implied) ? implied : statedRaw;
+  throw new Error(
+    `Jupiter quoted this long at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
+  );
+}
+
+export function fillFromIncrease(
+  quote: IncreaseQuote,
+  positionPubkey: string | null,
+  signature: string,
+  booked?: 5 | 10,
+): ChainFill {
   const price = perpUsd(quote.averagePriceUsd);
   const collateralUsd = perpUsd(quote.collateralUsdDelta);
   const notional = perpUsd(quote.sizeUsdDelta);
   const qty = price > 0 ? notional / price : 0;
-  const leverage = Number(quote.leverage);
   if (!(qty > 0) || !(price > 0)) throw new Error("Jupiter did not return a fill for this multiplier.");
+  const leverage = booked ?? quotedMultiplier(quote, 5);
   return {
     signature,
     qty,
     price,
     tokenDecimals: 9,
-    leverage: leverage === 10 ? 10 : 5,
+    leverage,
     collateralUsd: collateralUsd > 0 ? collateralUsd : undefined,
     positionPubkey: positionPubkey ?? undefined,
   };
@@ -226,7 +278,7 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
   const balances = await readBalances(trader);
   if (order.kind === "open") {
     const price = balances.solPriceUsd ?? order.price ?? 0;
-    const openWith = async (collateralUsd: number | undefined) => {
+    const openWith = async (collateralUsd: number | undefined, includeSize: boolean) => {
       const plan = planPerpIncrease({
         ...order,
         collateralUsd: collateralUsd ?? order.collateralUsd,
@@ -243,6 +295,7 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
           inputTokenAmount: plan.inputTokenAmount,
           side: plan.side,
           leverage: plan.leverage,
+          ...(includeSize ? { sizeUsdDelta: plan.sizeUsdDelta } : {}),
           maxSlippageBps: plan.maxSlippageBps,
           priorityFeeMicroLamports: plan.priorityFeeMicroLamports,
           walletAddress: trader,
@@ -250,21 +303,44 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
       );
       return { plan, opened };
     };
-    let plan: PerpIncreasePlan;
-    let opened: { serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote };
-    try {
-      ({ plan, opened } = await openWith(order.collateralUsd));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      const tiny = /collateral size|at least \$10/i.test(message);
-      const bumped = (order.collateralUsd ?? PERP_MIN_COLLATERAL_USD) * 1.25;
-      if (!tiny || !(bumped > (order.collateralUsd ?? 0))) throw error;
-      ({ plan, opened } = await openWith(bumped));
+    const attempts: Array<[number | undefined, boolean]> = [
+      [order.collateralUsd, true],
+      [order.collateralUsd, false],
+    ];
+    let plan: PerpIncreasePlan | undefined;
+    let opened: { serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote } | undefined;
+    let booked: 5 | 10 | undefined;
+    let lastError: unknown;
+    let bumped = false;
+    for (const [collateralUsd, includeSize] of attempts) {
+      try {
+        const next = await openWith(collateralUsd, includeSize);
+        if (!next.opened.serializedTxBase64 || !next.opened.quote) {
+          lastError = new Error("Jupiter did not return a 5x or 10x transaction.");
+          continue;
+        }
+        const requested = next.plan.leverage === "10" ? 10 : 5;
+        booked = quotedMultiplier(next.opened.quote, requested);
+        plan = next.plan;
+        opened = next.opened;
+        break;
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : "";
+        const tiny = /collateral size|at least \$10/i.test(message);
+        const larger = (order.collateralUsd ?? PERP_MIN_COLLATERAL_USD) * 1.25;
+        if (tiny && !bumped && larger > (order.collateralUsd ?? 0)) {
+          bumped = true;
+          attempts.push([larger, true], [larger, false]);
+        }
+      }
     }
-    if (!opened.serializedTxBase64 || !opened.quote) throw new Error("Jupiter did not return a 5x or 10x transaction.");
+    if (!plan || !opened?.serializedTxBase64 || !opened.quote || !booked) {
+      throw lastError instanceof Error ? lastError : new Error("Jupiter did not return a 5x or 10x transaction.");
+    }
     const signature = await submit(opened.serializedTxBase64, signer, "increase-position");
     const positionPubkey = opened.positionPubkey || (await findPosition(trader, plan.side).catch(() => null));
-    return fillFromIncrease(opened.quote, positionPubkey, signature);
+    return fillFromIncrease(opened.quote, positionPubkey, signature, booked);
   }
 
   let pubkey = order.positionPubkey;

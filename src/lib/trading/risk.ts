@@ -1,5 +1,5 @@
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
-import { PERP_RENT_SOL } from "./leverage";
+import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
 
 /** Smallest marked trading balance the desk will arm and open against. */
 export const MIN_TRADE_USD = 3;
@@ -136,6 +136,21 @@ export function solPerpPostableUsd(budget: WalletBudget): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
   const usdc = Math.max(0, budget.usdc);
   const solLeg = Math.max(0, budget.sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * px;
+  return Math.max(usdc, solLeg);
+}
+
+/**
+ * Dollars that can open a SOL 5x or 10x. USDC counts in full.
+ * SOL keeps the position-account rent when that still clears $10.
+ * A fee-only balance that still clears $10 is used when the rent haircut
+ * would otherwise turn a margin ticket into a spot buy.
+ */
+export function marginCashUsd(budget: WalletBudget): number {
+  const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
+  const usdc = Math.max(0, budget.usdc);
+  const afterRent = Math.max(0, budget.sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * px;
+  const afterFee = Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
+  const solLeg = afterRent + 1e-9 >= PERP_MIN_COLLATERAL_USD ? afterRent : afterFee;
   return Math.max(usdc, solLeg);
 }
 

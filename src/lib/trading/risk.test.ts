@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -556,6 +556,10 @@ describe("walletRiskBook", () => {
     const perp = solPerpPostableUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 });
     assert.ok(perp >= 10, `0.13 SOL should still post a 5x or 10x, got ${perp}`);
     assert.equal(solPerpPostableUsd({ usdc: 12, sol: 0.02, solPriceUsd: 200 }), 12);
+    assert.equal(marginCashUsd({ usdc: 11, sol: 0.02, solPriceUsd: 200 }), 11);
+    const feeOnly = marginCashUsd({ usdc: 0, sol: 0.09, solPriceUsd: 120 });
+    assert.ok(feeOnly + 1e-9 >= 10, `fee-only SOL should still count as margin cash, got ${feeOnly}`);
+    assert.ok(Math.abs(marginCashUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 }) - perp) < 1e-6);
     const smallSol = spendableUsd({ usdc: 0, sol: 0.02, solPriceUsd: 190 });
     assert.ok(smallSol >= 3, `0.02 SOL at $190 should still spend about $3, got ${smallSol}`);
     const paper = {
