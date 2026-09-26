@@ -45,7 +45,7 @@ export interface FlowWindow {
 
 export interface TokenCandidate {
   id: string;
-  chain: "solana";
+  chain: "solana" | "cronos";
   symbol: string;
   name: string;
   mint: string;
@@ -63,6 +63,11 @@ export interface TokenCandidate {
   flows: Record<Timeframe, FlowWindow>;
   watchlist: boolean;
   sources: string[];
+  /** Cross-checked mark. `split` means feeds disagree and the book will not open a new ticket. */
+  priceAgreement?: "agree" | "thin" | "split";
+  /** Percent, already scaled (4.98 means 4.98%). Null when no feed confirmed a yield for this mint. */
+  apyPct?: number | null;
+  apySources?: string[];
 }
 
 export interface TechnicalSnapshot {
@@ -74,6 +79,10 @@ export interface TechnicalSnapshot {
   volumeZ: number | null;
   lastClose: number | null;
   extensionPct: number | null;
+  closeStrength: number | null;
+  priorHigh: number | null;
+  priorLow: number | null;
+  barsAboveEma9: number;
 }
 
 export interface ScoredCandidate extends TokenCandidate {
@@ -145,6 +154,8 @@ export interface MarketRegime {
   overlooked: string[];
   overview: string;
   narratives: string[];
+  /** Compact public yields (LST, JLP, lend). Empty when those feeds missed the cycle. */
+  yields?: { label: string; apyPct: number; source: string }[];
 }
 
 export interface Signal {
@@ -152,6 +163,7 @@ export interface Signal {
   mint: string;
   symbol: string;
   poolAddress: string;
+  sector: Sector;
   side: Side;
   reason: TradeReason;
   confidence: number;
@@ -168,6 +180,7 @@ export interface Position {
   mint: string;
   symbol: string;
   poolAddress: string;
+  sector: Sector;
   side: Side;
   qty: number;
   entryPrice: number;
@@ -178,9 +191,22 @@ export interface Position {
   lastUpdate: string;
   reason: TradeReason;
   researchScore: number | null;
+  entryConfidence?: number;
+  entryStance?: MarketRegime["stance"];
   highWater: number;
   lowWater: number;
   notional: number;
+  initialStop: number;
+  scaled: boolean;
+  /** Set when a wallet signed the open. Missing means the ticket never left this browser. */
+  signature?: string;
+  tokenDecimals?: number;
+  /** Jupiter perp multiplier. Missing or 1 is a spot swap. */
+  leverage?: number;
+  /** Margin posted for a perp. Spot tickets leave this empty and lock the full notional. */
+  collateralUsd?: number;
+  /** Jupiter perp position account, required to close a 5x or 10x ticket. */
+  positionPubkey?: string;
 }
 
 export interface Trade {
@@ -196,6 +222,8 @@ export interface Trade {
   reason: TradeReason;
   at: string;
   note: string;
+  /** Solana signature for a wallet swap. Missing means the row is simulated. */
+  signature?: string;
 }
 
 export interface BotConfig {
@@ -209,6 +237,89 @@ export interface BotConfig {
   allowShorts: boolean;
   allowMemes: boolean;
   scanSeconds: number;
+  oneTicketPerTick: boolean;
+  microOneTicket: boolean;
+  maxPerSector: number;
+  lossStreakPause: number;
+  cooldownMinutes: number;
+  minConfidence: number;
+  autoCash: boolean;
+  cashPct: number;
+  dayBudgetPct: number;
+  defensiveBreakoutScore: number;
+  beR: number;
+  scaleAtR: number;
+  scaleFractionPct: number;
+  lockAtR: number;
+  lockProfitR: number;
+  timeCapMin: number;
+  memeTimeCapMin: number;
+  staleMin: number;
+  memeStaleMin: number;
+  scratchEnabled: boolean;
+  /** Platform ids from VENUE_OPTIONS. New tickets only open on these pools. */
+  venues: string[];
+  /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
+  walletSwaps: boolean;
+  /**
+   * 5x and 10x for SOL, Zebec, and CRO. 10x is used when the signal is strong.
+   * SOL is a Jupiter perp. Zebec and CRO post the collateral as spot and the book marks the multiplier.
+   * An empty list keeps every ticket a spot swap.
+   */
+  multipliers: number[];
+  /**
+   * Books saved before live swaps were the default have no rev and are switched on once.
+   * After that, an explicit off stays off.
+   */
+  liveTradesRev: number;
+}
+
+export interface ChainOrder {
+  kind: "open" | "close" | "scale";
+  side: Side;
+  mint: string;
+  symbol: string;
+  notionalUsd: number;
+  qty: number;
+  price: number;
+  tokenDecimals?: number;
+  venues?: string[];
+  /** 5 or 10. SOL is a Jupiter perp. Zebec and CRO are spot bags marked at this multiplier. */
+  leverage?: number;
+  collateralUsd?: number;
+  positionPubkey?: string;
+}
+
+export interface ChainFill {
+  signature: string;
+  qty: number;
+  price: number;
+  tokenDecimals: number;
+  leverage?: number;
+  collateralUsd?: number;
+  positionPubkey?: string;
+}
+
+export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;
+
+export interface RestingQuote {
+  orderKey: string;
+  signature: string;
+  mint: string;
+  symbol: string;
+  poolAddress: string;
+  sector: Sector;
+  side: "long";
+  reason: TradeReason;
+  confidence: number;
+  researchScore: number | null;
+  stopPct: number;
+  targetPct: number;
+  thesis: string;
+  limitPrice: number;
+  notionalUsd: number;
+  outputDecimals: number;
+  placedAt: string;
 }
 
 export interface BotState {
@@ -217,6 +328,22 @@ export interface BotState {
   lastError: string | null;
   ticks: number;
   startedAt: string | null;
+  lastNote: string | null;
+  lastOpened: number;
+  lastClosed: number;
+  blocked: string[];
+  /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
+  swapHoldUntil?: string | null;
+  /** A hand close. The scan will not reopen this mint until `until`. */
+  skipReentry?: { mint: string; until: string } | null;
+  /** A Jupiter limit bid waiting for a taker. The position is booked only after it fills. */
+  resting?: RestingQuote | null;
+  /** Signature of the arm transaction that funded the browser trading key. */
+  swapAuthSignature?: string | null;
+  /** Address that signs Jupiter swaps after that arm transaction. */
+  swapBot?: string | null;
+  /** USD marked on the trading key when it was funded. Cash above this is profit. */
+  swapPrincipalUsd?: number | null;
 }
 
 export interface Portfolio {
@@ -230,11 +357,60 @@ export interface Portfolio {
   winCount: number;
   lossCount: number;
   tradeCount: number;
+  sessionDay?: string;
 }
 
 export interface EquityPoint {
   t: string;
   equity: number;
+}
+
+export interface Lesson {
+  id: string;
+  at: string;
+  kind: "trade" | "read";
+  key: string;
+  symbol: string;
+  sector: string;
+  hit: boolean;
+  /** R multiple for a trade, percent move for a tape read. */
+  r: number;
+  note: string;
+}
+
+export interface PendingRead {
+  id: string;
+  at: string;
+  mint: string;
+  symbol: string;
+  sector: string;
+  price: number;
+  score: number;
+  mode: "follow" | "defend";
+  bucket: string;
+}
+
+export interface PlayMemory {
+  lessons: Lesson[];
+  pendingReads: PendingRead[];
+}
+
+export interface LearningEdge {
+  key: string;
+  label: string;
+  samples: number;
+  hitRate: number;
+  avgR: number;
+  unit: "R" | "%";
+  bias: "favor" | "fade" | "watch";
+}
+
+export interface LearningReport {
+  tradeSamples: number;
+  readSamples: number;
+  edges: LearningEdge[];
+  recent: Lesson[];
+  summary: string;
 }
 
 export interface AppState {
@@ -245,6 +421,7 @@ export interface AppState {
   trades: Trade[];
   equityCurve: EquityPoint[];
   lastSignals: Signal[];
+  memory: PlayMemory;
 }
 
 export interface TapeDot {
@@ -254,6 +431,22 @@ export interface TapeDot {
   change24h: number;
   liquidityUsd: number;
   volume24hUsd: number;
+}
+
+export interface BookStats {
+  expectancyUsd: number;
+  profitFactor: number | null;
+  avgWinUsd: number;
+  avgLossUsd: number;
+  closedTrades: number;
+  maxDrawdownPct: number;
+}
+
+export interface TapeCard {
+  symbol: string;
+  mint: string;
+  poolAddress: string;
+  change15m: number;
 }
 
 export interface DeskPayload {
@@ -271,5 +464,8 @@ export interface DeskPayload {
   equityCurve: EquityPoint[];
   whatCouldBeWrong: string[];
   tapeDots: TapeDot[];
+  tapes: TapeCard[];
+  stats: BookStats;
+  learning: LearningReport;
   generatedAt: string;
 }

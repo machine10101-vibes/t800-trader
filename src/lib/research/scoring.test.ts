@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { TokenCandidate } from "../types";
-import { scoreCandidate, screenCandidate } from "./scoring";
+import { bookScreen, scoreCandidate, screenCandidate } from "./scoring";
 
 function token(over: Partial<TokenCandidate> = {}): TokenCandidate {
   const flow = { buys: 100, sells: 95, buyers: 80, sellers: 78, volumeUsd: 40_000, priceChangePct: 2 };
@@ -45,6 +45,10 @@ const blankTech = {
   volumeZ: 1.3,
   lastClose: 1.02,
   extensionPct: 1.0,
+  closeStrength: 0.7,
+  priorHigh: 1.0,
+  priorLow: 0.96,
+  barsAboveEma9: 3,
 };
 
 describe("screenCandidate", () => {
@@ -76,6 +80,42 @@ describe("screenCandidate", () => {
       allowMemes: true,
     });
     assert.ok(reason?.includes("Wrapped"));
+  });
+
+  it("rejects a pool on a venue the book turned off", () => {
+    const reason = screenCandidate(token({ dex: "pumpswap", watchlist: false }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium", "orca"],
+    });
+    assert.equal(reason, "Venue Pump.fun is off");
+  });
+
+  it("keeps a Raydium CLMM pool when Raydium is on", () => {
+    const reason = screenCandidate(token({ dex: "raydium-clmm" }), {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium"],
+    });
+    assert.equal(reason, null);
+  });
+
+  it("lets the Cronos book through on VVS even when the saved venues are Solana's", () => {
+    const cro = token({ symbol: "CRO", name: "Cronos", dex: "vvs", chain: "cronos" });
+    const saved = {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium", "orca", "meteora", "jupiter", "pump", "other"],
+    };
+    assert.equal(screenCandidate(cro, saved), "Venue VVS Finance is off");
+    assert.equal(screenCandidate(cro, bookScreen(saved, "cronos")), null);
+    assert.equal(screenCandidate(token({ dex: "vvs" }), bookScreen(saved, "solana")), "Venue VVS Finance is off");
   });
 
   it("passes liquid watchlist names", () => {
@@ -110,5 +150,32 @@ describe("scoreCandidate", () => {
     );
     assert.ok(good.researchScore > bad.researchScore);
     assert.ok(good.researchScore > 50);
+  });
+
+  it("lifts a sourced LST yield and marks a split price as a penalty", () => {
+    const plain = scoreCandidate(token({ sector: "LST", symbol: "JITOSOL" }), blankTech);
+    const yielded = scoreCandidate(
+      token({
+        sector: "LST",
+        symbol: "JITOSOL",
+        apyPct: 5,
+        apySources: ["jito:stake-pool"],
+        priceAgreement: "agree",
+        sources: ["geckoterminal:price", "jupiter:price", "defillama:price"],
+      }),
+      blankTech,
+    );
+    const split = scoreCandidate(token({ priceAgreement: "split" }), blankTech);
+    const aligned = scoreCandidate(token(), blankTech);
+    const meme = scoreCandidate(token({ sector: "Meme", symbol: "BONK", name: "Bonk" }), blankTech);
+    const memeYield = scoreCandidate(
+      token({ sector: "Meme", symbol: "BONK", name: "Bonk", apyPct: 20, apySources: ["junk"] }),
+      blankTech,
+    );
+    assert.ok(yielded.researchScore > plain.researchScore);
+    assert.ok(yielded.strengths.some((n) => n.includes("Sourced yield")));
+    assert.ok(split.researchScore < aligned.researchScore);
+    assert.ok(split.penalties.some((n) => /disagree/i.test(n)));
+    assert.equal(memeYield.researchScore, meme.researchScore);
   });
 });

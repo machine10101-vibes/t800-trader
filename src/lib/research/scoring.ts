@@ -1,5 +1,7 @@
+import type { ChainId } from "@/lib/chain";
 import type { ScoredCandidate, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { isForeignOrWrapped } from "@/lib/market/universe";
+import { venueAllowed, venueForDex, venueLabel } from "@/lib/market/venues";
 import { clamp } from "@/lib/utils";
 
 export interface ScreenConfig {
@@ -7,6 +9,13 @@ export interface ScreenConfig {
   minVolume24hUsd: number;
   minAgeHours: number;
   allowMemes: boolean;
+  venues?: string[];
+}
+
+/** Cronos only trades the VVS pool. The saved Solana venue list must not blank that book. */
+export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
+  if (chain !== "cronos") return cfg;
+  return { ...cfg, venues: ["vvs"] };
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
@@ -19,6 +28,10 @@ export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | 
   }
   if (!cfg.allowMemes && c.sector === "Meme" && !c.watchlist) return "Meme sector excluded by risk policy";
   if (c.priceUsd <= 0) return "Invalid price";
+  if (cfg.venues && !cfg.venues.length) return "No trading venue selected";
+  if (cfg.venues && !venueAllowed(c.dex, cfg.venues)) {
+    return `Venue ${venueLabel(venueForDex(c.dex))} is off`;
+  }
   if (isForeignOrWrapped(c.symbol, c.name)) {
     return "Wrapped or non-Solana-native asset";
   }
@@ -47,6 +60,11 @@ export function scoreOrganic(c: TokenCandidate): { score: number; notes: string[
   }
 
   if (uniqueShare > 0.45 && uniqueShare < 0.62) score += 8;
+  const priceFeeds = c.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price"));
+  if (c.priceAgreement === "agree" && priceFeeds.length >= 2) {
+    score += 4;
+    notes.push(`Marks agree across ${priceFeeds.length} price feeds`);
+  }
   if (burst > 8 && !c.watchlist) {
     score -= 12;
     notes.push("1h volume is an extreme multiple of the 24h run-rate");
@@ -111,6 +129,13 @@ export function scoreValuation(c: TokenCandidate): { score: number; metric: stri
     score -= 6;
   }
 
+  const yieldSector = c.sector === "LST" || c.sector === "Lending" || c.sector === "Perps";
+  if (yieldSector && c.apyPct && c.apyPct > 0) {
+    score += clamp(3 + c.apyPct * 0.35, 3, 8);
+    const via = c.apySources?.length ? ` via ${c.apySources.join(", ")}` : "";
+    notes.push(`Sourced yield ${c.apyPct.toFixed(2)}%${via}`);
+  }
+
   return { score: clamp(score, 0, 100), metric, notes };
 }
 
@@ -168,6 +193,10 @@ export function scoreRisk(c: TokenCandidate): { score: number; notes: string[] }
     score -= 12;
     notes.push("Unclassified token — no mapped protocol");
   }
+  if (c.priceAgreement === "split") {
+    score -= 12;
+    notes.push("Price feeds disagree");
+  }
   return { score: clamp(score, 0, 100), notes };
 }
 
@@ -199,6 +228,9 @@ export function technicalScore(t: TechnicalSnapshot): number {
   if (t.rsi14 < 28) s += 4;
   if (t.volumeZ !== null && t.volumeZ > 1.2) s += 6;
   if (t.extensionPct !== null && Math.abs(t.extensionPct) > 6) s -= 8;
+  if (t.closeStrength != null && t.closeStrength >= 0.65 && t.ema9 !== null && t.ema21 !== null && t.ema9 > t.ema21) s += 5;
+  if (t.priorHigh != null && t.lastClose != null && t.lastClose >= t.priorHigh) s += 4;
+  if (t.atrPct !== null && (t.atrPct < 0.4 || t.atrPct > 6)) s -= 8;
   return clamp(s, 0, 100);
 }
 
@@ -217,7 +249,7 @@ export function scoreCandidate(c: TokenCandidate, technical: TechnicalSnapshot):
   });
 
   const penalties = [...organic.notes, ...valuation.notes, ...activity.notes, ...risk.notes].filter((n) =>
-    /risk|below|heavy|stale|violent|young|meme|launchpad|casino|dwarfs|not published|thin|excluded/i.test(n),
+    /risk|below|heavy|stale|violent|young|meme|launchpad|casino|dwarfs|not published|thin|excluded|disagree/i.test(n),
   );
   const strengths = [...organic.notes, ...valuation.notes, ...activity.notes].filter((n) => !penalties.includes(n));
 

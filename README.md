@@ -30,7 +30,7 @@ The published site is a **static** Next.js export. Overview, Radar, thesis drawe
 5. **Trade** (paper only) — volatility-sized, stop / target / trail / 50-minute time stop
 6. **Skeptic pass** — missing unlocks, revenue, and holder data are listed, never invented
 
-Default book: `$10,000` paper USDC. Max 4 positions. ~1.1% equity risk per trade, cut in defensive regimes. Daily loss cap 6%.
+Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). A **$5** wallet is enough to open. Max 4 positions. ~1.1% equity risk per trade, cut in defensive regimes. Daily loss cap 6%. Micro books ($5–$50) put most of the cash to work so a $5–$6 wallet can actually fill.
 
 ## Run it
 

@@ -1,7 +1,20 @@
-import { fetchOhlcv, loadMarket } from "@/lib/market/providers";
-import type { BotConfig, Catalyst, MarketRegime, ResearchThesis, ScoredCandidate, TokenCandidate } from "@/lib/types";
-import { snapshotTechnical } from "@/lib/trading/signals";
-import { mapPool, usd } from "@/lib/utils";
+import type { ChainId } from "@/lib/chain";
+import { sameMint } from "@/lib/chain";
+import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
+import { tapeRead } from "@/lib/market/tape";
+import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
+import type {
+  BotConfig,
+  Catalyst,
+  MarketRegime,
+  ResearchThesis,
+  ScoredCandidate,
+  TechnicalSnapshot,
+  TokenCandidate,
+} from "@/lib/types";
+import { snapshotTechnical, technicalFromFlows } from "@/lib/trading/signals";
+import { usd } from "@/lib/utils";
 import { scoreCandidate, screenCandidate } from "./scoring";
 
 function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number, maxUnknown: number): boolean {
@@ -81,26 +94,41 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     c.flows.h24.buys + c.flows.h24.sells > 0 ? c.flows.h24.buys / (c.flows.h24.buys + c.flows.h24.sells) : null;
   const missing: string[] = [];
   if (mc === null) missing.push("Circulating market cap");
+  if ((c.sector === "LST" || c.sector === "Perps" || c.sector === "Lending") && !(c.apyPct && c.apyPct > 0)) {
+    missing.push("Confirmed APY for this mint");
+  }
   if (fdv === null) missing.push("FDV");
   missing.push("Official unlock / vesting schedule");
   missing.push("Protocol revenue / token fee switch");
   missing.push("Holder concentration and insider wallets");
   missing.push("Audited token utility beyond pool tape");
 
-  const coreThesis = c.watchlist
-    ? `${c.name} is a liquid Solana ${c.sector.toLowerCase()} name. The desk is looking for short-horizon dislocation between live usage (volume, unique takers, reserves) and the last 24h price, not a multi-year venture story.`
-    : `${c.symbol} screened into the book from live Solana pool data. The only claim we can defend is that current liquidity and flow are strong enough to study — not that the token is fundamentally cheap.`;
+  const path =
+    c.mint === SOL_MINT
+      ? "A confirmed long is a Jupiter perp at 5x, or 10x when the signal is strong, once the key has $10. Below that it is a spot bid."
+      : c.mint === ZBCN_MINT
+        ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. Jupiter lists no ZBCN perp, so that collateral is a Zebec spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
+        : sameMint(c.mint, WCRO_MINT)
+          ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. This desk has no CRO perp, so that collateral is a CRO spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
+          : "A confirmed long is a spot bid.";
+  const coreThesis = `${tapeRead(c.symbol, c.flows.m5.priceChangePct, c.flows.m15.priceChangePct, c.flows.h1.priceChangePct)} ${techLine(c)} ${path} Reserves ${usd(c.liquidityUsd)}, 24h volume ${usd(c.volume24hUsd)}.`;
 
-  const whyMispriced = c.watchlist
-    ? `Majors often get ignored when tape chases new launches. If usage is intact while 24h performance is ${c.flows.h24.priceChangePct.toFixed(1)}%, the short-term market may be treating it as leftover beta instead of a functioning venue.`
-    : `New or mid-cap Solana names are usually priced as lottery tickets. ${c.symbol} only stays on the desk if reserves (${usd(c.liquidityUsd)}) and 24h volume (${usd(c.volume24hUsd)}) are real. That still does not mean the float is clean.`;
+  const m15Now = c.flows.m15.priceChangePct;
+  const fifteen = m15Now < 0 ? "red" : m15Now < 0.1 ? "flat" : "green";
+  const whyMispriced =
+    fifteen === "green"
+      ? `${c.symbol} has ${usd(c.volume24hUsd)} of 24h volume while the 15m is already green. The long is that continuation with a stop. It is not a claim that the token is cheap versus a model.`
+      : `${c.symbol} still has ${usd(c.liquidityUsd)} in reserves and ${usd(c.volume24hUsd)} of 24h volume, and the 15m tape is ${fifteen}. A red or flat chart is not a discount. The book waits for a green 15m.`;
 
   const fundamental = [
-    `Venue ${c.dex}, quoted vs ${c.quoteSymbol}.`,
+    `Pool on ${venueLabel(venueForDex(c.dex))} (${c.dex}), quoted vs ${c.quoteSymbol}.`,
     c.watchlist ? "Mapped to a known Solana protocol on the internal watchlist." : "Not on the conservative watchlist — treat as tape-first.",
     `24h unique takers ${ (c.flows.h24.buyers + c.flows.h24.sellers).toLocaleString() }.`,
     mc ? `Reported market cap ${usd(mc)}.` : "Market cap not published by GeckoTerminal for this pool.",
-  ];
+    c.apyPct && c.apyPct > 0
+      ? `Live APY ${c.apyPct.toFixed(2)}% from ${c.apySources?.join(", ") || "a public yield feed"}.`
+      : null,
+  ].filter((line): line is string => Boolean(line));
 
   const onchain = [
     `24h pool volume ${usd(c.volume24hUsd)} against reserves ${usd(c.liquidityUsd)}.`,
@@ -108,7 +136,12 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     `1h change ${c.flows.h1.priceChangePct.toFixed(2)}% on ${usd(c.flows.h1.volumeUsd)} volume.`,
     c.ageHours !== null ? `Oldest observed pool age ${c.ageHours.toFixed(1)} hours.` : "Pool age unavailable.",
     techLine(c),
-  ];
+    c.priceAgreement === "split"
+      ? "Independent price feeds disagree. The desk keeps the GeckoTerminal mark and will not open a new ticket on it."
+      : c.priceAgreement === "agree"
+        ? `Mark cross-checked by ${c.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price")).join(", ")}.`
+        : null,
+  ].filter((line): line is string => Boolean(line));
 
   const tokenomics = [
     fdv && mc ? `FDV ${usd(fdv)} vs circulating ${usd(mc)} (${(fdv / mc).toFixed(2)}x).` : "FDV/circ not fully available.",
@@ -127,11 +160,9 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     ? `${c.name} competes with other Solana ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
     : `${c.symbol} has no demonstrated moat in this dataset. Competitors are every other launch with deeper liquidity or a more credible float.`;
 
-  const bull = c.watchlist
-    ? `Usage stays elevated, SOL beta remains constructive (${regime.stance}), and the token holds value capture optionality. Short-term: trend-following longs work with defined stops.`
-    : `Liquidity does not vanish after the move, unique takers stay two-sided, and price mean-reverts or trends cleanly enough to scalp.`;
-  const base = `Choppy two-sided tape. The bot takes small, time-boxed trades and skips if spreads or slippage blow out.`;
-  const bear = `Reserves drain, unique sellers dominate, or the 24h move was wash/incentive flow. Token goes to zero optionality; paper book stops out.`;
+  const bull = `${c.symbol} 15m stays green, the 5m holds its short average, and reserves stay near ${usd(c.liquidityUsd)}. Regime is ${regime.stance}. ${path}`;
+  const base = `The 15m chops around flat. The bot skips until that window is green and the 5m agrees, then takes one ticket.`;
+  const bear = `The 15m stays red, or reserves fall under $${Math.max(80_000, c.liquidityUsd * 0.45).toFixed(0)}. No new long. An open ticket scratches when the 5m and the 15m both flip.`;
 
   return {
     id: c.mint,
@@ -187,88 +218,96 @@ function techLine(c: ScoredCandidate): string {
   const t = c.technical;
   const bits = [
     t.rsi14 !== null ? `RSI14 ${t.rsi14.toFixed(1)}` : null,
-    t.ema9 !== null && t.ema21 !== null ? `EMA9/21 ${t.ema9 > t.ema21 ? "bull" : "bear"}` : null,
+    t.ema9 !== null && t.ema21 !== null
+      ? `EMA9/21 ${t.ema9 > t.ema21 ? "bull" : t.ema9 < t.ema21 ? "bear" : "flat"}`
+      : null,
     t.extensionPct !== null ? `VWAP ext ${t.extensionPct.toFixed(2)}%` : null,
     t.atrPct !== null ? `ATR ${t.atrPct.toFixed(2)}%` : null,
   ].filter(Boolean);
   return bits.length ? `5m structure: ${bits.join(", ")}.` : "5m structure unavailable this cycle.";
 }
 
-let researchCache:
-  | {
-      at: number;
-      value: {
-        regime: MarketRegime;
-        research: ResearchThesis[];
-        universeSize: number;
-        eliminated: number;
-        candidates: ScoredCandidate[];
-      };
-    }
-  | null = null;
-
-const RESEARCH_CACHE_MS = 45_000;
-
-export function clearResearchCache(): void {
-  researchCache = null;
-}
-
-export async function runResearch(
-  config: BotConfig,
-  force = false,
-): Promise<{
+interface ResearchValue {
   regime: MarketRegime;
   research: ResearchThesis[];
   universeSize: number;
   eliminated: number;
   candidates: ScoredCandidate[];
-}> {
-  if (!force && researchCache && Date.now() - researchCache.at < RESEARCH_CACHE_MS) {
-    return researchCache.value;
+}
+
+const researchCache: Record<ChainId, { at: number; key: string; value: ResearchValue } | null> = {
+  solana: null,
+  cronos: null,
+};
+
+const RESEARCH_CACHE_MS = 6_000;
+
+function structureFor(candidate: TokenCandidate): TechnicalSnapshot {
+  const candles = cachedOhlcv(candidate.poolAddress);
+  if (candles && candles.length >= 20) return snapshotTechnical(candles);
+  return technicalFromFlows(candidate);
+}
+
+export function clearResearchCache(chain?: ChainId): void {
+  if (!chain) {
+    researchCache.solana = null;
+    researchCache.cronos = null;
+    return;
   }
-  const market = await loadMarket();
+  researchCache[chain] = null;
+}
+
+export async function runResearch(
+  config: BotConfig,
+  force = false,
+  chain: ChainId = "solana",
+): Promise<ResearchValue> {
+  const key = `${chain}|${screenKey(config)}`;
+  const cached = researchCache[chain];
+  if (!force && cached && cached.key === key && Date.now() - cached.at < RESEARCH_CACHE_MS) {
+    return cached.value;
+  }
+  const market = await loadMarket(false, chain);
   const screen = {
     minLiquidityUsd: config.minLiquidityUsd,
     minVolume24hUsd: config.minVolume24hUsd,
     minAgeHours: config.minAgeHours,
     allowMemes: config.allowMemes,
+    venues: chain === "cronos" ? ["vvs"] : config.venues,
   };
 
   const passed: TokenCandidate[] = [];
   let eliminated = 0;
-  for (const c of market.candidates) {
+  const book = market.candidates.filter((c) => isActiveBook(c.mint, chain));
+  for (const c of book) {
     if (screenCandidate(c, screen)) {
       eliminated += 1;
       continue;
     }
     passed.push(c);
   }
+  const unique = collapseMints(passed);
 
-  const watchPassed = passed.filter((c) => c.watchlist);
-  const otherPassed = passed
+  const watchPassed = unique.filter((c) => c.watchlist);
+  const otherPassed = unique
     .filter((c) => !c.watchlist)
     .map((c) => ({ c, heat: c.volume24hUsd + c.liquidityUsd * 2 }))
     .sort((a, b) => b.heat - a.heat)
     .map((x) => x.c);
-  const rankedSeed = [...watchPassed, ...otherPassed].slice(0, 22);
-
-  const scored = await mapPool(rankedSeed, 4, async (c) => {
-    try {
-      const candles = await fetchOhlcv(c.poolAddress, 70);
-      return scoreCandidate(c, snapshotTechnical(candles));
-    } catch {
-      return scoreCandidate(c, {
-        rsi14: null,
-        ema9: null,
-        ema21: null,
-        vwap: null,
-        atrPct: null,
-        volumeZ: null,
-        lastClose: c.priceUsd,
-        extensionPct: null,
-      });
-    }
-  });
+  const seen = new Set<string>();
+  const rankedSeed: TokenCandidate[] = [];
+  const pushSeed = (row: TokenCandidate) => {
+    if (seen.has(row.mint)) return;
+    seen.add(row.mint);
+    rankedSeed.push(row);
+  };
+  for (const row of watchPassed) pushSeed(row);
+  for (const row of otherPassed) {
+    if (row.sector !== "Unknown" && row.sector !== "Meme" && row.flows.m15.priceChangePct >= 0.1) pushSeed(row);
+  }
+  for (const row of otherPassed) pushSeed(row);
+  const seed = rankedSeed.slice(0, 20);
+  const scored = seed.map((c) => scoreCandidate(c, structureFor(c)));
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);
@@ -277,12 +316,32 @@ export async function runResearch(
   const value = {
     regime: market.regime,
     research,
-    universeSize: market.candidates.length,
+    universeSize: book.length,
     eliminated,
     candidates: scored,
   };
-  researchCache = { at: Date.now(), value };
+  researchCache[chain] = { at: Date.now(), key, value };
   return value;
+}
+
+function screenKey(config: BotConfig): string {
+  return [
+    config.minLiquidityUsd,
+    config.minVolume24hUsd,
+    config.minAgeHours,
+    config.allowMemes ? 1 : 0,
+    venueSummary(config.venues ?? []),
+    [...(config.venues ?? [])].slice().sort().join(","),
+  ].join("|");
+}
+
+function collapseMints(rows: TokenCandidate[]): TokenCandidate[] {
+  const best = new Map<string, TokenCandidate>();
+  for (const row of rows) {
+    const prev = best.get(row.mint);
+    if (!prev || row.liquidityUsd > prev.liquidityUsd) best.set(row.mint, row);
+  }
+  return [...best.values()];
 }
 
 export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): string[] {

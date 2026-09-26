@@ -1,6 +1,24 @@
+import type { ChainId } from "@/lib/chain";
+import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
-import { fetchJson, hoursSince, mapPool, num, nullableNum, uniqueBy } from "@/lib/utils";
-import { classifySector, isQuote, isStable, SOL_MINT, watchMeta, WATCHLIST } from "./universe";
+import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
+import { liveMajors } from "./marks";
+import { crossCheck, type YieldQuote } from "./quotes";
+import { venueForDex } from "./venues";
+import { withCandleTape } from "./tape";
+import {
+  bookMints,
+  bookPools,
+  bookTokens,
+  classifySector,
+  geckoNetwork,
+  isActiveBook,
+  isQuote,
+  isStable,
+  SOL_MINT,
+  SOL_USDC_POOLS,
+  watchMeta,
+} from "./universe";
 
 const TIMEFRAMES: Timeframe[] = ["m5", "m15", "m30", "h1", "h6", "h24"];
 
@@ -52,19 +70,58 @@ interface CgSimple {
   };
 }
 
-let cache:
-  | {
-      at: number;
-      candidates: TokenCandidate[];
-      regime: MarketRegime;
-    }
-  | null = null;
+interface MarketSnap {
+  at: number;
+  candidates: TokenCandidate[];
+  regime: MarketRegime;
+}
 
-const CACHE_MS = 25_000;
+interface MarketSlot {
+  cache: MarketSnap | null;
+  lastBook: Map<string, TokenCandidate>;
+  inflight: Promise<{ candidates: TokenCandidate[]; regime: MarketRegime; scanned: number }> | null;
+}
+
+function blankMarket(): MarketSlot {
+  return { cache: null, lastBook: new Map(), inflight: null };
+}
+
+const markets: Record<ChainId, MarketSlot> = {
+  solana: blankMarket(),
+  cronos: blankMarket(),
+};
+
+function bookKey(mint: string): string {
+  return mint.startsWith("0x") || mint.startsWith("0X") ? mint.toLowerCase() : mint;
+}
+
+/** A missed GeckoTerminal read must not erase the last print on this chain. */
+function bookComplete(rows: TokenCandidate[], chain: ChainId): boolean {
+  return bookMints(chain).every((mint) => rows.some((row) => sameMint(row.mint, mint)));
+}
+
+function fillActiveBook(rows: TokenCandidate[], chain: ChainId): TokenCandidate[] {
+  const slot = markets[chain];
+  const out = [...rows];
+  for (const mint of bookMints(chain)) {
+    const row = out.find((candidate) => sameMint(candidate.mint, mint));
+    const key = bookKey(mint);
+    if (row) slot.lastBook.set(key, row);
+    else {
+      const prev = slot.lastBook.get(key);
+      if (prev) out.push(prev);
+    }
+  }
+  return out;
+}
+
+const CACHE_MS = 6_000;
 
 function mintFromGtId(id: string | undefined): string {
   if (!id) return "";
-  return id.startsWith("solana_") ? id.slice("solana_".length) : id;
+  const cut = id.indexOf("_");
+  if (cut <= 0) return id;
+  return id.slice(cut + 1);
 }
 
 function flowsFromPool(attrs: GtPool["attributes"]): Record<Timeframe, FlowWindow> {
@@ -91,7 +148,7 @@ function tokenMap(included: GtToken[] | undefined): Map<string, GtToken> {
   return map;
 }
 
-function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string): TokenCandidate | null {
+function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string, chain: ChainId): TokenCandidate | null {
   const baseId = pool.relationships?.base_token?.data?.id;
   const quoteId = pool.relationships?.quote_token?.data?.id;
   const base = tokens.get(baseId ?? "");
@@ -105,13 +162,13 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string)
   if (quoteSymbol && !isQuote(quoteSymbol)) return null;
   if (mint === SOL_MINT && !quoteMint) return null;
 
-  const watch = watchMeta(mint);
+  const watch = watchMeta(mint, chain);
   const name = watch?.name || base?.attributes.name || symbol;
   const created = pool.attributes.pool_created_at;
 
   return {
     id: mint,
-    chain: "solana",
+    chain,
     symbol,
     name,
     mint,
@@ -129,35 +186,75 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string)
     flows: flowsFromPool(pool.attributes),
     watchlist: Boolean(watch),
     sources: [source],
+    priceAgreement: "thin",
+    apyPct: null,
+    apySources: [],
   };
 }
 
-async function gtPools(path: string, source: string): Promise<TokenCandidate[]> {
+async function gtPools(path: string, source: string, chain: ChainId): Promise<TokenCandidate[]> {
   const url = `https://api.geckoterminal.com/api/v2/${path}${path.includes("?") ? "&" : "?"}include=base_token,quote_token`;
-  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 12_000 });
+  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 6_000, retries: 1 });
   const tokens = tokenMap(json.included);
-  return json.data.map((p) => toCandidate(p, tokens, source)).filter((x): x is TokenCandidate => Boolean(x));
+  return json.data.map((p) => toCandidate(p, tokens, source, chain)).filter((x): x is TokenCandidate => Boolean(x));
 }
 
-async function watchlistPools(): Promise<TokenCandidate[]> {
-  const results = await mapPool(WATCHLIST.slice(0, 12), 3, async (t) => {
+async function gtPool(address: string, source: string, chain: ChainId): Promise<TokenCandidate | null> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${address}?include=base_token,quote_token`;
+  const json = await fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 });
+  return toCandidate(json.data, tokenMap(json.included), source, chain);
+}
+
+function stampWatch(row: TokenCandidate, mint: string, chain: ChainId): TokenCandidate {
+  const meta = watchMeta(mint, chain);
+  if (!meta) return { ...row, watchlist: true };
+  return { ...row, watchlist: true, symbol: meta.symbol, name: meta.name, sector: meta.sector, mint: meta.mint };
+}
+
+async function poolsForMint(mint: string, symbol: string, chain: ChainId): Promise<TokenCandidate[]> {
+  const pools = await gtPools(
+    `networks/${geckoNetwork(chain)}/tokens/${mint}/pools?page=1`,
+    `geckoterminal:token:${symbol}`,
+    chain,
+  );
+  return pools.filter((p) => sameMint(p.mint, mint)).map((p) => stampWatch(p, mint, chain));
+}
+
+async function pinnedPool(mint: string, symbol: string, pin: string, chain: ChainId): Promise<TokenCandidate | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const pools = await gtPools(
-        `networks/solana/tokens/${t.mint}/pools?page=1`,
-        `geckoterminal:token:${t.symbol}`,
-      );
-      return pools
-        .filter((p) => p.mint === t.mint)
-        .map((p) => ({ ...p, watchlist: true, symbol: t.symbol, name: t.name, sector: t.sector }));
+      const row = await gtPool(pin, `geckoterminal:pool:${symbol}`, chain);
+      if (row && sameMint(row.mint, mint)) return stampWatch(row, mint, chain);
+      return null;
     } catch {
-      return [] as TokenCandidate[];
+      if (attempt === 0) await sleep(400);
     }
-  });
-  const pools = results.flat();
+  }
+  return null;
+}
+
+async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
+  const book = bookTokens(chain);
+  const pools: TokenCandidate[] = [];
+  for (const t of book) {
+    if (pools.length) await sleep(350);
+    const pin = bookPools(chain).find((row) => sameMint(row.mint, t.mint))?.pool;
+    const row = pin ? await pinnedPool(t.mint, t.symbol, pin, chain) : null;
+    if (row) {
+      pools.push(row);
+      continue;
+    }
+    try {
+      pools.push(...(await poolsForMint(t.mint, t.symbol, chain)));
+    } catch {
+      // This name waits for the next tick.
+    }
+  }
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
-    const prev = best.get(p.mint);
-    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(p.mint, p);
+    const key = `${p.mint}:${venueForDex(p.dex)}`;
+    const prev = best.get(key);
+    if (!prev || p.liquidityUsd > prev.liquidityUsd) best.set(key, p);
   }
   return [...best.values()];
 }
@@ -166,9 +263,10 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
   const map = new Map<string, TokenCandidate>();
   for (const group of groups) {
     for (const c of group) {
-      const prev = map.get(c.mint);
+      const key = `${c.mint}:${venueForDex(c.dex)}`;
+      const prev = map.get(key);
       if (!prev) {
-        map.set(c.mint, c);
+        map.set(key, c);
         continue;
       }
       const richer = c.liquidityUsd > prev.liquidityUsd ? c : prev;
@@ -179,61 +277,168 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
         richer.name = prev.name;
         richer.symbol = prev.symbol;
       }
-      map.set(c.mint, richer);
+      map.set(key, richer);
     }
   }
   return [...map.values()];
 }
 
-export async function fetchOhlcv(poolAddress: string, limit = 80): Promise<Candle[]> {
-  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=${limit}`;
+const ohlcvCache = new Map<string, { at: number; rows: Candle[] }>();
+const ohlcvMiss = new Map<string, number>();
+const OHLCV_TTL_MS = 45_000;
+const OHLCV_STALE_MS = 20 * 60_000;
+const OHLCV_MISS_MS = 20_000;
+const OHLCV_PARALLEL = 2;
+let ohlcvActive = 0;
+const ohlcvWaiters: (() => void)[] = [];
+
+function acquireOhlcv(): Promise<void> {
+  if (ohlcvActive < OHLCV_PARALLEL) {
+    ohlcvActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    ohlcvWaiters.push(() => {
+      ohlcvActive += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseOhlcv(): void {
+  ohlcvActive -= 1;
+  const next = ohlcvWaiters.shift();
+  if (next) next();
+}
+
+function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
+  return acquireOhlcv().then(async () => {
+    try {
+      return await task();
+    } finally {
+      releaseOhlcv();
+    }
+  });
+}
+
+async function fetchOhlcvOnce(
+  poolAddress: string,
+  timeframe: "minute" | "hour",
+  aggregate: number,
+  limit: number,
+  chain: ChainId,
+): Promise<Candle[]> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
   const json = await fetchJson<{
     data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 10_000 });
+  }>(url, { timeoutMs: 6_000, retries: 1 });
   const list = json.data?.attributes?.ohlcv_list ?? [];
   return list
     .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
     .sort((a, b) => a.time - b.time);
 }
 
+function staleCandles(poolAddress: string): Candle[] | null {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit?.rows.length && Date.now() - hit.at < OHLCV_STALE_MS) return hit.rows;
+  return null;
+}
+
+export function cachedOhlcv(poolAddress: string): Candle[] | null {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit?.rows.length) return hit.rows;
+  return null;
+}
+
+export async function fetchOhlcv(poolAddress: string, limit = 80, chain: ChainId = "solana"): Promise<Candle[]> {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit && Date.now() - hit.at < OHLCV_TTL_MS && hit.rows.length) return hit.rows;
+  const missedAt = ohlcvMiss.get(poolAddress);
+  if (missedAt && Date.now() - missedAt < OHLCV_MISS_MS) {
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
+    throw new Error(`429 cooling down for ${poolAddress}`);
+  }
+  try {
+    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, "minute", 5, Math.min(limit, 70), chain));
+    if (rows.length) {
+      ohlcvCache.set(poolAddress, { at: Date.now(), rows });
+      ohlcvMiss.delete(poolAddress);
+      return rows;
+    }
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
+    return rows;
+  } catch (error) {
+    ohlcvMiss.set(poolAddress, Date.now());
+    const stale = staleCandles(poolAddress);
+    if (stale) return stale;
+    throw error;
+  }
+}
+
+export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): Promise<Candle[]> {
+  const ordered = uniqueBy([...poolAddresses.filter(Boolean), ...SOL_USDC_POOLS], (p) => p);
+  for (const pool of ordered) {
+    const hit = ohlcvCache.get(pool);
+    if (hit?.rows.length && Date.now() - hit.at < OHLCV_TTL_MS) return hit.rows;
+  }
+  const retry = uniqueBy([ordered[0], ...SOL_USDC_POOLS], (p) => p).filter(Boolean);
+  for (const pool of retry) {
+    try {
+      const rows = await fetchOhlcv(pool, limit);
+      if (rows.length) return rows;
+    } catch {
+      // Next pool — research may have already 429'd this origin.
+    }
+  }
+  return [];
+}
+
+const REGIME_FEED = { timeoutMs: 3_500, retries: 1 };
+
 async function fetchRegime(): Promise<MarketRegime> {
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
     fetchJson<CgSimple>(
       "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true",
+      REGIME_FEED,
     ),
-    fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global"),
-    fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1"),
-    fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains"),
+    fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global", REGIME_FEED),
+    fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1", REGIME_FEED),
+    fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains", REGIME_FEED),
     fetchJson<{ total24h?: number; change_1d?: number }>(
       "https://api.llama.fi/overview/dexs/solana?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true",
+      REGIME_FEED,
     ),
   ]);
 
   const px = prices.status === "fulfilled" ? prices.value : null;
+  const needFallback = !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(px?.solana?.usd);
+  const fallback = needFallback ? await liveMajors().catch(() => null) : null;
   const g = global.status === "fulfilled" ? global.value.data : null;
   const fear = fng.status === "fulfilled" ? fng.value.data?.[0] : null;
   const chainList = chains.status === "fulfilled" ? chains.value : [];
   const solChain = chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
-  const btcPx = nullableNum(px?.bitcoin?.usd);
-  const ethPx = nullableNum(px?.ethereum?.usd);
-  const solPx = nullableNum(px?.solana?.usd);
+  const btcPx = nullableNum(px?.bitcoin?.usd) ?? fallback?.btc.price ?? null;
+  const ethPx = nullableNum(px?.ethereum?.usd) ?? fallback?.eth.price ?? null;
+  const solPx = nullableNum(px?.solana?.usd) ?? fallback?.sol.price ?? null;
   const btc = {
     price: btcPx ?? 0,
-    change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change),
+    change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change ?? fallback?.btc.change24h),
     marketCap: num(px?.bitcoin?.usd_market_cap),
     volume24h: num(px?.bitcoin?.usd_24h_vol),
   };
   const eth = {
     price: ethPx ?? 0,
-    change24h: ethPx === null ? 0 : num(px?.ethereum?.usd_24h_change),
+    change24h: ethPx === null ? 0 : num(px?.ethereum?.usd_24h_change ?? fallback?.eth.change24h),
     marketCap: num(px?.ethereum?.usd_market_cap),
     volume24h: num(px?.ethereum?.usd_24h_vol),
   };
   const sol = {
     price: solPx ?? 0,
-    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change),
+    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change ?? fallback?.sol.change24h),
     marketCap: num(px?.solana?.usd_market_cap),
     volume24h: num(px?.solana?.usd_24h_vol),
   };
@@ -307,33 +512,84 @@ async function fetchRegime(): Promise<MarketRegime> {
         : stance === "defensive"
           ? ["Capital preservation", "SOL/USDC only", "Avoid illiquid launches"]
           : ["Liquid majors", "Mean-reversion fades", "Research over tape-chasing"],
+    yields: [],
   };
 }
 
-export async function loadMarket(force = false): Promise<{
+export async function loadMarket(force = false, chain: ChainId = "solana"): Promise<{
   candidates: TokenCandidate[];
   regime: MarketRegime;
   scanned: number;
 }> {
-  if (!force && cache && Date.now() - cache.at < CACHE_MS) {
-    return { candidates: cache.candidates, regime: cache.regime, scanned: cache.candidates.length };
+  const slot = markets[chain];
+  if (!force && slot.cache && Date.now() - slot.cache.at < CACHE_MS) {
+    return { candidates: slot.cache.candidates, regime: slot.cache.regime, scanned: slot.cache.candidates.length };
   }
+  if (!force && slot.inflight) return slot.inflight;
 
-  const [regime, trending, newPools, topVol] = await Promise.all([
-    fetchRegime(),
-    gtPools("networks/solana/trending_pools?page=1", "geckoterminal:trending").catch(() => [] as TokenCandidate[]),
-    gtPools("networks/solana/new_pools?page=1", "geckoterminal:new").catch(() => [] as TokenCandidate[]),
-    gtPools("networks/solana/pools?page=1&sort=h24_volume_usd_desc", "geckoterminal:volume").catch(
-      () => [] as TokenCandidate[],
-    ),
-  ]);
-  const watch = await watchlistPools().catch(() => [] as TokenCandidate[]);
-
-  const candidates = mergeCandidates([watch, trending, topVol, newPools]);
-  cache = { at: Date.now(), candidates, regime };
-  return { candidates, regime, scanned: candidates.length };
+  const run = loadMarketOnce(chain);
+  slot.inflight = run;
+  void run.finally(() => {
+    if (slot.inflight === run) slot.inflight = null;
+  });
+  return run;
 }
 
-export function invalidateMarketCache(): void {
-  cache = null;
+async function warmBookCandles(poolAddresses: string[], chain: ChainId): Promise<void> {
+  for (const pool of poolAddresses) {
+    await fetchOhlcv(pool, 48, chain).catch(() => [] as Candle[]);
+  }
+}
+
+async function loadMarketOnce(chain: ChainId): Promise<{
+  candidates: TokenCandidate[];
+  regime: MarketRegime;
+  scanned: number;
+}> {
+  const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
+  const regimePromise = fetchRegime();
+  let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
+  if (!bookComplete(merged, chain)) {
+    for (const mint of bookMints(chain)) {
+      if (merged.some((candidate) => sameMint(candidate.mint, mint))) continue;
+      const meta = watchMeta(mint, chain);
+      const pin = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+      if (!meta || !pin) continue;
+      await sleep(350);
+      const row = await pinnedPool(mint, meta.symbol, pin, chain);
+      if (row) merged.push(row);
+    }
+  }
+  merged = fillActiveBook(merged, chain);
+  const candlePools = uniqueBy(
+    merged.filter((candidate) => candidate.poolAddress),
+    (candidate) => candidate.mint,
+  ).map((candidate) => candidate.poolAddress);
+  const [regime, crossed] = await Promise.all([
+    regimePromise,
+    crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
+    warmBookCandles(candlePools, chain),
+  ]);
+  const candidates = fillActiveBook(
+    crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
+    chain,
+  );
+  const stamped = withYields(regime, crossed.yields);
+  if (bookComplete(candidates, chain)) markets[chain].cache = { at: Date.now(), candidates, regime: stamped };
+  return { candidates, regime: stamped, scanned: candidates.length };
+}
+
+function withYields(regime: MarketRegime, yields: YieldQuote[]): MarketRegime {
+  if (!yields.length) return { ...regime, yields };
+  const line = `Live APY: ${yields.map((y) => `${y.label} ${y.apyPct.toFixed(2)}% (${y.source})`).join("; ")}.`;
+  return { ...regime, yields, overview: `${regime.overview} ${line}` };
+}
+
+export function invalidateMarketCache(chain?: ChainId): void {
+  if (!chain) {
+    markets.solana.cache = null;
+    markets.cronos.cache = null;
+    return;
+  }
+  markets[chain].cache = null;
 }

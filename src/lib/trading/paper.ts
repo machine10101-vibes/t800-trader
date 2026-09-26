@@ -1,6 +1,7 @@
-import type { AppState, Position, Signal, Trade } from "@/lib/types";
+import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
-import { markPosition, unrealizedPnl } from "./risk";
+import { rememberClose } from "./learn";
+import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl } from "./risk";
 
 const SLIP_BPS = 8;
 
@@ -10,10 +11,61 @@ export function fillPrice(signalPrice: number, side: "long" | "short", action: "
   return side === "long" ? signalPrice - slip : signalPrice + slip;
 }
 
-export function openPosition(state: AppState, signal: Signal, qty: number): AppState {
-  const price = fillPrice(signal.price, signal.side, "open");
-  const notional = qty * price;
-  if (notional > state.portfolio.cashUsd) return state;
+export function positionValue(position: Position): number {
+  return positionEquity(position);
+}
+
+export function exitProceeds(
+  position: Pick<Position, "side" | "qty" | "entryPrice" | "leverage" | "collateralUsd">,
+  fill: number,
+  pnlUsd: number,
+): number {
+  const lev = position.leverage ?? 1;
+  if (lev > 1 && position.side === "long") {
+    const margin = position.collateralUsd ?? (position.qty * position.entryPrice) / lev;
+    return Math.max(0, margin + pnlUsd);
+  }
+  if (position.side === "long") return position.qty * fill;
+  return position.qty * position.entryPrice + pnlUsd;
+}
+
+function syncBook(state: AppState): AppState {
+  const equity = state.portfolio.cashUsd + state.positions.reduce((acc, p) => acc + positionValue(p), 0);
+  const unreal = state.positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
+  return {
+    ...state,
+    portfolio: {
+      ...state.portfolio,
+      equityUsd: equity,
+      peakEquity: Math.max(state.portfolio.peakEquity, equity),
+      unrealizedPnlUsd: unreal,
+      dayPnlUsd: equity - state.portfolio.dayStartEquity,
+    },
+  };
+}
+
+export function openPosition(
+  state: AppState,
+  signal: Signal,
+  qty: number,
+  stance?: MarketRegime["stance"],
+  stamp?: ChainFill,
+): AppState {
+  const signed = Boolean(stamp?.signature);
+  const price = signed && stamp ? stamp.price : fillPrice(signal.price, signal.side, "open");
+  const room = state.portfolio.cashUsd * 0.98;
+  const leverage = stamp?.leverage && stamp.leverage > 1 ? stamp.leverage : 1;
+  let filledQty = signed && stamp ? stamp.qty : qty;
+  let exposure = filledQty * price;
+  let collateral = leverage > 1 ? (stamp?.collateralUsd ?? exposure / leverage) : exposure;
+  if (!signed && collateral > room) {
+    if (room < MIN_TICKET_USD) return state;
+    collateral = room;
+    exposure = collateral * leverage;
+    filledQty = price > 0 ? exposure / price : 0;
+  }
+  qty = filledQty;
+  const notional = exposure;
 
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
@@ -25,6 +77,7 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     mint: signal.mint,
     symbol: signal.symbol,
     poolAddress: signal.poolAddress,
+    sector: signal.sector ?? "Unknown",
     side: signal.side,
     qty,
     entryPrice: price,
@@ -35,9 +88,18 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     lastUpdate: new Date().toISOString(),
     reason: signal.reason,
     researchScore: signal.researchScore,
+    entryConfidence: signal.confidence,
+    entryStance: stance,
     highWater: price,
     lowWater: price,
     notional,
+    initialStop: stop,
+    scaled: false,
+    signature: stamp?.signature || undefined,
+    tokenDecimals: stamp?.tokenDecimals,
+    leverage: leverage > 1 ? leverage : undefined,
+    collateralUsd: leverage > 1 ? collateral : undefined,
+    positionPubkey: stamp?.positionPubkey,
   };
 
   const trade: Trade = {
@@ -52,28 +114,35 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     pnlPct: null,
     reason: signal.reason,
     at: new Date().toISOString(),
-    note: signal.thesis,
+    note: `${leverage > 1 ? `${leverage}x ` : ""}${stamp?.signature ? `${signal.thesis} Wallet tx ${stamp.signature}.` : signal.thesis}`,
+    signature: stamp?.signature || undefined,
   };
 
-  return {
+  return syncBook({
     ...state,
     portfolio: {
       ...state.portfolio,
-      cashUsd: state.portfolio.cashUsd - notional,
+      cashUsd: state.portfolio.cashUsd - collateral,
       tradeCount: state.portfolio.tradeCount + 1,
     },
     positions: [position, ...state.positions],
     trades: [trade, ...state.trades].slice(0, 250),
-  };
+  });
 }
 
-export function closePosition(state: AppState, positionId: string, priceHint: number, reason: Trade["reason"]): AppState {
+export function closePosition(
+  state: AppState,
+  positionId: string,
+  priceHint: number,
+  reason: Trade["reason"],
+  signature?: string,
+): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
-  const price = fillPrice(priceHint, pos.side, "close");
+  const price = signature ? priceHint : fillPrice(priceHint, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
-  const proceeds = pos.qty * price;
+  const proceeds = exitProceeds(pos, price, pnl.usd);
   const trade: Trade = {
     id: id("tr"),
     mint: pos.mint,
@@ -86,15 +155,17 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
     pnlPct: pnl.pct,
     reason,
     at: new Date().toISOString(),
-    note: `${reason} exit from ${pos.reason} entry`,
+    note: signature ? `${reason} exit from ${pos.reason} entry. Wallet tx ${signature}.` : `${reason} exit from ${pos.reason} entry`,
+    signature,
   };
 
   const realized = state.portfolio.realizedPnlUsd + pnl.usd;
   const winCount = state.portfolio.winCount + (pnl.usd >= 0 ? 1 : 0);
   const lossCount = state.portfolio.lossCount + (pnl.usd < 0 ? 1 : 0);
+  const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: reason });
 
-  return {
-    ...state,
+  return syncBook({
+    ...learned,
     portfolio: {
       ...state.portfolio,
       cashUsd: state.portfolio.cashUsd + proceeds,
@@ -105,7 +176,7 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
     },
     positions: state.positions.filter((p) => p.id !== positionId),
     trades: [trade, ...state.trades].slice(0, 250),
-  };
+  });
 }
 
 export function markBook(state: AppState, prices: Map<string, number>): AppState {
@@ -114,7 +185,7 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
     return markPosition(p, px);
   });
   const unreal = positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
-  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + p.qty * p.markPrice, 0);
+  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + positionValue(p), 0);
   const peak = Math.max(state.portfolio.peakEquity, equity);
   return {
     ...state,
@@ -126,6 +197,105 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
       unrealizedPnlUsd: unreal,
       dayPnlUsd: equity - state.portfolio.dayStartEquity,
     },
+  };
+}
+
+export function updateStop(state: AppState, positionId: string, stopPrice: number): AppState {
+  return {
+    ...state,
+    positions: state.positions.map((p) => (p.id === positionId ? { ...p, stopPrice, lastUpdate: new Date().toISOString() } : p)),
+  };
+}
+
+export function scaleOut(
+  state: AppState,
+  positionId: string,
+  fraction = 0.5,
+  signature?: string,
+  fillPriceOverride?: number,
+): AppState {
+  const pos = state.positions.find((p) => p.id === positionId);
+  if (!pos || pos.scaled || fraction <= 0 || fraction >= 1) return state;
+  const qty = pos.qty * fraction;
+  if (qty <= 0) return state;
+  const price = fillPriceOverride ?? (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close"));
+  const marked = markPosition({ ...pos, markPrice: price, qty }, price);
+  const pnl = unrealizedPnl(marked);
+  const lev = pos.leverage ?? 1;
+  const fullMargin = lev > 1 ? (pos.collateralUsd ?? (pos.qty * pos.entryPrice) / lev) : 0;
+  const proceeds =
+    lev > 1 && pos.side === "long" ? Math.max(0, fullMargin * fraction + pnl.usd) : exitProceeds({ ...pos, qty }, price, pnl.usd);
+  const remain = pos.qty - qty;
+  const trade: Trade = {
+    id: id("tr"),
+    mint: pos.mint,
+    symbol: pos.symbol,
+    side: pos.side,
+    action: "close",
+    qty,
+    price,
+    pnlUsd: pnl.usd,
+    pnlPct: pnl.pct,
+    reason: "target",
+    at: new Date().toISOString(),
+    note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run${signature ? `. Wallet tx ${signature}.` : ""}`,
+    signature,
+  };
+  const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: "target" });
+  return syncBook({
+    ...learned,
+    portfolio: {
+      ...state.portfolio,
+      cashUsd: state.portfolio.cashUsd + proceeds,
+      realizedPnlUsd: state.portfolio.realizedPnlUsd + pnl.usd,
+      winCount: state.portfolio.winCount + (pnl.usd >= 0 ? 1 : 0),
+      lossCount: state.portfolio.lossCount + (pnl.usd < 0 ? 1 : 0),
+      tradeCount: state.portfolio.tradeCount + 1,
+    },
+    positions: state.positions.map((p) =>
+      p.id === positionId
+        ? {
+            ...p,
+            qty: remain,
+            notional: remain * p.markPrice,
+            collateralUsd: lev > 1 ? fullMargin * (1 - fraction) : p.collateralUsd,
+            scaled: true,
+            lastUpdate: new Date().toISOString(),
+          }
+        : p,
+    ),
+    trades: [trade, ...state.trades].slice(0, 250),
+  });
+}
+
+export function flattenBook(state: AppState, reason: Trade["reason"] = "manual"): AppState {
+  return state.positions.reduce((acc, pos) => closePosition(acc, pos.id, pos.markPrice, reason), state);
+}
+
+/** A red or flat 15m sold the native bag to USDC. There was no open row to close. */
+export function recordCashSale(
+  state: AppState,
+  args: { mint: string; symbol: string; qty: number; price: number; signature: string; note: string },
+): AppState {
+  const trade: Trade = {
+    id: id("tr"),
+    mint: args.mint,
+    symbol: args.symbol,
+    side: "long",
+    action: "close",
+    qty: args.qty,
+    price: args.price,
+    pnlUsd: null,
+    pnlPct: null,
+    reason: "risk-off",
+    at: new Date().toISOString(),
+    note: args.note,
+    signature: args.signature,
+  };
+  return {
+    ...state,
+    portfolio: { ...state.portfolio, tradeCount: state.portfolio.tradeCount + 1 },
+    trades: [trade, ...state.trades].slice(0, 250),
   };
 }
 
