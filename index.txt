@@ -1,7 +1,7 @@
 1:"$Sreact.fragment"
 2:I[9766,[],""]
 3:I[8924,[],""]
-4:I[2977,["956","static/chunks/3a91511d-2839e4e4861400cc.js","916","static/chunks/916-d507568bfbaeec0e.js","541","static/chunks/541-4ac4247cb1e36a87.js","974","static/chunks/app/page-3ae3c3cd70cca014.js"],"DeskApp"]
+4:I[2977,["956","static/chunks/3a91511d-2839e4e4861400cc.js","916","static/chunks/916-d507568bfbaeec0e.js","541","static/chunks/541-742a40696f3308e2.js","974","static/chunks/app/page-3ae3c3cd70cca014.js"],"DeskApp"]
 5:I[4431,[],"OutletBoundary"]
 7:I[5278,[],"AsyncMetadataOutlet"]
 9:I[4431,[],"ViewportBoundary"]
@@ -10,8 +10,8 @@ c:"$Sreact.suspense"
 e:I[7150,[],""]
 :HL["/t800-trader/_next/static/media/22a5144ee8d83bca-s.p.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/t800-trader/_next/static/media/7d4881bb7e1bf84d-s.p.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
-:HL["/t800-trader/_next/static/css/a5d0dfb85e106767.css","style"]
-0:{"P":null,"b":"pEaP6lt31npjWQ4h__3UY","p":"/t800-trader","c":["",""],"i":false,"f":[[["",{"children":["__PAGE__",{}]},"$undefined","$undefined",true],["",["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/t800-trader/_next/static/css/a5d0dfb85e106767.css","precedence":"next","crossOrigin":"$undefined","nonce":"$undefined"}]],["$","html",null,{"lang":"en","children":["$","body",null,{"className":"__variable_a2733c __variable_d80fa0 antialiased","children":["$","$L2",null,{"parallelRouterKey":"children","error":"$undefined","errorStyles":"$undefined","errorScripts":"$undefined","template":["$","$L3",null,{}],"templateStyles":"$undefined","templateScripts":"$undefined","notFound":[["$","$L4",null,{}],[]],"forbidden":"$undefined","unauthorized":"$undefined"}]}]}]]}],{"children":["__PAGE__",["$","$1","c",{"children":[["$","$L4",null,{}],null,["$","$L5",null,{"children":["$L6",["$","$L7",null,{"promise":"$@8"}]]}]]}],{},null,false]},null,false],["$","$1","h",{"children":[null,[["$","$L9",null,{"children":"$La"}],["$","meta",null,{"name":"next-size-adjust","content":""}]],["$","$Lb",null,{"children":["$","div",null,{"hidden":true,"children":["$","$c",null,{"fallback":null,"children":"$Ld"}]}]}]]}],false]],"m":"$undefined","G":["$e",[]],"s":false,"S":true}
+:HL["/t800-trader/_next/static/css/9b4605f4c120f84b.css","style"]
+0:{"P":null,"b":"RGA38xoLXHlmD6XB_ihyE","p":"/t800-trader","c":["",""],"i":false,"f":[[["",{"children":["__PAGE__",{}]},"$undefined","$undefined",true],["",["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/t800-trader/_next/static/css/9b4605f4c120f84b.css","precedence":"next","crossOrigin":"$undefined","nonce":"$undefined"}]],["$","html",null,{"lang":"en","children":["$","body",null,{"className":"__variable_a2733c __variable_d80fa0 antialiased","children":["$","$L2",null,{"parallelRouterKey":"children","error":"$undefined","errorStyles":"$undefined","errorScripts":"$undefined","template":["$","$L3",null,{}],"templateStyles":"$undefined","templateScripts":"$undefined","notFound":[["$","$L4",null,{}],[]],"forbidden":"$undefined","unauthorized":"$undefined"}]}]}]]}],{"children":["__PAGE__",["$","$1","c",{"children":[["$","$L4",null,{}],null,["$","$L5",null,{"children":["$L6",["$","$L7",null,{"promise":"$@8"}]]}]]}],{},null,false]},null,false],["$","$1","h",{"children":[null,[["$","$L9",null,{"children":"$La"}],["$","meta",null,{"name":"next-size-adjust","content":""}]],["$","$Lb",null,{"children":["$","div",null,{"hidden":true,"children":["$","$c",null,{"fallback":null,"children":"$Ld"}]}]}]]}],false]],"m":"$undefined","G":["$e",[]],"s":false,"S":true}
 a:[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]
 6:null
 f:I[622,[],"IconMark"]
