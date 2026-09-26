@@ -59,7 +59,7 @@ export function SettingsPanel({
           {local.dailyLossLimitPct}% · confidence {local.minConfidence}
           {local.allowShorts ? " · shorts on" : " · shorts off"}
           {local.allowMemes ? " · memes on" : " · memes off"}
-          {local.oneTicketPerTick ? " · one ticket per scan" : " · several tickets per scan"}
+          {local.oneTicketPerTick ? " · two tickets per scan" : " · several tickets per scan"}
           {" · "}
           {chain === "cronos" ? "VVS Finance" : venueSummary(local.venues)}
           {local.walletSwaps ? " · wallet swaps" : " · simulated fills"}
@@ -153,7 +153,7 @@ export function SettingsPanel({
         />
         <Field
           label="Cooldown after a stop"
-          hint="Minutes a mint stays dark after a stop, time-out, or risk-off exit. Zero turns the cooldown off."
+          hint="Minutes a mint stays dark after a stop, time-out, or risk-off exit. The live book waits at most 8 minutes so 5x and 10x are not parked for the hour. Zero turns the cooldown off."
           suffix="m"
           min={0}
           max={180}
@@ -162,8 +162,8 @@ export function SettingsPanel({
           onChange={(v) => set({ cooldownMinutes: v })}
         />
         <Toggle
-          label="One new ticket per scan"
-          hint="On keeps the bot from opening a basket in one pass. Off lets it fill until a limit stops it."
+          label="Two new tickets per scan"
+          hint="On lets SOL and the second name both open on one scan. A third ticket waits. Off fills until a limit stops it."
           checked={local.oneTicketPerTick}
           onChange={(v) => set({ oneTicketPerTick: v })}
         />
@@ -289,8 +289,8 @@ export function SettingsPanel({
           onChange={(v) => set({ dayBudgetPct: v })}
         />
         <Toggle
-          label="Micro books ride one ticket"
-          hint="A book under $50 keeps a single open ticket so a small wallet is not split into dust."
+          label="Micro books ride two tickets"
+          hint="A book under $50 can hold SOL and the second name at 5x or 10x. A third ticket waits so a small wallet is not split into dust."
           checked={local.microOneTicket}
           onChange={(v) => set({ microOneTicket: v })}
         />

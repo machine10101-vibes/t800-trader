@@ -25,25 +25,25 @@ export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | nu
   return { ...candidate, flows };
 }
 
-/** The sentence research and the tick share. Red or flat 15m stays in cash. */
+/** A clearly red 15m stays in cash. A flat 15m can still take 5x or 10x when the 5m is not red. */
 export function tapeRead(symbol: string, m5: number, m15: number, h1: number): string {
   const head =
-    m15 < 0
+    m15 <= -0.25
       ? `${symbol} 15m is red at ${m15.toFixed(2)}%. The book stays in cash.`
       : m15 < 0.1
-        ? `${symbol} 15m is flat at ${m15.toFixed(2)}%. No new long until that window is green.`
+        ? `${symbol} 15m is flat at ${m15.toFixed(2)}%. A 5x or 10x long is still eligible when the 5m is not red.`
         : `${symbol} 15m is green at ${m15.toFixed(2)}%. A long is eligible when the 5m tape agrees.`;
   return `${head} 5m ${m5.toFixed(2)}%, 1h ${h1.toFixed(2)}%.`;
 }
 
-/** Red or flat 15m stays in cash. A long needs the same 0.1% green bar the tape names. */
+/** Only a clearly red 15m stays in cash. Flat tape can still open 5x or 10x. */
 export function tapeInCash(m15: number): boolean {
-  return !(m15 >= 0.1);
+  return m15 <= -0.25;
 }
 
 export function tickPass(symbol: string, m15: number): string {
-  if (m15 < 0) return `${symbol}: 15m is red (${m15.toFixed(2)}%), staying in cash`;
-  if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), staying in cash`;
+  if (m15 <= -0.25) return `${symbol}: 15m is red (${m15.toFixed(2)}%), staying in cash`;
+  if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), waiting on a 5m that can take 5x or 10x`;
   return `${symbol}: 15m is green (${m15.toFixed(2)}%), and the 5m tape did not confirm a long`;
 }
 

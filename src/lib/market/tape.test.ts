@@ -34,15 +34,16 @@ describe("candle tape", () => {
     assert.equal(stamped.flows.h24.priceChangePct, 3);
   });
 
-  it("keeps a red 15-minute tape in cash and names a green one as eligible", () => {
+  it("keeps a red 15-minute tape in cash and lets a flat one take 5x or 10x", () => {
     assert.match(tapeRead("SOL", 0.2, -0.43, 1.1), /red at -0.43%.*stays in cash/);
-    assert.match(tapeRead("ZBCN", 0, 0, 0.2), /flat at 0.00%.*until that window is green/);
+    assert.match(tapeRead("ZBCN", 0, 0, 0.2), /flat at 0.00%.*5x or 10x/);
     assert.match(tapeRead("SOL", 0.4, 0.8, 1), /green at 0.80%.*long is eligible/);
-    assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), staying in cash/);
+    assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), waiting on a 5m/);
     assert.match(tickPass("SOL", -0.4), /red \(-0.40%\), staying in cash/);
     assert.equal(tapeInCash(-0.4), true);
-    assert.equal(tapeInCash(0), true);
-    assert.equal(tapeInCash(0.09), true);
+    assert.equal(tapeInCash(-0.3), true);
+    assert.equal(tapeInCash(0), false);
+    assert.equal(tapeInCash(0.09), false);
     assert.equal(tapeInCash(0.1), false);
   });
 

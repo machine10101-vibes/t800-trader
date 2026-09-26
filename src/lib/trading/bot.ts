@@ -325,8 +325,8 @@ export async function tickBot(
             blocked.push(`${learned.symbol}: closed by hand — the next ticket waits a few minutes`);
             continue;
           }
-          if (opened && next.config.oneTicketPerTick !== false) {
-            blocked.push(`${learned.symbol}: passed over — one new ticket per tick`);
+          if (opened >= 2 && next.config.oneTicketPerTick !== false) {
+            blocked.push(`${learned.symbol}: passed over — two new tickets this scan`);
             continue;
           }
           if (advice.block) {

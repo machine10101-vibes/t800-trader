@@ -304,8 +304,8 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
       return { plan, opened };
     };
     const attempts: Array<[number | undefined, boolean]> = [
-      [order.collateralUsd, true],
       [order.collateralUsd, false],
+      [order.collateralUsd, true],
     ];
     let plan: PerpIncreasePlan | undefined;
     let opened: { serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote } | undefined;

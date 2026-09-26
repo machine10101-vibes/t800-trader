@@ -99,6 +99,8 @@ describe("perp planner", () => {
   });
 
   it("accepts a 5x or 10x quote and refuses an explicit 1x before signing", () => {
+    assert.equal(quotedMultiplier({ leverage: "4.99", collateralUsdDelta: "14986798", sizeUsdDelta: "74671720" }, 5), 5);
+    assert.equal(quotedMultiplier({ leverage: "9.99", collateralUsdDelta: "14986800", sizeUsdDelta: "148818920" }, 10), 10);
     assert.equal(quotedMultiplier({ leverage: "5" }, 5), 5);
     assert.equal(quotedMultiplier({ leverage: "10", collateralUsdDelta: "10000000", sizeUsdDelta: "100000000" }, 10), 10);
     assert.equal(quotedMultiplier({ collateralUsdDelta: "12500000", sizeUsdDelta: "62500000" }, 10), 5);

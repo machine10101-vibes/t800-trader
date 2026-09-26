@@ -305,8 +305,8 @@ export function entrySignals(
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
 ): Signal[] {
   if (tech) {
-    const fromCandles = buildSignals(token, tech, researchScore, allowShorts, ctx);
-    if (fromCandles.length) return fromCandles;
+    const longs = buildSignals(token, tech, researchScore, allowShorts, ctx).filter((row) => row.side === "long");
+    if (longs.length) return longs;
   }
   return buildFlowSignals(token, researchScore, allowShorts, ctx);
 }
@@ -330,7 +330,7 @@ export function buildFlowSignals(
   const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
-  if (h1 <= -6 || m15 <= -4 || m5 <= -3.5 || solDump) return [];
+  if (h1 <= -6 || m15 <= -0.25 || m5 <= -1.2 || solDump) return [];
   if (token.sector === "Meme" && (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))) return [];
   if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
 
@@ -355,8 +355,11 @@ export function buildFlowSignals(
     tape >= 0.53;
   // A green 15m watchlist name is a long. Buy-share still has to be real, not a one-sided print.
   const greenLong =
-    token.watchlist && m15 >= 0.1 && m15 < 8 && m5 > -0.2 && h1 > -2 && h1 < 10 && tape >= 0.35;
-  if (!aligned && !impulse && !rising && !greenLong) return [];
+    token.watchlist && m15 >= 0.1 && m15 < 8 && m5 > -0.2 && h1 > -2 && h1 < 10 && tape >= 0.32;
+  // Flat 15m still takes 5x or 10x when the 5m is green and the print is not one-sided.
+  const flatLong =
+    token.watchlist && m15 > -0.25 && m15 < 8 && m5 >= 0.05 && h1 > -3 && h1 < 12 && tape >= 0.32;
+  if (!aligned && !impulse && !rising && !greenLong && !flatLong) return [];
 
   const stopPct = clamp(1.25 + (defensive ? 0.15 : 0), 1.2, 2.6);
   const rr = withMinRR(stopPct, stopPct * 1.8);

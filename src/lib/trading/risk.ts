@@ -214,8 +214,8 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (positions.length >= config.maxPositions) return "Max positions reached";
-  if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 1) {
-    return "Micro book rides one ticket";
+  if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
+    return "Micro book rides two tickets";
   }
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
@@ -237,7 +237,8 @@ export function canOpen(args: {
   const lastStop = trades.find(
     (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
   );
-  const cooldownMs = Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)) * 60_000;
+  const cooldownMin = Math.min(8, Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)));
+  const cooldownMs = cooldownMin * 60_000;
   if (cooldownMs > 0 && lastStop && Date.now() - Date.parse(lastStop.at) < cooldownMs) {
     return "Cooldown after a stop/time-out on this mint";
   }

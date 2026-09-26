@@ -283,6 +283,27 @@ describe("indicators", () => {
       },
     };
     assert.equal(buildFlowSignals(modest, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 1);
+    const flat = {
+      ...token,
+      symbol: "SOL",
+      flows: {
+        m5: flow(0.2, 48, 52),
+        m15: flow(0.02, 48, 52),
+        m30: flow(0.1, 48, 52),
+        h1: flow(0.4, 48, 52),
+        h6: flow(0.2, 48, 52),
+        h24: flow(0.4, 48, 52),
+      },
+    };
+    assert.equal(buildFlowSignals(flat, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 1);
+    const flatRed5 = {
+      ...flat,
+      flows: {
+        ...flat.flows,
+        m5: flow(-0.4, 48, 52),
+      },
+    };
+    assert.equal(buildFlowSignals(flatRed5, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

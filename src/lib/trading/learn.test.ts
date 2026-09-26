@@ -71,7 +71,9 @@ describe("learn", () => {
 
     book = lose(lose(lose(book)));
     const faded = advise(signal(), book.memory, "defensive");
-    assert.match(faded.block ?? "", /losing book/);
+    assert.equal(faded.block, null);
+    assert.ok(faded.sizeMul < 1);
+    assert.match(faded.note, /losing book/);
 
     let paid = emptyState();
     for (let i = 0; i < 4; i += 1) {
@@ -83,7 +85,7 @@ describe("learn", () => {
     assert.ok(favor.sizeMul > 1);
   });
 
-  it("stops a name after three straight losing closes", () => {
+  it("cuts size after three straight losing closes and still allows the next ticket", () => {
     let book = emptyState();
     book = lose(book, "JUP");
     book = rememberClose(book, {
@@ -98,7 +100,10 @@ describe("learn", () => {
       r: -0.2,
       exitReason: "time",
     });
-    assert.match(advise(signal({ symbol: "JUP", sector: "DEX", reason: "fade" }), book.memory, "mixed").block ?? "", /last 3 closes/);
+    const cut = advise(signal({ symbol: "JUP", sector: "DEX", reason: "fade" }), book.memory, "mixed");
+    assert.equal(cut.block, null);
+    assert.ok(cut.sizeMul < 1);
+    assert.match(cut.note, /last 3 closes/);
   });
 
   it("grades a tape read after the window and lets misses tighten the next ticket", () => {

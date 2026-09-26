@@ -90,12 +90,14 @@ export function advise(signal: Signal, memory: PlayMemory | undefined, stance: M
 
   let confidenceDelta = 0;
   let sizeMul = 1;
-  let block: string | null = null;
+  const block: string | null = null;
   const notes: string[] = [];
 
   const setupSmooth = smooth(setup);
   if (setup.length >= 4 && setupSmooth.avgR < -0.12) {
-    block = `${signal.symbol}: ${signal.side} ${signal.reason} in ${sector} has a losing book`;
+    confidenceDelta -= 6;
+    sizeMul *= 0.7;
+    notes.push(`${signal.side} ${signal.reason} in ${sector} has a losing book`);
   } else if (setup.length >= 3 && setupSmooth.avgR < 0) {
     confidenceDelta -= 4;
     sizeMul *= 0.85;
@@ -108,7 +110,9 @@ export function advise(signal: Signal, memory: PlayMemory | undefined, stance: M
 
   const recentMint = mint.slice(0, 3);
   if (!block && recentMint.length >= 3 && recentMint.every((row) => !row.hit)) {
-    block = `${signal.symbol}: last 3 closes lost`;
+    confidenceDelta -= 4;
+    sizeMul *= 0.75;
+    notes.push(`${signal.symbol}: last 3 closes lost, size cut`);
   } else if (mint.length >= 3 && smooth(mint).avgR > 0.1 && smooth(mint).hitRate > 0.55) {
     confidenceDelta += 2;
     notes.push(`${signal.symbol} has paid this book`);

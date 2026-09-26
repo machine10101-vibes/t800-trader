@@ -28,7 +28,7 @@ export function normalizeMultipliers(value: unknown): Multiplier[] {
 /** 10x on a stronger tape, 5x otherwise. Null when both multipliers are off. */
 export function pickMultiplier(enabled: readonly Multiplier[], confidence: number, reason: string): Multiplier | null {
   if (!enabled.length) return null;
-  const strong = confidence >= 72 || reason === "breakout";
+  const strong = confidence >= 66 || reason === "breakout";
   if (strong && enabled.includes(10)) return 10;
   if (enabled.includes(5)) return 5;
   if (enabled.includes(10)) return 10;

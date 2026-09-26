@@ -315,7 +315,7 @@ describe("risk", () => {
     assert.ok(defensive.notional <= 5 * 0.6);
   });
 
-  it("keeps a micro book on one ticket", () => {
+  it("lets a micro book hold SOL and a second name, then stops", () => {
     const signal = {
       id: "s6",
       mint: "jup",
@@ -354,14 +354,19 @@ describe("risk", () => {
       initialStop: 0.98,
       scaled: false,
     } as Position;
+    const book = portfolio({ cashUsd: 4, equityUsd: 6, peakEquity: 6, dayStartEquity: 6 });
+    assert.equal(
+      canOpen({ positions: [held], signal, config: DEFAULT_CONFIG, portfolio: book, stance: "defensive" }),
+      null,
+    );
     const reason = canOpen({
-      positions: [held],
+      positions: [held, { ...held, id: "p2", mint: "zbcn", symbol: "ZBCN" }],
       signal,
       config: DEFAULT_CONFIG,
-      portfolio: portfolio({ cashUsd: 4, equityUsd: 6, peakEquity: 6, dayStartEquity: 6 }),
+      portfolio: book,
       stance: "defensive",
     });
-    assert.equal(reason, "Micro book rides one ticket");
+    assert.equal(reason, "Micro book rides two tickets");
   });
 
   it("scratches a long when 5m and 15m both flip and the trade is not working", () => {

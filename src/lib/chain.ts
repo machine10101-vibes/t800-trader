@@ -58,7 +58,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     bookArm:
       "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back.",
     noOpen: "No open swap. A rising SOL or Zebec long is sent from the trading key.",
-    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. A red 15m tape stays in cash.",
+    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. A red 15m tape stays in cash. A flat 15m can still open 5x or 10x.",
     explorerName: "Solscan",
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain.",
@@ -94,7 +94,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     bookArm:
       "Arm asks the Cronos wallet to sign the funding transfer. That transaction moves a trading balance to a key in this browser, and that key signs each VVS swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover CRO and USDC back.",
     noOpen: "No open swap. A rising CRO long is sent from the trading key.",
-    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. A red 15m tape stays in cash.",
+    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. A red 15m tape stays in cash. A flat 15m can still open 5x or 10x.",
     explorerName: "Cronoscan",
     settingsWallet:
       "On: The first arm signs one transaction and moves spare CRO and USDC to a browser trading key. That key signs each VVS swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain.",

@@ -161,7 +161,7 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     : `${c.symbol} has no demonstrated moat in this dataset. Competitors are every other launch with deeper liquidity or a more credible float.`;
 
   const bull = `${c.symbol} 15m stays green, the 5m holds its short average, and reserves stay near ${usd(c.liquidityUsd)}. Regime is ${regime.stance}. ${path}`;
-  const base = `The 15m chops around flat. The bot skips until that window is green and the 5m agrees, then takes one ticket.`;
+  const base = `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still open 5x or 10x when the 5m is not red.`;
   const bear = `The 15m stays red, or reserves fall under $${Math.max(80_000, c.liquidityUsd * 0.45).toFixed(0)}. No new long. An open ticket scratches when the 5m and the 15m both flip.`;
 
   return {
