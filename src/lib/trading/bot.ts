@@ -225,7 +225,7 @@ export async function tickBot(
               qty: fill.qty,
               price: fill.price,
               signature: fill.signature,
-              note: "CRO 15m is red or flat, so the trading key sold CRO to USDC on VVS.",
+              note: "CRO 15m is red, so the trading key sold CRO to USDC on VVS.",
             });
             closed += 1;
           } catch (error) {
