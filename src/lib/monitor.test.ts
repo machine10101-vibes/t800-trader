@@ -14,7 +14,7 @@ describe("monitor", () => {
   });
 
   it("builds a read-only view from a saved book and a live mark", () => {
-    const book = emptyState({ startingEquity: 12 });
+    const book = emptyState({ startingEquity: 12, walletSwaps: true, liveTradesRev: 1 });
     book.bot.running = true;
     book.bot.ticks = 4;
     book.bot.lastNote = "Tick 4";
