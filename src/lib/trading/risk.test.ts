@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, dayLossBreached, sizePosition } from "./risk";
+import { canOpen, dayLossBreached, exitReason, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Signal } from "../types";
 
@@ -112,5 +112,58 @@ describe("risk", () => {
       portfolio: portfolio(),
     });
     assert.equal(reason, "Already in this mint");
+  });
+
+  it("exits longs on stop, target, trail, and time", () => {
+    const base = {
+      id: "p",
+      mint: "abc",
+      symbol: "ABC",
+      poolAddress: "p",
+      side: "long" as const,
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 100,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "breakout" as const,
+      researchScore: 60,
+      highWater: 100,
+      lowWater: 100,
+      notional: 100,
+    };
+    assert.equal(exitReason({ ...base, markPrice: 97.5 }), "stop");
+    assert.equal(exitReason({ ...base, markPrice: 104.2 }), "target");
+    const locked = 100 + (104 - 100) * 0.55;
+    assert.equal(exitReason({ ...base, markPrice: locked - 0.1, highWater: locked + 0.2 }), "trail");
+    assert.equal(exitReason(base, Date.now() + 51 * 60_000), "time");
+  });
+
+  it("trails a winning short off the favorable extreme, not the adverse wick", () => {
+    const entry = 100;
+    const target = 90;
+    const locked = entry - (entry - target) * 0.55;
+    const reason = exitReason({
+      id: "p",
+      mint: "abc",
+      symbol: "ABC",
+      poolAddress: "p",
+      side: "short",
+      qty: 1,
+      entryPrice: entry,
+      markPrice: locked + 0.4,
+      stopPrice: 106,
+      targetPrice: target,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "fade",
+      researchScore: 60,
+      highWater: locked - 0.3,
+      lowWater: 102,
+      notional: 100,
+    });
+    assert.equal(reason, "trail");
   });
 });

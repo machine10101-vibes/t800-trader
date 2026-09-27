@@ -82,7 +82,7 @@ export function exitReason(position: Position, nowMs = Date.now()): "stop" | "ta
     if (position.markPrice >= position.stopPrice) return "stop";
     if (position.markPrice <= position.targetPrice) return "target";
     const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * 0.55;
-    if (usd > 0 && position.lowWater <= locked && position.markPrice > locked) return "trail";
+    if (usd > 0 && position.highWater <= locked && position.markPrice > locked) return "trail";
   }
   if (ageMin > 50) return "time";
   return null;

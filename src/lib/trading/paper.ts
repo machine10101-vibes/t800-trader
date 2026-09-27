@@ -67,13 +67,20 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
   };
 }
 
+function bookedValue(position: Position): number {
+  if (position.side === "short") {
+    return position.qty * position.entryPrice + unrealizedPnl(position).usd;
+  }
+  return position.qty * position.markPrice;
+}
+
 export function closePosition(state: AppState, positionId: string, priceHint: number, reason: Trade["reason"]): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
   const price = fillPrice(priceHint, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
-  const proceeds = pos.qty * price;
+  const proceeds = bookedValue(marked);
   const trade: Trade = {
     id: id("tr"),
     mint: pos.mint,
@@ -114,7 +121,7 @@ export function markBook(state: AppState, prices: Map<string, number>): AppState
     return markPosition(p, px);
   });
   const unreal = positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
-  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + p.qty * p.markPrice, 0);
+  const equity = state.portfolio.cashUsd + positions.reduce((acc, p) => acc + bookedValue(p), 0);
   const peak = Math.max(state.portfolio.peakEquity, equity);
   return {
     ...state,

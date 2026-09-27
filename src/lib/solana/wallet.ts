@@ -2,7 +2,13 @@ import { PublicKey } from "@solana/web3.js";
 import { USDC_MINT } from "@/lib/market/universe";
 import { fetchJson, nullableNum } from "@/lib/utils";
 
-const RPCS = ["https://solana.publicnode.com", "https://solana-rpc.publicnode.com"];
+const DEFAULT_RPCS = ["https://solana.publicnode.com", "https://solana-rpc.publicnode.com"];
+const RPC_TIMEOUT_MS = 10_000;
+
+export function solanaRpcs(): string[] {
+  const extra = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SOLANA_RPC?.trim() : "";
+  return extra ? [extra, ...DEFAULT_RPCS] : [...DEFAULT_RPCS];
+}
 
 export interface WalletSession {
   address: string;
@@ -55,13 +61,16 @@ interface RpcResult<T> {
   error?: { message?: string };
 }
 
-async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+async function rpc<T>(method: string, params: unknown[]): Promise<{ endpoint: string; result: T }> {
   let last: unknown;
-  for (const url of RPCS) {
+  for (const url of solanaRpcs()) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), RPC_TIMEOUT_MS);
     try {
       const res = await fetch(url, {
         method: "POST",
         cache: "no-store",
+        signal: ctrl.signal,
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       });
@@ -70,9 +79,11 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
         throw new Error(json.error?.message || `${res.status} ${res.statusText} from ${url}`);
       }
       if (json.result === undefined) throw new Error(`Empty RPC result from ${url}`);
-      return json.result;
+      return { endpoint: url, result: json.result };
     } catch (error) {
-      last = error;
+      last = error instanceof Error && error.name === "AbortError" ? new Error(`RPC timeout from ${url}`) : error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw last instanceof Error ? last : new Error("Solana RPC could not read this wallet");
@@ -88,6 +99,10 @@ function usdcAta(owner: PublicKey): PublicKey {
   )[0];
 }
 
+export function associatedUsdcAddress(owner: string): string {
+  return usdcAta(new PublicKey(owner)).toBase58();
+}
+
 async function readUsdc(owner: PublicKey): Promise<number> {
   const ata = usdcAta(owner);
   const acc = await rpc<{
@@ -95,9 +110,14 @@ async function readUsdc(owner: PublicKey): Promise<number> {
       data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
     } | null;
   }>("getAccountInfo", [ata.toBase58(), { encoding: "jsonParsed" }]);
-  if (!acc.value) return 0;
-  const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
+  if (!acc.result.value) return 0;
+  const amt = acc.result.value.data?.parsed?.info?.tokenAmount?.uiAmount;
   return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+}
+
+export async function pingSolanaRpc(): Promise<{ endpoint: string; result: string }> {
+  const { endpoint, result } = await rpc<string>("getHealth", []);
+  return { endpoint, result };
 }
 
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
@@ -107,7 +127,7 @@ export async function readBalances(address: string): Promise<Omit<WalletSession,
     readUsdc(pk),
     liveSolPrice(),
   ]);
-  const sol = lamports.value / 1_000_000_000;
+  const sol = lamports.result.value / 1_000_000_000;
   const equityUsd = usdc + (solPriceUsd !== null ? sol * solPriceUsd : 0);
   return { address: pk.toBase58(), sol, usdc, solPriceUsd, equityUsd };
 }
