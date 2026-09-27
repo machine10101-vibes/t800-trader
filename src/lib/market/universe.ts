@@ -16,7 +16,7 @@ export const WATCHLIST: WatchToken[] = [
   { symbol: "JUP", name: "Jupiter", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", sector: "DEX" },
   { symbol: "JTO", name: "Jito", mint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL", sector: "LST" },
   { symbol: "RAY", name: "Raydium", mint: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", sector: "DEX" },
-  { symbol: "ORCA", name: "Orca", mint: "orcaEKTdK7LKz57vaA7iQxNhMvpvA2aP8VDgQ1sVR8", sector: "DEX" },
+  { symbol: "ORCA", name: "Orca", mint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE", sector: "DEX" },
   { symbol: "PYTH", name: "Pyth", mint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", sector: "Oracle" },
   { symbol: "DRIFT", name: "Drift", mint: "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7", sector: "Perps" },
   { symbol: "MNDE", name: "Marinade", mint: "MNDEFzGvMt87ueuHvVU9VcTQSQB6XND51pVSJD1YJXB", sector: "LST" },

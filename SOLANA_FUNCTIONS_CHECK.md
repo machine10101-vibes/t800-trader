@@ -66,8 +66,9 @@ Status after the checks in this PR. `SKIPPED` means the path cannot run here wit
 | `ema` / `rsi` / `snapshotTechnical` / `buildSignals` | `trading/signals.ts` | PASS | Signals are paper tickets only |
 | `screenCandidate` / `scoreCandidate` | `research/scoring.ts` | PASS | Existing unit tests |
 | `runResearch` / `wrongAbout` | `research/engine.ts` | PASS (indirect) | Exercised by `tickBot` + `loadMarket` |
-| `WATCHLIST` / mint constants | `market/universe.ts` | PASS | All mints are valid `PublicKey`s |
-| `loadMarket` / `fetchOhlcv` | `market/providers.ts` | PASS or SKIPPED | Public GeckoTerminal; 429 → skip |
+| `WATCHLIST` / mint constants | `market/universe.ts` | PASS | All mints valid after ORCA mint correction |
+| `loadMarket` | `market/providers.ts` | PASS | Live universe this run: Solana-only candidates, no API key |
+| `fetchOhlcv` | `market/providers.ts` | SKIPPED (this run) | GeckoTerminal `429` on a follow-up OHLCV pull after `loadMarket` |
 | `loadDesk` / `controlBot` / `configureBot` | `client.ts` | PASS (indirect) | Thin wrappers over store + desk + bot |
 | `buildDesk` | `desk.ts` | PASS (indirect) | Requires attached wallet + feeds |
 | Live Jupiter quote | — | SKIPPED | Not implemented |
@@ -84,10 +85,11 @@ Status after the checks in this PR. `SKIPPED` means the path cannot run here wit
 4. **RPC endpoints were hardcoded** with no override. Added optional `NEXT_PUBLIC_SOLANA_RPC` (documented in `.env.example`). Still no secrets.
 5. **README said the default book was $10,000.** The UI and `DEFAULT_CONFIG.startingEquity = 0` size the book from the connected wallet. README updated.
 6. **No tests covered wallet, paper book, store, universe, or live read-only RPC.** Added mock-safe unit tests plus skippable live smokes.
-7. **Watchlist pool fetch uses `WATCHLIST.slice(0, 12)`.** BONK, WIF, and JLP do not get a dedicated GeckoTerminal token-pool pull (they can still appear in trending/volume). Left as-is to avoid extra public API load; documented, not changed.
-8. **`@solana/web3.js` is used only for `PublicKey` + ATA PDA.** Heavy but valid. No broken import.
-9. **Public RPCs are assumed CORS-ok in the browser.** Node smokes cannot prove GitHub Pages CORS. If a wallet connect fails in production after approve, the next place to look is PublicNode CORS or rate limit — then set `NEXT_PUBLIC_SOLANA_RPC`.
-10. **No live swap stack.** If the goal was an on-chain Solana trader, that entire layer (quote, swap, priority fees, tx send, confirmation) is missing by design. This review does not add it.
+7. **ORCA watchlist mint was not a valid public key** (`orcaEKTdK7LKz57vaA7iQxNhMvpvA2aP8VDgQ1sVR8`, 42 chars). Dedicated GeckoTerminal token-pool fetches and `watchMeta` matches for Orca could never succeed. Replaced with the official mint `orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE`.
+8. **Watchlist pool fetch uses `WATCHLIST.slice(0, 12)`.** BONK, WIF, and JLP do not get a dedicated GeckoTerminal token-pool pull (they can still appear in trending/volume). Left as-is to avoid extra public API load; documented, not changed.
+9. **`@solana/web3.js` is used only for `PublicKey` + ATA PDA.** Heavy but valid. No broken import.
+10. **Public RPCs are assumed CORS-ok in the browser.** Node smokes cannot prove GitHub Pages CORS. If a wallet connect fails in production after approve, the next place to look is PublicNode CORS or rate limit — then set `NEXT_PUBLIC_SOLANA_RPC`.
+11. **No live swap stack.** If the goal was an on-chain Solana trader, that entire layer (quote, swap, priority fees, tx send, confirmation) is missing by design. This review does not add it.
 
 ## Unsafe defaults (accepted vs fixed)
 
@@ -109,6 +111,19 @@ npm run build
 ```
 
 Live smokes hit public Solana RPC and GeckoTerminal only. They skip on timeout/429 instead of inventing credentials.
+
+### Last local run (this PR)
+
+```
+# tests 38
+# pass 37
+# fail 0
+# skipped 1   (fetchOhlcv 429 Too Many Requests)
+```
+
+`pingSolanaRpc` → PublicNode `getHealth` = `ok`.  
+`readBalances` on the WSOL mint succeeded (read-only).  
+`tickBot` completed a paper tick against live Solana feeds with no transaction sent.
 
 ## Cronos
 
