@@ -357,7 +357,7 @@ export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): st
     research.some((r) => r.sector === "Meme")
       ? "Meme finalists can print research scores from activity alone. Activity is not value accrual."
       : "Excluding memes does not make remaining tokens 'fundamentals'. Many Solana venues do not route value to the token.",
-    "Paper fills assume mid-price plus a small slip. Live Solana priority fees, MEV, and impact would be worse.",
+    "PAPER fills assume mid-price plus a small slip. LIVE Jupiter impact, MEV, and priority fees are worse, and a kill switch does not unwind already-signed tickets.",
     "SOL beta can invert in a session. The desk can be right on a pool and still lose if the L1 dumps.",
   ];
 }

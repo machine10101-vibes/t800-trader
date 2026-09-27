@@ -1,6 +1,7 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { liveSolPrice } from "@/lib/market/marks";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
+import { sleep } from "@/lib/utils";
 import {
   beginPhantomConnect,
   browserPhantomStore,
@@ -18,6 +19,12 @@ const RPCS = [
   "https://public.rpc.solanavibestation.com",
   "https://rpc.solanatracker.io/public",
 ];
+
+export function solanaRpcs(): string[] {
+  const extra = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SOLANA_RPC?.trim() : "";
+  if (extra && !RPCS.includes(extra)) return [extra, ...RPCS];
+  return [...RPCS];
+}
 
 export interface WalletSession {
   address: string;
@@ -422,6 +429,10 @@ async function readUsdc(owner: PublicKey): Promise<number> {
   return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
 }
 
+export function associatedUsdcAddress(owner: string): string {
+  return usdcAta(new PublicKey(owner)).toBase58();
+}
+
 export async function mintDecimals(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
   if (mint === USDC_MINT) return 6;
@@ -433,6 +444,65 @@ export async function mintDecimals(mint: string): Promise<number> {
     throw new Error("Could not read token decimals for this mint");
   }
   return decimals;
+}
+
+export async function readMintDecimals(mint: string): Promise<number> {
+  return mintDecimals(mint);
+}
+
+export async function readTokenUiAmount(owner: string, mint: string): Promise<number> {
+  const held = await readMintBalance(owner, mint);
+  return held ?? 0;
+}
+
+export async function signVersionedTx(
+  provider: InjectedProvider,
+  transaction: VersionedTransaction,
+): Promise<VersionedTransaction> {
+  if (!provider.signTransaction) {
+    throw new Error("Wallet cannot sign a fee-sponsored close. Use Phantom or Solflare.");
+  }
+  const signed = await provider.signTransaction(transaction);
+  if (signed instanceof VersionedTransaction) return signed;
+  if (signed && typeof signed === "object" && "serialize" in signed) {
+    return VersionedTransaction.deserialize((signed as { serialize(): Uint8Array }).serialize());
+  }
+  throw new Error("Wallet signed but did not return a transaction");
+}
+
+export function serializeSignedTx(transaction: VersionedTransaction): string {
+  return Buffer.from(transaction.serialize()).toString("base64");
+}
+
+export async function signAndSendVersionedTx(
+  provider: InjectedProvider,
+  transaction: VersionedTransaction,
+): Promise<string> {
+  if (provider.signAndSendTransaction) {
+    const result = await provider.signAndSendTransaction(transaction);
+    if (typeof result === "string" && result.length > 0) return result;
+    if (result && typeof result === "object" && "signature" in result && result.signature) {
+      return result.signature;
+    }
+    throw new Error("Wallet signed but did not return a transaction signature");
+  }
+  const signed = await signVersionedTx(provider, transaction);
+  return broadcastTransaction(signed.serialize());
+}
+
+export async function confirmSignature(signature: string, timeoutMs = 60_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const res = await solanaRpc<{ value?: Array<{ confirmationStatus?: string; err?: unknown } | null> }>(
+      "getSignatureStatuses",
+      [[signature], { searchTransactionHistory: true }],
+    );
+    const status = res.value?.[0];
+    if (status?.err) throw new Error(`Swap landed with an error: ${JSON.stringify(status.err)}`);
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return;
+    await sleep(1_400);
+  }
+  throw new Error(`Swap not confirmed in time. Signature ${signature}`);
 }
 
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {

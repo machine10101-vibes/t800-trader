@@ -62,20 +62,61 @@ export function SettingsPanel({
           {local.oneTicketPerTick ? " · two tickets per scan" : " · several tickets per scan"}
           {" · "}
           {chain === "cronos" ? "VVS Finance" : venueSummary(local.venues)}
-          {local.walletSwaps ? " · wallet swaps" : " · simulated fills"}
+          {local.walletSwaps ? " · LIVE swaps" : " · PAPER fills"}
+          {local.killSwitch ? " · kill switch" : ""}
           {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n}x`).join(" ")}` : " · spot only"}
         </p>
       </div>
 
       <Section
-        title="Wallet"
-        hint="Live swaps are on. Arming asks the wallet to sign once. That transaction funds a trading key in this browser, and that key sends each swap. Turn this off only to keep a simulated blotter."
+        title="Execution"
+        hint="PAPER is the default. LIVE still needs you to type LIVE in the confirm sheet this session. Arming then asks the wallet to fund a trading key; that key sends Jupiter swaps. A reload locks LIVE again until you re-confirm."
       >
         <Toggle
-          label="Send swaps to this wallet"
-          hint={copy.settingsWallet}
+          label="LIVE Jupiter swaps"
+          hint={
+            local.killSwitch
+              ? "Kill switch is on. Turn LIVE back on from the confirm sheet."
+              : copy.settingsWallet
+          }
           checked={local.walletSwaps}
-          onChange={(v) => set({ walletSwaps: v })}
+          onChange={(v) => set({ walletSwaps: v, executionMode: v ? "live" : "paper", killSwitch: v ? false : local.killSwitch })}
+        />
+        <Field
+          label="Live slippage"
+          hint="Jupiter quote and Ultra close slippage."
+          value={local.slippageBps}
+          min={10}
+          max={200}
+          step={10}
+          suffix=" bps"
+          onChange={(v) => set({ slippageBps: v })}
+        />
+        <Field
+          label="Max live ticket"
+          hint="Hard cap on a single LIVE open."
+          value={local.maxLiveNotionalUsd}
+          min={5}
+          max={500}
+          step={5}
+          suffix=" USD"
+          onChange={(v) => set({ maxLiveNotionalUsd: v })}
+        />
+        <Field
+          label="Min SOL for fees"
+          hint="LIVE buys wait until the wallet has at least this much SOL."
+          value={local.minSolForFees}
+          min={0.006}
+          max={0.08}
+          step={0.002}
+          suffix=" SOL"
+          onChange={(v) => set({ minSolForFees: v })}
+        />
+        <Toggle
+          label="Kill switch"
+          hint="Stops new LIVE tickets and flips the book to PAPER. Signed tickets can still be closed by hand."
+          checked={local.killSwitch}
+          onChange={(v) => set({ killSwitch: v, ...(v ? { walletSwaps: false, executionMode: "paper" as const } : {}) })}
         />
       </Section>
 

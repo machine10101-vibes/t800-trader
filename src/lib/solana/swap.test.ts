@@ -74,4 +74,10 @@ describe("planSpotOrder", () => {
     assert.equal(plan.outputMint, USDC_MINT);
     assert.equal(plan.amount, "1500000");
   });
+
+  it("still plans a close when SOL is under Phantom's 0.005 fee buffer", () => {
+    const plan = planSpotOrder({ ...order, kind: "close", tokenDecimals: 6, qty: 1.5, usdc: 0, sol: 0.001 });
+    assert.equal(plan.inputMint, "mint");
+    assert.equal(plan.outputMint, USDC_MINT);
+  });
 });

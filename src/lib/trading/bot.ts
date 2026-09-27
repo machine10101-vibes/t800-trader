@@ -33,6 +33,7 @@ import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition } from "./leverage";
 import { isAlreadyFlat, reentryBlocked } from "./close";
 import type { MakerDesk } from "./quote";
+import { isLiveSessionArmed } from "@/lib/solana/live-session";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
 function huntRank(token: ScoredCandidate): number {
@@ -66,23 +67,23 @@ async function walletExit(
   executor: ChainExecutor | undefined,
   blocked: string[],
 ): Promise<AppState> {
+  if (pos.signature && pos.side === "long") {
+    if (!executor) {
+      blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the sell`);
+      return state;
+    }
+    try {
+      const fill = await executor(orderForPosition(pos, "close", state.config.venues));
+      return closePosition(state, pos.id, fill.price, reason, fill.signature);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "wallet sell failed";
+      if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
+      blocked.push(`${pos.symbol}: ${message}`);
+      return state;
+    }
+  }
   if (state.config.walletSwaps && !pos.signature) return state;
-  if (!state.config.walletSwaps || pos.side !== "long") {
-    return closePosition(state, pos.id, pos.markPrice, reason);
-  }
-  if (!executor) {
-    blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the sell`);
-    return state;
-  }
-  try {
-    const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-    return closePosition(state, pos.id, fill.price, reason, fill.signature);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "wallet sell failed";
-    if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
-    blocked.push(`${pos.symbol}: ${message}`);
-    return state;
-  }
+  return closePosition(state, pos.id, pos.markPrice, reason);
 }
 
 export async function tickBot(
@@ -317,6 +318,14 @@ export async function tickBot(
           next.config.walletSwaps && next.bot.swapHoldUntil && Date.parse(next.bot.swapHoldUntil) > Date.now(),
         );
         if (pauseOpens) blocked.push("Signature was declined — the next wallet prompt waits about a minute");
+        if (next.config.killSwitch) {
+          pauseOpens = true;
+          blocked.push("Kill switch is on");
+        }
+        if (chain === "solana" && next.config.walletSwaps && !isLiveSessionArmed()) {
+          pauseOpens = true;
+          blocked.push("Re-confirm LIVE this session before sending swaps");
+        }
         if (maker && next.bot.resting) {
           try {
             await maker.cancel(next.bot.resting.orderKey);
@@ -407,6 +416,8 @@ export async function tickBot(
             blocked.push(`${learned.symbol}: missing live mark`);
           } else if (collateralUsd < MIN_TICKET_USD || qty <= 0) {
             blocked.push(`${learned.symbol}: size ${collateralUsd.toFixed(2)} too small`);
+          } else if (next.config.walletSwaps && collateralUsd > next.config.maxLiveNotionalUsd) {
+            blocked.push(`${learned.symbol}: notional exceeds live max $${next.config.maxLiveNotionalUsd}`);
           } else if (pauseOpens) {
             continue;
           } else if (bookTooSmall) {
@@ -520,9 +531,16 @@ export async function tickBot(
   }, chain);
 }
 
-export function applyControl(state: AppState, action: "start" | "stop" | "reset" | "flatten"): AppState {
+export function applyControl(state: AppState, action: "start" | "stop" | "reset" | "flatten" | "kill"): AppState {
   if (action === "reset") {
     return emptyState(state.config);
+  }
+  if (action === "kill") {
+    return {
+      ...state,
+      config: { ...state.config, executionMode: "paper", walletSwaps: false, killSwitch: true },
+      bot: { ...state.bot, running: false, resting: undefined, lastNote: "Kill switch — desk is paper and disarmed" },
+    };
   }
   if (action === "flatten") {
     const flat = pushEquity(flattenBook(state, "manual"));

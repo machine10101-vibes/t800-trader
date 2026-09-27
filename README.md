@@ -1,16 +1,16 @@
 # T-800 Trader
 
-Solana-first research desk and short-term **paper** trading bot.
+Solana-first research desk. **PAPER** is the default. Opt-in **LIVE** Jupiter swaps (trading key + Ultra-sponsored closes) after you type `LIVE` this session.
 
 Play it at **https://machine10101-vibes.github.io/t800-trader/**
 
 Connect a real **Phantom** or **Solflare** wallet to arm the desk. There is no demo book and no $10,000 fallback. The book is sized from the wallet’s live SOL + USDC.
 
-The desk does not start from a celebrity coin list. It pulls a live Solana universe (watchlist venues plus trending, new, and high-volume pools), throws out thin or obviously adversarial tape, then keeps 5–8 finalists. A separate execution loop will only paper-trade names that survived that screen, and only when 5-minute structure, volume, and risk limits agree.
+The desk does not start from a celebrity coin list. It pulls a live Solana universe (watchlist venues plus trending, new, and high-volume pools), throws out thin or obviously adversarial tape, then keeps 5–8 finalists. A separate execution loop only trades names that survived that screen, and only when 5-minute structure, volume, and risk limits agree.
 
-This is a research and simulation tool. It is **not** financial advice and it does **not** place live on-chain orders.
+This is a research tool. It is **not** financial advice. LIVE can lose real USDC and SOL. See [LIVE_TRADING.md](LIVE_TRADING.md).
 
-The published site is a **static** Next.js export. Overview, Radar, thesis drawer, Arm / Force tick, Book, and Risk all run in the browser. Paper state lives in `localStorage` (key `t800-trader-state`). There is no Node server and no `data/state.json` on GitHub Pages.
+The published site is a **static** Next.js export (`output: 'export'`, `basePath` / `assetPrefix` `/t800-trader`). Overview, Radar, thesis drawer, Arm, Book, and Options all run in the browser. Book state lives in `localStorage`. There is no Node server and no `data/state.json` on GitHub Pages.
 
 ## What you get
 
@@ -27,7 +27,7 @@ The published site is a **static** Next.js export. Overview, Radar, thesis drawe
 2. **Universe** from GeckoTerminal Solana pools + a conservative watchlist (JUP, JTO, RAY, Drift, Pyth, …)
 3. **Screen** — liquidity, 24h volume, pool age, quote asset, optional meme ban
 4. **Score** — organic flow, valuation hygiene, activity, venue risk, 5m technicals
-5. **Trade** (paper only) — volatility-sized, stop / target / trail / 50-minute time stop
+5. **Trade** — PAPER simulates fills. LIVE arms a trading key, then Jupiter sends the swap. Stop / target / trail / time exits.
 6. **Skeptic pass** — missing unlocks, revenue, and holder data are listed, never invented
 
 Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). A **$5** wallet is enough to open. Max 4 positions. ~1.1% equity risk per trade, cut in defensive regimes. Daily loss cap 6%. Micro books ($5–$50) put most of the cash to work so a $5–$6 wallet can actually fill.
@@ -61,7 +61,8 @@ No API keys required for the public endpoints above. Rate limits apply. On Pages
 
 ## Honest limits
 
-- Paper fills assume a small mid-price slip. Live Solana priority fees, MEV, and impact are worse.
+- PAPER fills assume a small mid-price slip. LIVE Jupiter priority fees, MEV, and impact are worse.
+- LIVE requires typing `LIVE` each browser session. Kill switch flips back to PAPER; signed tickets still need a hand close or flatten.
 - Pool “unique takers” are not unique humans.
 - Unlock calendars, treasuries, audits, and protocol revenue are **not** in these feeds.
 - A research score is a ranking heuristic, not a valuation.

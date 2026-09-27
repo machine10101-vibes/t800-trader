@@ -12,9 +12,11 @@ import {
   cancelResting,
   closeTicket,
   configureBot,
+  confirmLiveMode,
   controlBot,
   detachWallet,
   loadDesk,
+  setPaperMode,
   shellDesk,
   tradingProfitUsd,
   tradingSnapshot,
@@ -118,6 +120,8 @@ function ChainDesk({
   const [watchDraft, setWatchDraft] = useState("");
   const [watchError, setWatchError] = useState<string | null>(null);
   const [knownBooks, setKnownBooks] = useState<string[]>([]);
+  const [liveConfirm, setLiveConfirm] = useState(false);
+  const [pendingLiveConfig, setPendingLiveConfig] = useState<Partial<BotConfig> | null>(null);
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
@@ -441,9 +445,13 @@ function ChainDesk({
     }, 4200);
   }, [desk?.config.walletSwaps, desk?.trades]);
 
-  const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten") => {
+  const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten" | "kill") => {
     if (!wallet) {
       setError(copy.needWallet);
+      return;
+    }
+    if (action === "start" && chain === "solana" && desk?.config.walletSwaps && !desk.liveSessionArmed) {
+      setLiveConfirm(true);
       return;
     }
     busyRef.current = true;
@@ -507,11 +515,52 @@ function ChainDesk({
 
   const saveConfig = async (config: Partial<BotConfig>) => {
     if (!wallet) return;
+    if (chain === "solana" && config.walletSwaps && !desk?.liveSessionArmed) {
+      setPendingLiveConfig(config);
+      setLiveConfirm(true);
+      return;
+    }
+    if (chain === "solana" && config.walletSwaps === false) {
+      setBusy(true);
+      try {
+        applyDesk(await setPaperMode(chain));
+        if (Object.keys(config).some((key) => key !== "walletSwaps" && key !== "executionMode")) {
+          applyDesk(await configureBot({ ...config, walletSwaps: false, executionMode: "paper" }, chain));
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Config failed");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
       applyDesk(await configureBot(config, chain));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Config failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestLive = () => {
+    setPendingLiveConfig(null);
+    setLiveConfirm(true);
+  };
+
+  const finishLiveConfirm = async () => {
+    if (!wallet) return;
+    setBusy(true);
+    try {
+      applyDesk(await confirmLiveMode(chain));
+      if (pendingLiveConfig) {
+        applyDesk(await configureBot({ ...pendingLiveConfig, walletSwaps: true, executionMode: "live", killSwitch: false }, chain));
+      }
+      setPendingLiveConfig(null);
+      setLiveConfirm(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not arm LIVE");
     } finally {
       setBusy(false);
     }
@@ -736,6 +785,15 @@ function ChainDesk({
           >
             {desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
+          {chain === "solana" ? (
+            <button
+              disabled={busy || !desk}
+              onClick={() => void control("kill")}
+              className="btn mt-2 w-full bg-[var(--danger-soft)] text-[var(--crimson)]"
+            >
+              Kill LIVE
+            </button>
+          ) : null}
           {desk?.config.walletSwaps ? (
             <button
               disabled={busy || !trading || tradingProfitUsd(trading.equityUsd, desk?.bot.swapPrincipalUsd) < 1}
@@ -815,7 +873,7 @@ function ChainDesk({
                   onOpenPosition={setDetailId}
                   onClose={closePos}
                   onFlatten={() => void control("flatten")}
-                  onWalletSwaps={(on) => void saveConfig({ walletSwaps: on })}
+                  onWalletSwaps={(on) => (on ? requestLive() : void saveConfig({ walletSwaps: false, executionMode: "paper" }))}
                   onWithdraw={() => void withdrawProfit()}
                 />
               ) : null}
@@ -840,6 +898,16 @@ function ChainDesk({
           onExit={() => void closePos(detail.id)}
         />
       ) : null}
+      {liveConfirm ? (
+        <LiveConfirmModal
+          busy={busy}
+          onCancel={() => {
+            setLiveConfirm(false);
+            setPendingLiveConfig(null);
+          }}
+          onConfirm={() => void finishLiveConfirm()}
+        />
+      ) : null}
       {toasts.length ? (
         <div className="toast-stack">
           {toasts.map((t) => (
@@ -849,6 +917,53 @@ function ChainDesk({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function LiveConfirmModal({
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [acked, setAcked] = useState(false);
+  const ready = typed.trim() === "LIVE" && acked;
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
+      <div className="neon w-full max-w-lg p-6">
+        <h2 className="text-xl font-medium">Enable LIVE Jupiter swaps</h2>
+        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+          PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus
+          SOL fees. Spot shorts stay paper-only. A reload locks LIVE until you type LIVE again.
+        </p>
+        <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">
+          <input type="checkbox" className="mt-1" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
+          <span>I understand this can lose money and is not financial advice.</span>
+        </label>
+        <label className="mt-4 block text-sm">
+          <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Type LIVE</span>
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="mt-2 w-full rounded-2xl border border-[var(--line)] bg-black/30 px-3 py-2"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button disabled={busy || !ready} onClick={onConfirm} className="btn btn-magenta">
+            Arm LIVE this session
+          </button>
+          <button disabled={busy} onClick={onCancel} className="btn btn-ghost">
+            Stay on PAPER
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -964,6 +1079,9 @@ function Header({
               Watch
             </button>
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+            <Pill tone={desk?.config.walletSwaps ? (desk.liveSessionArmed ? "mint" : "magenta") : "default"}>
+              {desk?.config.walletSwaps ? (desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
+            </Pill>
             <Pill tone={armed ? "mint" : "default"}>
               <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
               {armed ? "Armed" : "Standby"}
@@ -1986,11 +2104,11 @@ function Book({
       <div className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
+            <Label>{swaps ? "LIVE Jupiter book" : "PAPER book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
                 ? copy.bookArm
-                : "Wallet swaps are off, so this book only simulates fills. Turn them on, then arm, and the wallet signature is what sends the swaps."}
+                : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto">
@@ -2000,7 +2118,7 @@ function Book({
               </button>
             ) : null}
             <button disabled={busy} onClick={() => onWalletSwaps(!swaps)} className="btn btn-ink w-full sm:w-auto">
-              {swaps ? "Stop wallet swaps" : "Send swaps to my wallet"}
+              {swaps ? "Back to PAPER" : "Enable LIVE…"}
             </button>
           </div>
         </div>
