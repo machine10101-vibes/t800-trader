@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, foldCandles, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, foldCandles, printClose, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
@@ -14,6 +14,14 @@ describe("candle tape", () => {
     assert.ok((candleChangePct(up, 3) ?? 0) > 0.9);
     assert.ok((candleChangePct(down, 3) ?? 0) < 0);
     assert.equal(candleChangePct(up, 12), null);
+  });
+
+  it("marks an open ticket from the newer of the candle and the live print", () => {
+    const prints = [{ time: 11 * 60, open: 100, high: 130, low: 100, close: 130, volume: 0 }];
+    assert.equal(printClose([bar(100, 10)], prints), 130);
+    assert.equal(printClose([bar(100, 12)], prints), 100);
+    assert.equal(printClose([], []), null);
+    assert.equal(printClose(undefined, undefined), null);
   });
 
   it("draws a live print before the 1-minute fetch arrives", () => {

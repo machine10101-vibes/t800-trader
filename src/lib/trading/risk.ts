@@ -291,13 +291,22 @@ function leverageHurry(leverage: number | undefined): number {
   return 1;
 }
 
+/** Minutes since the fill. A missing timestamp is treated as already stale so a stuck ticket can exit. */
+export function positionAgeMin(position: Pick<Position, "openedAt" | "lastUpdate">, nowMs = Date.now()): number {
+  const opened = Date.parse(position.openedAt);
+  if (Number.isFinite(opened)) return (nowMs - opened) / 60_000;
+  const updated = Date.parse(position.lastUpdate);
+  if (Number.isFinite(updated)) return (nowMs - updated) / 60_000;
+  return Number.POSITIVE_INFINITY;
+}
+
 export function exitReason(
   position: Position,
   nowMs = Date.now(),
   timeCapMin?: number,
 ): "stop" | "target" | "trail" | "time" | "risk-off" | null {
   const { usd } = unrealizedPnl(position);
-  const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
+  const ageMin = positionAgeMin(position, nowMs);
   const fallback = (position.sector ?? "Unknown") === "Meme" ? POLICY.memeTimeCapMin : POLICY.timeCapMin;
   const timeCap = policyNum(timeCapMin, fallback);
   const trailFrac = (position.leverage ?? 1) >= 5 ? 0.35 : 0.55;
@@ -367,7 +376,7 @@ export function managePosition(
   const hard = exitReason(position, nowMs, hurriedCap);
   if (hard && hard !== "time") return { exit: hard };
   const r = rMultiple(position);
-  const ageMin = (nowMs - Date.parse(position.openedAt)) / 60_000;
+  const ageMin = positionAgeMin(position, nowMs);
   if (ageMin >= hurriedStale && r < 0.15) return { exit: "time" };
   if (hard) return { exit: hard };
 

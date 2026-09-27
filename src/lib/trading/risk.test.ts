@@ -464,6 +464,85 @@ describe("risk", () => {
     assert.equal(plan.exit, undefined);
   });
 
+  it("closes a ticket left open since yesterday even when the stored mark never moved", () => {
+    const openedAt = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+    const plan = managePosition({
+      id: "p",
+      mint: "m",
+      symbol: "SOL",
+      poolAddress: "x",
+      sector: "L1",
+      side: "long",
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 100,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt,
+      lastUpdate: openedAt,
+      reason: "reclaim",
+      researchScore: 70,
+      highWater: 100,
+      lowWater: 100,
+      notional: 100,
+      initialStop: 98,
+      scaled: false,
+    });
+    assert.equal(plan.exit, "time");
+  });
+
+  it("closes a ticket once the live mark trades through the stop", () => {
+    const plan = managePosition({
+      id: "p",
+      mint: "m",
+      symbol: "SOL",
+      poolAddress: "x",
+      sector: "L1",
+      side: "long",
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 97,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      reason: "reclaim",
+      researchScore: 70,
+      highWater: 100,
+      lowWater: 97,
+      notional: 97,
+      initialStop: 98,
+      scaled: false,
+    });
+    assert.equal(plan.exit, "stop");
+  });
+
+  it("exits a ticket whose open time cannot be read", () => {
+    const plan = managePosition({
+      id: "p",
+      mint: "m",
+      symbol: "SOL",
+      poolAddress: "x",
+      sector: "L1",
+      side: "long",
+      qty: 1,
+      entryPrice: 100,
+      markPrice: 100,
+      stopPrice: 98,
+      targetPrice: 104,
+      openedAt: "yesterday",
+      lastUpdate: "yesterday",
+      reason: "reclaim",
+      researchScore: 70,
+      highWater: 100,
+      lowWater: 100,
+      notional: 100,
+      initialStop: 98,
+      scaled: false,
+    });
+    assert.equal(plan.exit, "time");
+  });
+
   it("moves a winner to breakeven and asks to scale at 1R", () => {
     const plan = managePosition({
       id: "p",

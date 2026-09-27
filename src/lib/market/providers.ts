@@ -230,6 +230,20 @@ async function gtPools(path: string, source: string, chain: ChainId): Promise<To
   return json.data.map((p) => toCandidate(p, tokens, source, chain)).filter((x): x is TokenCandidate => Boolean(x));
 }
 
+const poolPriceCache = new Map<string, { at: number; price: number }>();
+
+/** Spot price for an open ticket whose mint is no longer on the scanned book. */
+export async function livePoolPrice(pool: string, chain: ChainId): Promise<number | null> {
+  if (!pool) return null;
+  const key = `${chain}:${pool}`;
+  const hit = poolPriceCache.get(key);
+  if (hit && hit.price > 0 && Date.now() - hit.at < 15_000) return hit.price;
+  const row = await gtPool(pool, "geckoterminal:mark", chain).catch(() => null);
+  const price = row && row.priceUsd > 0 ? row.priceUsd : null;
+  if (price) poolPriceCache.set(key, { at: Date.now(), price });
+  return price;
+}
+
 async function gtPool(address: string, source: string, chain: ChainId): Promise<TokenCandidate | null> {
   const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${address}?include=base_token,quote_token`;
   const json = await paceGecko(() => fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 }));

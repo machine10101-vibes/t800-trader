@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_CONFIG, emptyState } from "../store";
 import type { Signal } from "../types";
-import { closePosition, markBook, openPosition, scaleOut } from "./paper";
+import { closePosition, markBook, marksForOpen, openPosition, scaleOut } from "./paper";
 
 function signal(over: Partial<Signal> = {}): Signal {
   return {
@@ -104,5 +104,30 @@ describe("paper", () => {
     assert.equal(closed.positions.length, 0);
     assert.ok(Math.abs(closed.portfolio.equityUsd - closed.portfolio.cashUsd) < 1e-6);
     assert.equal(closed.portfolio.winCount, 2);
+  });
+
+  it("moves a mark onto a checksum quote and keeps it when the quote is zero", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
+    const opened = openPosition(
+      state,
+      signal({ mint: "0xAbCdEF0000000000000000000000000000000001", price: 100 }),
+      1,
+    );
+    const pos = opened.positions[0]!;
+    const moved = markBook(
+      opened,
+      marksForOpen([pos], [{ mint: "0xabcdef0000000000000000000000000000000001", price: 80 }]),
+    );
+    assert.equal(moved.positions[0]?.markPrice, 80);
+    const stuck = markBook(opened, marksForOpen([pos], [{ mint: pos.mint, price: 0 }]));
+    assert.equal(stuck.positions[0]?.markPrice, pos.entryPrice);
+  });
+
+  it("marks a ticket that left the book from its pool print", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
+    const opened = openPosition(state, signal({ mint: "left-the-book", poolAddress: "pool-a", price: 100 }), 1);
+    const pos = opened.positions[0]!;
+    const marked = markBook(opened, marksForOpen([pos], [], [{ pool: "pool-a", price: 140 }]));
+    assert.equal(marked.positions[0]?.markPrice, 140);
   });
 });

@@ -44,8 +44,14 @@ async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Pro
     await mutateState(async (current) => {
       const still = current.positions.find((p) => p.id === pos.id);
       if (!still?.signature || still.side !== "long") return current;
-      const fill = await executor(orderForPosition(still, "close", current.config.venues));
-      return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
+      try {
+        const fill = await executor(orderForPosition(still, "close", current.config.venues));
+        return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (!isAlreadyFlat(message)) throw error;
+        return pushEquity(closePosition(current, still.id, still.markPrice, "manual"));
+      }
     }, chain);
   }
 }
@@ -93,10 +99,18 @@ export async function controlBot(
   const executor = liveKit ? liveKit.executor : solana ? executorFor(solana) : undefined;
   const maker = liveKit ? liveKit.maker : solana ? makerDesk(solana) : null;
   const budget = () => (liveKit ? liveKit.budget() : budgetFor(solana));
-  if (action === "tick") {
+    if (action === "tick") {
     const state = await loadState(chain);
     const live = state.config.walletSwaps && state.bot.running;
-    await tickBot(executor, live ? await budget() : null, live ? maker : null, chain);
+    let funds: WalletBudget | null = null;
+    if (live) {
+      try {
+        funds = await budget();
+      } catch {
+        funds = null;
+      }
+    }
+    await tickBot(executor, funds, live ? maker : null, chain);
     return buildDesk(false, chain);
   }
   if ((action === "stop" || action === "flatten" || action === "reset") && maker) {

@@ -26,6 +26,17 @@ export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | nu
 }
 
 /**
+ * Newest close between the 1-minute bars and the live prints.
+ * Used to mark an open ticket. Signals keep using the 1-minute bars alone.
+ */
+export function printClose(candles: Candle[] | null | undefined, prints: Candle[] | undefined): number | null {
+  const bar = candles?.length ? candles[candles.length - 1] : undefined;
+  const print = prints?.length ? prints[prints.length - 1] : undefined;
+  const pick = !bar ? print : !print ? bar : bar.time >= print.time ? bar : print;
+  return pick && pick.close > 0 ? pick.close : null;
+}
+
+/**
  * Append a live print so a tape can draw before the 1-minute fetch lands.
  * Prints inside 4 seconds update the last bar instead of adding another one.
  */

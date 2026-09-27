@@ -1,7 +1,7 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { GAS_CRO } from "@/lib/cronos/constants";
-import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { foldCandles, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadMarket } from "@/lib/market/providers";
+import { candleChangePct, foldCandles, printClose, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -28,10 +28,10 @@ import {
   walletRiskBook,
   type WalletBudget,
 } from "./risk";
-import { closePosition, flattenBook, markBook, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
+import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition } from "./leverage";
-import { reentryBlocked } from "./close";
+import { isAlreadyFlat, reentryBlocked } from "./close";
 import type { MakerDesk } from "./quote";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
@@ -41,11 +41,22 @@ function huntRank(token: ScoredCandidate): number {
   return green + token.researchScore * 0.15 + (token.watchlist ? 25 : 0);
 }
 
-function priceMap(state: AppState, extras: { mint: string; price: number }[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const p of state.positions) map.set(p.mint, p.markPrice);
-  for (const e of extras) map.set(e.mint, e.price);
-  return map;
+async function marksForPositions(
+  positions: Position[],
+  candidates: { mint: string; priceUsd: number }[],
+  chain: ChainId,
+): Promise<Map<string, number>> {
+  const quotes = candidates.map((row) => ({ mint: row.mint, price: row.priceUsd }));
+  for (const pos of positions) {
+    if (findQuote(pos.mint, quotes)) continue;
+    const price = await livePoolPrice(pos.poolAddress, chain);
+    if (price && price > 0) quotes.push({ mint: pos.mint, price });
+  }
+  const prints = positions.map((pos) => ({
+    pool: pos.poolAddress,
+    price: printClose(cachedOhlcv(pos.poolAddress), cachedTapeMarks(pos.poolAddress)) ?? 0,
+  }));
+  return marksForOpen(positions, quotes, prints);
 }
 
 async function walletExit(
@@ -67,7 +78,9 @@ async function walletExit(
     const fill = await executor(orderForPosition(pos, "close", state.config.venues));
     return closePosition(state, pos.id, fill.price, reason, fill.signature);
   } catch (error) {
-    blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet sell failed"}`);
+    const message = error instanceof Error ? error.message : "wallet sell failed";
+    if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
+    blocked.push(`${pos.symbol}: ${message}`);
     return state;
   }
 }
@@ -79,15 +92,13 @@ export async function tickBot(
   chain: ChainId = "solana",
 ): Promise<AppState> {
   return mutateState(async (state) => {
+    let next = state;
     try {
       const market = await loadMarket(false, chain);
       const byMint = new Map(market.candidates.map((c) => [c.mint, c]));
-      const marks: { mint: string; price: number }[] = market.candidates.map((c) => ({
-        mint: c.mint,
-        price: c.priceUsd,
-      }));
+      const prices = await marksForPositions(state.positions, market.candidates, chain);
 
-      let next = markBook(state, priceMap(state, marks));
+      next = markBook(state, prices);
       next = { ...next, portfolio: rollSession(next.portfolio) };
       if (next.bot.skipReentry && !reentryBlocked(next.bot.skipReentry, next.bot.skipReentry.mint)) {
         next = { ...next, bot: { ...next.bot, skipReentry: null } };
@@ -140,7 +151,10 @@ export async function tickBot(
       }
       if (next.bot.running) for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint) ?? [...byMint.values()].find((row) => sameMint(row.mint, pos.mint));
-        const cashTape = Boolean(live && tapeInCash(live.flows.m15.priceChangePct));
+        const candles = cachedOhlcv(pos.poolAddress);
+        const m15 = live ? live.flows.m15.priceChangePct : candleChangePct(candles ?? [], 15);
+        const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
+        const cashTape = m15 !== null && tapeInCash(m15);
         if (cashTape) {
           const before = next.positions.length;
           next = await walletExit(next, pos, "fade", executor, blocked);
@@ -148,12 +162,12 @@ export async function tickBot(
           continue;
         }
         if (next.config.scratchEnabled === false) continue;
-        if (!live || !shouldScratch(pos, live.flows.m5.priceChangePct, live.flows.m15.priceChangePct)) continue;
+        if (m5 === null || m15 === null || !shouldScratch(pos, m5, m15)) continue;
         const before = next.positions.length;
         next = await walletExit(next, pos, "time", executor, blocked);
         if (next.positions.length < before) closed += 1;
       }
-      next = markBook(next, priceMap(next, marks));
+      next = markBook(next, prices);
 
       const signals: Signal[] = [];
       let opened = 0;
@@ -241,10 +255,12 @@ export async function tickBot(
         }
       }
       const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
-      const nativeMark = marks.find((row) => sameMint(row.mint, nativeMint))?.price ?? 0;
+      const nativeMark = [...prices.entries()].find(([mint, price]) => price > 0 && sameMint(mint, nativeMint))?.[1] ?? 0;
       const priced =
         budget && !(budget.solPriceUsd > 0) && nativeMark > 0 ? { ...budget, solPriceUsd: nativeMark } : budget;
       const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps);
+      const balanceUnread = Boolean(next.config.walletSwaps && next.bot.running && !budget);
+      if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
         next = studyTape(next, research.candidates, market.regime.stance);
@@ -322,6 +338,7 @@ export async function tickBot(
             thesis: advice.note ? `${signal.thesis} Learned: ${advice.note}.` : signal.thesis,
           };
           shown.push(learned);
+          if (balanceUnread) continue;
           if (reentryBlocked(next.bot.skipReentry, learned.mint)) {
             blocked.push(`${learned.symbol}: closed by hand — the next ticket waits a few minutes`);
             continue;
@@ -465,7 +482,7 @@ export async function tickBot(
         }
       }
 
-      next = markBook(next, priceMap(next, marks));
+      next = markBook(next, prices);
       next = pushEquity(next);
       const fills = opened || closed ? ` · opened ${opened} · closed ${closed}` : "";
       const stuck = !opened && !closed && blocked[0] ? ` · ${blocked[0]}` : "";
@@ -488,15 +505,15 @@ export async function tickBot(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tick failed";
       return {
-        ...state,
+        ...next,
         bot: {
-          ...state.bot,
+          ...next.bot,
           lastError: message,
           lastTickAt: new Date().toISOString(),
           lastNote: message,
-          lastOpened: state.bot.lastOpened ?? 0,
-          lastClosed: state.bot.lastClosed ?? 0,
-          blocked: state.bot.blocked ?? [],
+          lastOpened: next.bot.lastOpened ?? 0,
+          lastClosed: next.bot.lastClosed ?? 0,
+          blocked: next.bot.blocked ?? [],
         },
       };
     }

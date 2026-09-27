@@ -1,3 +1,4 @@
+import { sameMint } from "@/lib/chain";
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
 import { rememberClose } from "./learn";
@@ -179,9 +180,44 @@ export function closePosition(
   });
 }
 
+/** First positive quote for this mint, including a Cronos address that differs only by checksum. */
+export function findQuote(mint: string, quotes: { mint: string; price: number }[]): number | undefined {
+  for (const quote of quotes) {
+    if (quote.price > 0 && sameMint(quote.mint, mint)) return quote.price;
+  }
+  return undefined;
+}
+
+function quotedPrice(prices: Map<string, number>, mint: string): number | undefined {
+  const direct = prices.get(mint);
+  if (direct !== undefined && direct > 0) return direct;
+  for (const [key, value] of prices) {
+    if (value > 0 && sameMint(key, mint)) return value;
+  }
+  return undefined;
+}
+
+/** Live quotes win. A pool print fills a ticket that has left the scanned book. A zero quote is ignored. */
+export function marksForOpen(
+  positions: Pick<Position, "mint" | "poolAddress">[],
+  quotes: { mint: string; price: number }[],
+  poolPrints: { pool: string; price: number }[] = [],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const quote of quotes) {
+    if (quote.price > 0) map.set(quote.mint, quote.price);
+  }
+  for (const pos of positions) {
+    if (quotedPrice(map, pos.mint)) continue;
+    const print = poolPrints.find((row) => row.pool && row.pool === pos.poolAddress);
+    if (print && print.price > 0) map.set(pos.mint, print.price);
+  }
+  return map;
+}
+
 export function markBook(state: AppState, prices: Map<string, number>): AppState {
   const positions = state.positions.map((p) => {
-    const px = prices.get(p.mint) ?? p.markPrice;
+    const px = quotedPrice(prices, p.mint) ?? p.markPrice;
     return markPosition(p, px);
   });
   const unreal = positions.reduce((acc, p) => acc + unrealizedPnl(p).usd, 0);
