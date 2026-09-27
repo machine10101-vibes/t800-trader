@@ -18,25 +18,25 @@ describe("candle tape", () => {
 
   it("folds five 1-minute bars into one 5-minute bar", () => {
     const start = 1_700_003_100;
-    const closes = [1, 1.4, 0.8, 1.1, 1.2, 1.3];
+    const closes = [10, 14, 8, 11, 12, 13];
     const candles = closes.map((close, i) => ({
       time: start + i * 60,
       open: close,
-      high: close + 0.1,
-      low: close - 0.1,
+      high: close + 1,
+      low: close - 1,
       close,
       volume: 2,
     }));
     const folded = foldCandles(candles, 5);
     assert.equal(folded.length, 2);
     assert.equal(folded[0].time, start);
-    assert.equal(folded[0].open, 1);
-    assert.equal(folded[0].close, 1.2);
-    assert.equal(folded[0].high, 1.5);
-    assert.equal(folded[0].low, 0.7);
+    assert.equal(folded[0].open, 10);
+    assert.equal(folded[0].close, 12);
+    assert.equal(folded[0].high, 15);
+    assert.equal(folded[0].low, 7);
     assert.equal(folded[0].volume, 10);
-    assert.equal(folded[1].open, 1.3);
-    assert.equal(folded[1].close, 1.3);
+    assert.equal(folded[1].open, 13);
+    assert.equal(folded[1].close, 13);
   });
 
   it("stamps the 5-minute and 15-minute moves from 1-minute bars", () => {
