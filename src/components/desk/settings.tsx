@@ -1,7 +1,7 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
-import { nextSettingsDraft } from "@/lib/deskSettings";
+import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS, venueSummary } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -102,7 +102,11 @@ export function SettingsPanel({
           max={10_000}
           step={1}
           value={local.maxLiveNotionalUsd}
-          onChange={(v) => set({ maxLiveNotionalUsd: v })}
+          onChange={(v) => {
+            const cap = commitTicketCap(String(v), local.maxLiveNotionalUsd);
+            set({ maxLiveNotionalUsd: cap });
+            if (cap !== saved.maxLiveNotionalUsd) onSave({ maxLiveNotionalUsd: cap });
+          }}
         />
       </Section>
 
@@ -547,6 +551,24 @@ function Field({
 }) {
   const digits = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
   const shown = digits === 0 ? String(Math.round(value)) : value.toFixed(digits);
+  const [draft, setDraft] = useState(shown);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(shown);
+  }, [shown]);
+  const commitDraft = () => {
+    focused.current = false;
+    const text = draft.trim();
+    const next = text ? Number(text) : Number.NaN;
+    if (!Number.isFinite(next)) {
+      setDraft(shown);
+      return;
+    }
+    const resolved = Math.min(max, Math.max(min, next));
+    const printed = digits === 0 ? String(Math.round(resolved)) : resolved.toFixed(digits);
+    setDraft(printed);
+    if (resolved !== value) onChange(resolved);
+  };
   return (
     <label className={`block rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${disabled ? "opacity-50" : ""}`}>
       <div className="flex items-start justify-between gap-3 text-sm">
@@ -565,11 +587,18 @@ function Field({
           min={min}
           max={max}
           step={step}
-          value={value}
+          value={focused.current ? draft : shown}
           disabled={disabled}
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            if (Number.isFinite(next)) onChange(next);
+          onFocus={() => {
+            focused.current = true;
+            setDraft(shown);
+          }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur();
+            }
           }}
         />
       ) : (
