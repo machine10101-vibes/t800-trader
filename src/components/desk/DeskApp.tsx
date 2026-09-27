@@ -22,6 +22,7 @@ import {
   tradingSnapshot,
   withdrawTradingProfit,
 } from "@/lib/client";
+import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { CORE_CANDLE_MS, POPULAR_CANDLE_MS } from "@/lib/market/ohlcvPlan";
@@ -399,8 +400,7 @@ function ChainDesk({
         setDetailId(null);
         return;
       }
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (isDeskShortcutTarget(e.target)) return;
       if (e.key >= "1" && e.key <= "5") {
         const next = NAV[Number(e.key) - 1];
         if (next) {
@@ -2355,7 +2355,15 @@ function PositionActions({
         <button
           type="button"
           disabled={closing}
-          onClick={onClose}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+          onKeyDown={(event) => {
+            if (event.code === "Space" || event.key === "Enter" || event.key.toLowerCase() === "f") {
+              event.stopPropagation();
+            }
+          }}
           className="rounded-lg border border-[var(--danger-border)] bg-[var(--danger-fill)] px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--crimson)] disabled:opacity-60"
         >
           {closing ? "Closing…" : "Close"}
@@ -2421,7 +2429,15 @@ function PositionDrawer({
         <button
           type="button"
           disabled={closing}
-          onClick={onExit}
+          onClick={(event) => {
+            event.stopPropagation();
+            onExit();
+          }}
+          onKeyDown={(event) => {
+            if (event.code === "Space" || event.key === "Enter" || event.key.toLowerCase() === "f") {
+              event.stopPropagation();
+            }
+          }}
           className="btn mt-6 w-full bg-[var(--danger-soft)] text-[var(--crimson)] disabled:opacity-60"
         >
           {closing ? "Closing…" : "Close position"}

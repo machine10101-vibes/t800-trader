@@ -1,3 +1,6 @@
+import type { AppState } from "@/lib/types";
+import { closePosition, pushEquity } from "./paper";
+
 /** How long a hand close, stop, or target keeps the scan from opening another trade. */
 export const REENTRY_MS = 3 * 60_000;
 
@@ -46,4 +49,25 @@ export function reentryBlocked(
 /** Chain close found nothing left to sell, so the book row can come off. */
 export function isAlreadyFlat(message: string): boolean {
   return message.startsWith("ALREADY_FLAT");
+}
+
+/** Exit one named ticket. Flatten / disarm must not go through here. */
+export function applyHandClose(
+  state: AppState,
+  positionId: string,
+  price: number,
+  signature?: string,
+  note?: string,
+): AppState {
+  const pos = state.positions.find((p) => p.id === positionId);
+  if (!pos) return state;
+  const closed = pushEquity(closePosition(state, pos.id, price, "manual", signature));
+  return {
+    ...closed,
+    bot: {
+      ...closed.bot,
+      lastNote: note ?? `Closed ${pos.symbol} by hand`,
+      skipReentry: reentryHold(pos.mint),
+    },
+  };
 }
