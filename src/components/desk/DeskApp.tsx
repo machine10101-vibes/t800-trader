@@ -1,6 +1,6 @@
 "use client";
 
-import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
+import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
@@ -1152,6 +1152,35 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
   return bars;
 }
 
+function LegendToggle({
+  on,
+  tone,
+  label,
+  onClick,
+}: {
+  on: boolean;
+  tone: "magenta" | "ice" | "amber";
+  label: string;
+  onClick: () => void;
+}) {
+  const color = tone === "magenta" ? "var(--magenta)" : tone === "ice" ? "var(--ice)" : "var(--amber)";
+  return (
+    <button type="button" aria-pressed={on} data-on={on} onClick={onClick} className="legend-toggle" style={{ color }}>
+      {label}
+    </button>
+  );
+}
+
+function ScoreMeter({ score }: { score: number }) {
+  const width = Math.max(4, Math.min(100, score));
+  const color = score >= 70 ? "var(--mint)" : score >= 55 ? "var(--amber)" : "var(--crimson)";
+  return (
+    <span className="score-track" aria-hidden="true">
+      <span style={{ width: `${width}%`, background: color }} />
+    </span>
+  );
+}
+
 function Overview({
   desk,
   wallet,
@@ -1177,9 +1206,23 @@ function Overview({
   onArm: () => void;
   busy: boolean;
 }) {
+  const [layers, setLayers] = useState<ChartLayers>({ ema9: true, ema21: true, vwap: true });
+  const [tapeFilter, setTapeFilter] = useState<"all" | "live" | "up" | "down">("all");
+  const [priceTick, setPriceTick] = useState(0);
+  const [priceDir, setPriceDir] = useState<"up" | "down" | null>(null);
+  const lastPrice = useRef<number | null>(null);
   const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
   const bars = useWatchTapes(desk.tapes, chain);
+  const focusPrice = focus?.price ?? null;
+  useEffect(() => {
+    const prev = lastPrice.current;
+    if (prev !== null && focusPrice !== null && prev !== focusPrice) {
+      setPriceDir(focusPrice >= prev ? "up" : "down");
+      setPriceTick((tick) => tick + 1);
+    }
+    lastPrice.current = focusPrice;
+  }, [focusPrice]);
   const focusTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? desk.tapes[0] ?? null;
   const focusCandles = focusTape ? bars[focusTape.poolAddress] ?? [] : [];
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
@@ -1207,7 +1250,9 @@ function Overview({
                   Live
                 </Pill>
               </div>
-              <div className="hero-price mt-4 num text-4xl">{focus ? priceFmt(focus.price) : "—"}</div>
+              <div key={priceTick} className={`hero-price mt-4 num text-4xl ${priceDir === "up" ? "price-up" : priceDir === "down" ? "price-down" : ""}`}>
+                {focus ? priceFmt(focus.price) : "—"}
+              </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
                 {focusTape ? (
@@ -1243,14 +1288,14 @@ function Overview({
             <div className="border-t border-[var(--line)] p-3 lg:border-t-0 lg:border-l">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
                 <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 5m` : "5m tape"}</span>
-                <span className="flex gap-3 tracking-normal normal-case">
-                  <span className="text-[var(--magenta)]">EMA 9</span>
-                  <span className="text-[var(--ice)]">EMA 21</span>
-                  <span className="text-[var(--amber)]">VWAP</span>
+                <span className="flex gap-1.5 tracking-normal normal-case">
+                  <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+                  <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+                  <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
                 </span>
               </div>
               <div className="h-[210px]">
-                <CandleChart candles={focusCandles} />
+                <CandleChart candles={focusCandles} layers={layers} />
               </div>
             </div>
           </div>
@@ -1277,8 +1322,29 @@ function Overview({
         <p className="mb-3 px-1 text-sm leading-6 text-[var(--text)]">
           {desk.bot.lastNote ?? copy.waitingTick}
         </p>
+        <div className="mb-3 flex flex-wrap gap-1.5 px-1">
+          {(
+            [
+              ["all", "All"],
+              ["live", "Signaling"],
+              ["up", "15m up"],
+              ["down", "15m down"],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} type="button" aria-pressed={tapeFilter === id} data-on={tapeFilter === id} onClick={() => setTapeFilter(id)} className="filter-chip">
+              {label}
+            </button>
+          ))}
+        </div>
         <div className={`grid gap-3 ${bookTokens(chain).length > 1 ? "sm:grid-cols-2 xl:grid-cols-3" : ""}`}>
-          {bookTokens(chain).map((token) => {
+          {bookTokens(chain).filter((token) => {
+            const tape = desk.tapes.find((row) => row.symbol === token.symbol);
+            const live = desk.signals.some((row) => row.symbol === token.symbol);
+            if (tapeFilter === "live") return live;
+            if (tapeFilter === "up") return (tape?.change15m ?? 0) > 0.05;
+            if (tapeFilter === "down") return (tape?.change15m ?? 0) < -0.05;
+            return true;
+          }).map((token) => {
             const symbol = token.symbol;
             const tape = desk.tapes.find((row) => row.symbol === symbol);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
@@ -1306,12 +1372,21 @@ function Overview({
                 </div>
                 <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[168px]">
-                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} /> : <div className="grid h-full place-items-center text-[11px] tracking-[0.12em] text-[var(--faint)]">Finding the pool</div>}
+                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} layers={layers} /> : <div className="grid h-full place-items-center text-[11px] tracking-[0.12em] text-[var(--faint)]">Finding the pool</div>}
                 </div>
               </button>
             );
           })}
         </div>
+        {tapeFilter !== "all" && bookTokens(chain).every((token) => {
+          const tape = desk.tapes.find((row) => row.symbol === token.symbol);
+          const live = desk.signals.some((row) => row.symbol === token.symbol);
+          if (tapeFilter === "live") return !live;
+          if (tapeFilter === "up") return !((tape?.change15m ?? 0) > 0.05);
+          return !((tape?.change15m ?? 0) < -0.05);
+        }) ? (
+          <p className="px-1 pb-2 text-sm text-[var(--muted)]">Nothing in this cut right now.</p>
+        ) : null}
       </section>
 
       {open.length ? <PositionRail positions={open} onOpen={onOpenPosition} /> : null}
@@ -1335,7 +1410,8 @@ function Overview({
           </span>
         </div>
         <div className="h-[220px]">
-          <ScatterTape dots={desk.tapeDots} />
+          <ScatterTape dots={desk.tapeDots} onPick={onFocus} />
+          <p className="px-2 pb-1 text-[11px] tracking-[0.12em] text-[var(--faint)]">Click a name to focus it. Hover reads the score.</p>
         </div>
       </section>
 
@@ -1456,16 +1532,22 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
           <div className="neon p-4 text-sm text-[var(--muted)]">No live finalists this cycle.</div>
         ) : (
           desk.research.map((r) => (
-            <button key={r.id} type="button" onClick={() => onOpen(r)} className="neon block w-full p-4 text-left">
+            <button key={r.id} type="button" onClick={() => onOpen(r)} className="radar-card neon block w-full p-4 text-left">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium">{r.ticker}</div>
                   <div className="text-[11px] text-[var(--faint)]">{r.asset} · {venueLabel(venueForDex(r.candidate.dex))}</div>
                 </div>
-                <div className="shrink-0 text-right">
-                  <div className="num text-sm">{priceFmt(r.price)}</div>
-                  <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <div className="text-right">
+                    <div className="num text-sm">{priceFmt(r.price)}</div>
+                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                  </div>
+                  <ScoreRing score={r.researchScore} />
                 </div>
+              </div>
+              <div className="mt-3">
+                <ScoreMeter score={r.researchScore} />
               </div>
               <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r.coreThesis}</p>
               <p className="mt-2 text-xs leading-5 text-[var(--text)]">{r.keyCatalyst}</p>
@@ -1508,8 +1590,15 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
               desk.research.map((r) => (
                 <tr
                   key={r.id}
+                  tabIndex={0}
                   onClick={() => onOpen(r)}
-                  className="cursor-pointer border-t border-[var(--line)] hover:bg-[var(--accent-wash)]"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onOpen(r);
+                    }
+                  }}
+                  className="radar-row cursor-pointer border-t border-[var(--line)]"
                 >
                   <td className="px-4 py-3 font-medium">{r.asset}</td>
                   <td className="num">
@@ -1536,7 +1625,10 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
                   <td className="max-w-[160px] truncate">{r.keyCatalyst}</td>
                   <td className="max-w-[160px] truncate text-[var(--crimson)]">{r.biggestRisk}</td>
                   <td className="num">{r.keyMetric}</td>
-                  <td className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</td>
+                  <td className="pr-4">
+                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                    <ScoreMeter score={r.researchScore} />
+                  </td>
                 </tr>
               ))
             )}
@@ -1654,7 +1746,9 @@ function BotView({
             <Label>This tick</Label>
             <ul className="space-y-1">
               {(desk.bot.blocked ?? []).map((b) => (
-                <li key={b}>— {b}</li>
+                <li key={b} className={b.includes("red") ? "text-[var(--crimson)]" : b.includes("green") ? "text-[var(--mint)]" : undefined}>
+                  — {b}
+                </li>
               ))}
             </ul>
           </div>

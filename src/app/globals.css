@@ -462,6 +462,91 @@ input[type="range"] {
   opacity: 0.9;
 }
 
+.legend-toggle {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  padding: 0.15rem 0.55rem;
+  font-size: 11px;
+  opacity: 0.38;
+}
+
+.legend-toggle[data-on="true"] {
+  border-color: currentColor;
+  background: var(--accent-wash);
+  opacity: 1;
+}
+
+.filter-chip {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--faint);
+  padding: 0.3rem 0.7rem;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filter-chip[data-on="true"] {
+  border-color: var(--line-2);
+  background: var(--accent-soft);
+  color: var(--magenta);
+}
+
+.score-track {
+  display: block;
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--chart-grid);
+}
+
+.score-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.radar-row {
+  transition: background 160ms ease;
+}
+
+.radar-row:hover,
+.radar-row:focus-visible {
+  background: var(--accent-wash);
+  outline: none;
+  box-shadow: inset 3px 0 0 var(--magenta);
+}
+
+.radar-card {
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.radar-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-2);
+}
+
+@keyframes priceUp {
+  0% { color: var(--mint); }
+  100% { color: var(--text); }
+}
+
+@keyframes priceDown {
+  0% { color: var(--crimson); }
+  100% { color: var(--text); }
+}
+
+.price-up {
+  animation: priceUp 720ms ease;
+}
+
+.price-down {
+  animation: priceDown 720ms ease;
+}
+
 .nav-scroll {
   scrollbar-width: none;
 }
