@@ -24,7 +24,7 @@ import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { CORE_CANDLE_MS, POPULAR_CANDLE_MS } from "@/lib/market/ohlcvPlan";
 import { cachedOhlcv, cachedTapeMarks, candleFetchedAt, rememberTapeMark, requestBookCandles } from "@/lib/market/providers";
-import { bookTokens } from "@/lib/market/universe";
+import { bookPools, bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
@@ -1225,12 +1225,13 @@ function Overview({
   const watchTapes = desk.tapes.slice();
   const seenMint = new Set(watchTapes.map((tape) => tape.mint));
   for (const token of bookTokens(chain)) {
-    if (!token.pool || seenMint.has(token.mint)) continue;
+    const pool = token.pool ?? bookPools(chain).find((row) => row.mint === token.mint)?.pool;
+    if (!pool || seenMint.has(token.mint)) continue;
     seenMint.add(token.mint);
     watchTapes.push({
       symbol: token.symbol,
       mint: token.mint,
-      poolAddress: token.pool,
+      poolAddress: pool,
       price: token.priceUsd,
       change5m: token.change5m,
       change15m: 0,
@@ -1253,6 +1254,7 @@ function Overview({
   const focusPool =
     matchedTape?.poolAddress ??
     bookTokens(chain).find((token) => token.mint === focus?.candidate.mint)?.pool ??
+    bookPools(chain).find((row) => row.mint === focus?.candidate.mint)?.pool ??
     focusTape?.poolAddress;
   const focusCandles = focusPool ? (bars[focusPool] ?? []) : [];
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
@@ -1381,8 +1383,12 @@ function Overview({
             const tape = desk.tapes.find((row) => row.mint === token.mint);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
-            const pool = tape?.poolAddress ?? token.pool;
-            const price = tape?.price ?? token.priceUsd;
+            const pool = tape?.poolAddress ?? token.pool ?? bookPools(chain).find((row) => row.mint === token.mint)?.pool;
+            const price =
+              tape?.price ??
+              token.priceUsd ??
+              (token.symbol === "SOL" && desk.regime.sol.price > 0 ? desk.regime.sol.price : undefined) ??
+              (token.symbol === "CRO" ? desk.research.find((row) => row.ticker === "CRO")?.price : undefined);
             const change5m = tape?.change5m ?? token.change5m;
             const selected = token.mint === (focus?.candidate.mint ?? focusTape?.mint);
             return (
