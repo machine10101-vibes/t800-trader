@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -824,6 +824,17 @@ describe("settings stop and target", () => {
     assert.equal(later.stopPrice, 101);
     assert.equal(later.targetPrice, 105);
     assert.equal(managePosition({ ...later, markPrice: 102 }, Date.now(), { stopLossPct: 0.4, targetProfitPct: 1 }).exit, undefined);
+  });
+
+  it("sells a $100 ticket after a $5 loss and a $4 gain when those are the percents", () => {
+    const locked = presetBracket(held({ qty: 1, notional: 100, markPrice: 100 }), { stopLossPct: 5, targetProfitPct: 4 });
+    assert.equal(ticketEntryUsd(locked), 100);
+    const down = { ...locked, markPrice: 95, lowWater: 95 };
+    assert.ok(Math.abs(unrealizedPnl(down).usd + 5) < 1e-6);
+    assert.equal(managePosition(down).exit, "stop");
+    const up = { ...locked, markPrice: 104, highWater: 104 };
+    assert.ok(Math.abs(unrealizedPnl(up).usd - 4) < 1e-6);
+    assert.equal(managePosition(up).exit, "target");
   });
 
   it("stamps new tickets with the settings stop and target", () => {

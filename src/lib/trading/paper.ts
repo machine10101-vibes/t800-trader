@@ -97,6 +97,8 @@ export function openPosition(
     initialStop: stop,
     scaled: false,
     bracketPreset: true,
+    stopLossPct: signal.stopPct,
+    targetProfitPct: signal.targetPct,
     signature: stamp?.signature || undefined,
     tokenDecimals: stamp?.tokenDecimals,
     leverage: leverage > 1 ? leverage : undefined,

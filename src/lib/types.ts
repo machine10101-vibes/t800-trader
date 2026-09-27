@@ -201,6 +201,10 @@ export interface Position {
   scaled: boolean;
   /** Stop and target were locked at entry. Later setting changes do not move them. */
   bracketPreset?: boolean;
+  /** Preset loss as a percent of the ticket price (qty × entry). */
+  stopLossPct?: number;
+  /** Preset profit as a percent of the ticket price (qty × entry). */
+  targetProfitPct?: number;
   /** Set when a wallet signed the open. Missing means the ticket never left this browser. */
   signature?: string;
   tokenDecimals?: number;

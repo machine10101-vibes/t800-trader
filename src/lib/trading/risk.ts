@@ -281,10 +281,18 @@ export function markPosition(position: Position, price: number): Position {
   };
 }
 
+/** Dollars the ticket was worth at entry. Stop and target are a percent of this price. */
+export function ticketEntryUsd(position: Pick<Position, "qty" | "entryPrice" | "notional">): number {
+  const fromFill = position.qty * position.entryPrice;
+  if (fromFill > 0) return fromFill;
+  return position.notional > 0 ? position.notional : 0;
+}
+
 export function unrealizedPnl(position: Position): { usd: number; pct: number } {
   const dir = position.side === "long" ? 1 : -1;
   const pct = ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * dir;
-  const usd = position.qty * position.entryPrice * (pct / 100);
+  const basis = ticketEntryUsd(position);
+  const usd = basis > 0 ? basis * (pct / 100) : 0;
   return { usd, pct };
 }
 
@@ -407,7 +415,9 @@ export function alignBracket(position: Position, config?: Partial<BotConfig>): P
 /** First scan locks the settings bracket. After that the prices stay on the ticket. */
 export function presetBracket(position: Position, config?: Partial<BotConfig>): Position {
   if (position.bracketPreset) return position;
-  return { ...alignBracket(position, config), bracketPreset: true };
+  const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
+  const targetProfitPct = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
+  return { ...alignBracket(position, config), bracketPreset: true, stopLossPct, targetProfitPct };
 }
 
 /** New tickets use the settings stop and target, not the signal's built-in percents. */
@@ -427,6 +437,9 @@ export function managePosition(
   nowMs = Date.now(),
   config?: Partial<BotConfig>,
 ): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
+  const pnlPct = unrealizedPnl(position).pct;
+  if (typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) return { exit: "target" };
+  if (typeof position.stopLossPct === "number" && pnlPct <= -position.stopLossPct + 1e-6) return { exit: "stop" };
   const meme = (position.sector ?? "Unknown") === "Meme";
   const timeCap = meme
     ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)
