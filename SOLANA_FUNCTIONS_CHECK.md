@@ -125,6 +125,8 @@ Live smokes hit public Solana RPC and GeckoTerminal only. They skip on timeout/4
 `readBalances` on the WSOL mint succeeded (read-only).  
 `tickBot` completed a paper tick against live Solana feeds with no transaction sent.
 
+`npm run build` compiled, type-checked, linted, and exported the static `/t800-trader` desk.
+
 ## Cronos
 
 No Cronos sources, scripts, or env. Nothing was modified or tested on Cronos.
