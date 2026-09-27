@@ -1,7 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { emptyState } from "../store";
+import type { Signal } from "../types";
 import { applyControl } from "./bot";
+import { openPosition } from "./paper";
+
+function signal(over: Partial<Signal> = {}): Signal {
+  return {
+    id: "s",
+    mint: "mint",
+    symbol: "SOL",
+    poolAddress: "pool",
+    sector: "L1",
+    side: "long",
+    reason: "reclaim",
+    confidence: 70,
+    price: 100,
+    stopPct: 2,
+    targetPct: 4,
+    thesis: "t",
+    researchScore: 65,
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
 
 const config = emptyState().config;
 
@@ -21,6 +43,19 @@ describe("bot control", () => {
     assert.equal(reset.portfolio.tradeCount, 0);
     assert.equal(reset.portfolio.cashUsd, 1_000);
     assert.equal(reset.positions.length, 0);
+  });
+
+  it("flatten exits every ticket and stop leaves the book", () => {
+    let state = emptyState({ ...config, startingEquity: 1_000 });
+    state = openPosition(state, signal({ mint: "mint-a", symbol: "AAA", price: 100 }), 1);
+    state = openPosition(state, signal({ mint: "mint-b", symbol: "BBB", price: 50 }), 1);
+    assert.equal(state.positions.length, 2);
+    const stopped = applyControl(state, "stop");
+    assert.equal(stopped.bot.running, false);
+    assert.equal(stopped.positions.length, 2);
+    const flat = applyControl(state, "flatten");
+    assert.equal(flat.positions.length, 0);
+    assert.equal(flat.bot.running, false);
   });
 
   it("kill switch flips the desk back to paper and stops the bot", () => {

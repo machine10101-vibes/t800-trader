@@ -123,6 +123,19 @@ describe("paper", () => {
     assert.equal(stuck.positions[0]?.markPrice, pos.entryPrice);
   });
 
+  it("closes one ticket without flattening the rest of the book", () => {
+    let state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
+    state = openPosition(state, signal({ mint: "mint-keep", symbol: "KEEP", price: 100 }), 1);
+    state = openPosition(state, signal({ mint: "mint-drop", symbol: "DROP", price: 40 }), 1);
+    assert.equal(state.positions.length, 2);
+    const drop = state.positions.find((p) => p.mint === "mint-drop")!;
+    const keep = state.positions.find((p) => p.mint === "mint-keep")!;
+    const closed = closePosition(state, drop.id, drop.markPrice, "manual");
+    assert.equal(closed.positions.length, 1);
+    assert.equal(closed.positions[0]!.id, keep.id);
+    assert.equal(closed.positions[0]!.mint, "mint-keep");
+  });
+
   it("marks a ticket that left the book from its pool print", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ mint: "left-the-book", poolAddress: "pool-a", price: 100 }), 1);

@@ -1,6 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isAlreadyFlat, reentryBlocked, reentryHold } from "./close";
+import { DEFAULT_CONFIG, emptyState } from "../store";
+import type { Signal } from "../types";
+import { applyHandClose, isAlreadyFlat, reentryBlocked, reentryHold } from "./close";
+import { openPosition } from "./paper";
+
+function signal(over: Partial<Signal> = {}): Signal {
+  return {
+    id: "s",
+    mint: "mint",
+    symbol: "SOL",
+    poolAddress: "pool",
+    sector: "L1",
+    side: "long",
+    reason: "reclaim",
+    confidence: 70,
+    price: 100,
+    stopPct: 2,
+    targetPct: 4,
+    thesis: "t",
+    researchScore: 65,
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
 
 describe("hand close", () => {
   it("blocks the same mint until the hold expires", () => {
@@ -15,5 +38,24 @@ describe("hand close", () => {
   it("only treats an explicit already-flat close as a book cleanup", () => {
     assert.equal(isAlreadyFlat("ALREADY_FLAT: trading key does not hold this token"), true);
     assert.equal(isAlreadyFlat("Jupiter could not simulate this swap"), false);
+  });
+
+  it("closes only the named ticket and leaves the rest of the book", () => {
+    let state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
+    state = openPosition(state, signal({ mint: "mint-a", symbol: "AAA", price: 100 }), 1);
+    state = openPosition(state, signal({ mint: "mint-b", symbol: "BBB", price: 50 }), 1);
+    state = openPosition(state, signal({ mint: "mint-c", symbol: "CCC", price: 25 }), 1);
+    assert.equal(state.positions.length, 3);
+    const drop = state.positions.find((p) => p.mint === "mint-b")!;
+    const closed = applyHandClose(state, drop.id, drop.markPrice);
+    assert.equal(closed.positions.length, 2);
+    assert.deepEqual(
+      closed.positions.map((p) => p.mint).sort(),
+      ["mint-a", "mint-c"],
+    );
+    assert.equal(closed.bot.skipReentry?.mint, "mint-b");
+    assert.equal(closed.bot.lastNote, "Closed BBB by hand");
+    assert.equal(closed.trades[0]?.reason, "manual");
+    assert.equal(closed.trades[0]?.mint, "mint-b");
   });
 });
