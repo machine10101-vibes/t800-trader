@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -671,5 +671,76 @@ describe("walletRiskBook", () => {
     assert.equal(risk.portfolio.cashUsd, 12);
     assert.equal(risk.portfolio.dayPnlUsd, 0);
     assert.equal(dayLossBreached(risk.portfolio, { ...DEFAULT_CONFIG, dailyLossLimitPct: 6 }), false);
+  });
+});
+
+describe("LIVE gates and short trail", () => {
+  const longSignal = {
+    id: "s",
+    mint: "abc",
+    symbol: "ABC",
+    poolAddress: "p",
+    sector: "DEX",
+    side: "long",
+    reason: "breakout",
+    confidence: 80,
+    price: 1,
+    stopPct: 2,
+    targetPct: 4,
+    thesis: "",
+    researchScore: 70,
+    createdAt: new Date().toISOString(),
+  } as Signal;
+
+  it("blocks new tickets when the kill switch is on", () => {
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: longSignal,
+        config: { ...DEFAULT_CONFIG, killSwitch: true },
+        portfolio: portfolio(),
+      }),
+      "Kill switch is on",
+    );
+  });
+
+  it("keeps live spot shorts paper-only", () => {
+    assert.match(
+      canOpen({
+        positions: [],
+        signal: { ...longSignal, side: "short" },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "risk-on",
+      }) ?? "",
+      /perps/,
+    );
+  });
+
+  it("trails a short from highWater (the favorable extreme)", () => {
+    const opened = Date.parse("2026-09-27T00:00:00.000Z");
+    const pos = {
+      id: "p",
+      mint: "m",
+      symbol: "JUP",
+      poolAddress: "x",
+      sector: "DEX",
+      side: "short" as const,
+      qty: 10,
+      entryPrice: 100,
+      markPrice: 96,
+      stopPrice: 106,
+      targetPrice: 90,
+      openedAt: new Date(opened).toISOString(),
+      lastUpdate: new Date(opened + 60_000).toISOString(),
+      reason: "fade" as const,
+      researchScore: 70,
+      highWater: 88,
+      lowWater: 104,
+      notional: 960,
+      initialStop: 106,
+      scaled: false,
+    } as Position;
+    assert.equal(exitReason(pos, opened + 5 * 60_000), "trail");
   });
 });

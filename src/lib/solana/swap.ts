@@ -6,6 +6,14 @@ import { marginFill } from "@/lib/trading/leverage";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { broadcastTransaction, mintDecimals, readBalances, readMintBalance, type WalletSession } from "./wallet";
+import {
+  decodeSwapTransaction,
+  executeUltraOrder,
+  fetchUltraOrder,
+  fromAtomic,
+  SOL_FEE_RESERVE as ULTRA_SOL_RESERVE,
+  toAtomic,
+} from "./jupiter";
 
 export const SLIPPAGE_BPS = 80;
 const FEE_SOL = SOL_FEE_RESERVE;
@@ -45,7 +53,7 @@ export function planSpotOrder(
   if (order.side === "short") {
     throw new Error("Wallet swaps are spot buys and sells. Shorts are not sent to the wallet.");
   }
-  if (order.sol < MIN_SOL) {
+  if (order.kind === "open" && order.sol < MIN_SOL) {
     throw new Error("Need at least 0.005 SOL in the wallet to pay the network fee.");
   }
   const dexes = dexesForVenues(order.venues);
@@ -145,6 +153,9 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   }
   const tokenDecimals =
     sized.tokenDecimals ?? (sized.kind === "open" ? undefined : await mintDecimals(sized.mint));
+  if (sized.kind !== "open" && balances.sol < ULTRA_SOL_RESERVE) {
+    return settleUltraClose(signer, trader, sized, tokenDecimals ?? (await mintDecimals(sized.mint)));
+  }
   const plan = planSpotOrder({
     ...sized,
     tokenDecimals,
@@ -198,6 +209,35 @@ export async function settleSpot(session: WalletSession, order: ChainOrder): Pro
   const qty = plan.outputMint === USDC_MINT ? inQty : outQty;
   const decimals = plan.outputMint === USDC_MINT ? (tokenDecimals ?? inDecimals) : outDecimals;
   return { signature, qty, price, tokenDecimals: decimals };
+}
+
+async function settleUltraClose(
+  signer: Keypair,
+  trader: string,
+  order: ChainOrder,
+  tokenDecimals: number,
+): Promise<ChainFill> {
+  const qty = order.mint === SOL_MINT ? Math.max(0, order.qty - ULTRA_SOL_RESERVE) : order.qty;
+  if (!(qty > 0)) {
+    throw new Error(
+      "Closing this SOL position would drop the wallet under Phantom's 0.005 SOL fee buffer. Leave 0.006 SOL, or close a token position instead.",
+    );
+  }
+  const orderRes = await fetchUltraOrder({
+    inputMint: order.mint,
+    outputMint: USDC_MINT,
+    amount: toAtomic(qty, tokenDecimals),
+    taker: trader,
+    slippageBps: SLIPPAGE_BPS,
+  });
+  const tx = decodeSwapTransaction(orderRes.transaction);
+  tx.sign([signer]);
+  const signature = await executeUltraOrder(Buffer.from(tx.serialize()).toString("base64"), orderRes.requestId);
+  if (!signature) throw new Error("Jupiter Ultra did not return a signature");
+  const outQty = fromAtomic(orderRes.outAmount, 6);
+  const inQty = fromAtomic(orderRes.inAmount, tokenDecimals);
+  const price = inQty > 0 ? outQty / inQty : order.price;
+  return { signature, qty: inQty > 0 ? inQty : qty, price, tokenDecimals };
 }
 
 export function executorFor(session: WalletSession): ChainExecutor {

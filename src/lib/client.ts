@@ -22,6 +22,7 @@ import { applyControl, tickBot } from "@/lib/trading/bot";
 import { isAlreadyFlat, reentryHold } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
+import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd };
 
@@ -38,7 +39,6 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
 async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const state = await loadState(chain);
-    if (!state.config.walletSwaps) return;
     const pos = state.positions.find((p) => p.signature && p.side === "long");
     if (!pos) return;
     await mutateState(async (current) => {
@@ -89,8 +89,33 @@ async function cronosLive(session: DeskSession | null | undefined) {
   };
 }
 
+export async function confirmLiveMode(chain: ChainId = "solana"): Promise<DeskPayload> {
+  armLiveSession();
+  await mutateState((state) => ({
+    ...state,
+    config: normalizeConfig({
+      ...state.config,
+      executionMode: "live",
+      walletSwaps: true,
+      killSwitch: false,
+    }),
+    bot: { ...state.bot, lastNote: "LIVE armed this session — each new ticket still needs the trading key" },
+  }), chain);
+  return buildDesk(false, chain);
+}
+
+export async function setPaperMode(chain: ChainId = "solana"): Promise<DeskPayload> {
+  disarmLiveSession();
+  await mutateState((state) => ({
+    ...state,
+    config: normalizeConfig({ ...state.config, executionMode: "paper", walletSwaps: false }),
+    bot: { ...state.bot, lastNote: "PAPER — fills stay in this browser" },
+  }), chain);
+  return buildDesk(false, chain);
+}
+
 export async function controlBot(
-  action: "start" | "stop" | "reset" | "tick" | "flatten",
+  action: "start" | "stop" | "reset" | "tick" | "flatten" | "kill",
   session?: DeskSession | null,
   chain: ChainId = "solana",
 ): Promise<DeskPayload> {
@@ -99,7 +124,12 @@ export async function controlBot(
   const executor = liveKit ? liveKit.executor : solana ? executorFor(solana) : undefined;
   const maker = liveKit ? liveKit.maker : solana ? makerDesk(solana) : null;
   const budget = () => (liveKit ? liveKit.budget() : budgetFor(solana));
-    if (action === "tick") {
+  if (action === "kill") {
+    disarmLiveSession();
+    await mutateState((state) => applyControl(state, "kill"), chain);
+    return buildDesk(false, chain);
+  }
+  if (action === "tick") {
     const state = await loadState(chain);
     const live = state.config.walletSwaps && state.bot.running;
     let funds: WalletBudget | null = null;
@@ -262,7 +292,7 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
   const saved = await mutateState(async (state) => {
     const pos = state.positions.find((p) => p.id === positionId);
     if (!pos) return state;
-    if (state.config.walletSwaps && pos.signature && pos.side === "long") {
+    if (pos.signature && pos.side === "long") {
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
         const fill = await executor(orderForPosition(pos, "close", state.config.venues));

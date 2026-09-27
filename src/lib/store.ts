@@ -18,9 +18,14 @@ export const DEFAULT_CONFIG: BotConfig = {
   scanSeconds: 5,
   ...POLICY,
   venues: [...DEFAULT_VENUES],
-  walletSwaps: true,
+  walletSwaps: false,
   liveTradesRev: 1,
   multipliers: [5, 10],
+  executionMode: "paper",
+  slippageBps: 80,
+  maxLiveNotionalUsd: 250,
+  minSolForFees: 0.02,
+  killSwitch: false,
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -70,6 +75,10 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
     multipliers: normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers),
+    slippageBps: clampNum(src.slippageBps, DEFAULT_CONFIG.slippageBps, 1, 2_000, true),
+    maxLiveNotionalUsd: clampNum(src.maxLiveNotionalUsd, DEFAULT_CONFIG.maxLiveNotionalUsd, 5, 10_000),
+    minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
+    killSwitch: asBool(src.killSwitch, false),
     ...liveSwapChoice(input, src),
   };
 }
@@ -81,11 +90,14 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
 function liveSwapChoice(
   input: Partial<BotConfig> | null | undefined,
   merged: Partial<BotConfig>,
-): { walletSwaps: boolean; liveTradesRev: number } {
+): { walletSwaps: boolean; liveTradesRev: number; executionMode: BotConfig["executionMode"] } {
   const savedRev = input?.liveTradesRev;
   const chosen = typeof savedRev === "number" && Number.isFinite(savedRev) && savedRev >= 1;
-  if (chosen) return { walletSwaps: asBool(merged.walletSwaps, true), liveTradesRev: 1 };
-  return { walletSwaps: true, liveTradesRev: 1 };
+  const exec = input?.executionMode === "live" || input?.executionMode === "paper" ? input.executionMode : null;
+  let swaps = chosen ? asBool(merged.walletSwaps, false) : false;
+  if (exec === "live") swaps = true;
+  if (exec === "paper") swaps = false;
+  return { walletSwaps: swaps, liveTradesRev: 1, executionMode: swaps ? "live" : "paper" };
 }
 
 function hydrate(state: AppState): AppState {

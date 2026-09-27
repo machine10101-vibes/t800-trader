@@ -213,7 +213,10 @@ export function canOpen(args: {
   minCashUsd?: number;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
-  if (positions.length >= config.maxPositions) return "Max positions reached";
+  if (config.killSwitch) return "Kill switch is on";
+  if (config.walletSwaps && signal.side === "short") {
+    return "Spot Solana cannot short without perps — shorts stay paper-only";
+  }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
@@ -319,7 +322,7 @@ export function exitReason(
     if (position.markPrice >= position.stopPrice) return "stop";
     if (position.markPrice <= position.targetPrice) return "target";
     const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * trailFrac;
-    if (usd > 0 && position.lowWater <= locked && position.markPrice > locked) return "trail";
+    if (usd > 0 && position.highWater <= locked && position.markPrice > locked) return "trail";
   }
   if (ageMin > timeCap) return "time";
   return null;

@@ -14,6 +14,7 @@ export type Sector =
   | "Unknown";
 
 export type Side = "long" | "short";
+export type ExecutionMode = "paper" | "live";
 export type TradeReason =
   | "breakout"
   | "reclaim"
@@ -272,6 +273,16 @@ export interface BotConfig {
    * After that, an explicit off stays off.
    */
   liveTradesRev: number;
+  /** PAPER is the default. LIVE still needs a session confirm before swaps leave the browser. */
+  executionMode: ExecutionMode;
+  /** Jupiter quote slippage for LIVE preflight and Ultra closes. */
+  slippageBps: number;
+  /** Hard cap on a single LIVE ticket, in USD. */
+  maxLiveNotionalUsd: number;
+  /** Minimum native SOL before a LIVE buy is allowed. */
+  minSolForFees: number;
+  /** When on, new LIVE tickets are refused. Open signed tickets can still close. */
+  killSwitch: boolean;
 }
 
 export interface ChainOrder {
@@ -470,4 +481,6 @@ export interface DeskPayload {
   stats: BookStats;
   learning: LearningReport;
   generatedAt: string;
+  /** In-memory only. Reload clears it even if the saved book still says LIVE. */
+  liveSessionArmed: boolean;
 }
