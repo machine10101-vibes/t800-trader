@@ -297,7 +297,9 @@ export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): st
     research.some((r) => r.sector === "Meme")
       ? "Meme finalists can print research scores from activity alone. Activity is not value accrual."
       : "Excluding memes does not make remaining tokens 'fundamentals'. Many Solana venues do not route value to the token.",
-    "Paper fills assume mid-price plus a small slip. Live Solana priority fees, MEV, and impact would be worse.",
+    "Paper fills assume mid-price plus a small slip. Live Jupiter swaps pay real priority fees, MEV, and impact.",
+    "LIVE mode spends the connected wallet's USDC. Phantom/Solflare must approve every swap. There is no server-side key.",
+    "Spot Solana cannot short without a perps venue. Short signals stay paper-only even when LIVE is on.",
     "SOL beta can invert in a session. The desk can be right on a pool and still lose if the L1 dumps.",
   ];
 }

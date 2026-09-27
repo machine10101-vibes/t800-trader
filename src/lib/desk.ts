@@ -1,5 +1,6 @@
 import { invalidateMarketCache } from "@/lib/market/providers";
 import { clearResearchCache, runResearch, wrongAbout } from "@/lib/research/engine";
+import { isLiveSessionArmed } from "@/lib/solana/live-session";
 import { loadState } from "@/lib/store";
 import type { DeskPayload } from "@/lib/types";
 
@@ -33,5 +34,6 @@ export async function buildDesk(force = false): Promise<DeskPayload> {
       volume24hUsd: c.volume24hUsd,
     })),
     generatedAt: new Date().toISOString(),
+    liveSessionArmed: isLiveSessionArmed(),
   };
 }

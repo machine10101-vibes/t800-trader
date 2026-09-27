@@ -27,6 +27,8 @@ describe("wallet-scoped paper store", () => {
     assert.equal(first.portfolio.cashUsd, 250);
     assert.equal(first.config.startingEquity, 250);
     assert.equal(first.config.maxPositions, DEFAULT_CONFIG.maxPositions);
+    assert.equal(first.config.executionMode, "paper");
+    assert.equal(first.config.killSwitch, false);
 
     const next = await mutateState((state) => ({
       ...state,

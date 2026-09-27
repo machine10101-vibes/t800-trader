@@ -45,6 +45,10 @@ export function canOpen(args: {
   if (positions.length >= config.maxPositions) return "Max positions reached";
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
+  if (config.killSwitch && config.executionMode === "live") return "Kill switch is on";
+  if (config.executionMode === "live" && signal.side === "short") {
+    return "Spot Solana cannot short without perps — shorts stay paper-only";
+  }
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   if (portfolio.cashUsd < 25) return "Insufficient cash";
   return null;

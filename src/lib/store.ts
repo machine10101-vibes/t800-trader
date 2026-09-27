@@ -11,7 +11,24 @@ export const DEFAULT_CONFIG: BotConfig = {
   allowShorts: true,
   allowMemes: true,
   scanSeconds: 8,
+  executionMode: "paper",
+  slippageBps: 100,
+  maxLiveNotionalUsd: 50,
+  minSolForFees: 0.02,
+  killSwitch: false,
 };
+
+export function normalizeConfig(config?: Partial<BotConfig> | null): BotConfig {
+  const merged = { ...DEFAULT_CONFIG, ...config };
+  return {
+    ...merged,
+    executionMode: merged.executionMode === "live" ? "live" : "paper",
+    slippageBps: Math.max(1, Math.min(2_000, Math.round(merged.slippageBps || DEFAULT_CONFIG.slippageBps))),
+    maxLiveNotionalUsd: Math.max(5, merged.maxLiveNotionalUsd || DEFAULT_CONFIG.maxLiveNotionalUsd),
+    minSolForFees: Math.max(0.005, merged.minSolForFees || DEFAULT_CONFIG.minSolForFees),
+    killSwitch: Boolean(merged.killSwitch),
+  };
+}
 
 let activeWallet: string | null = null;
 let memory: AppState | null = null;
@@ -25,10 +42,11 @@ function storageKey(wallet: string): string {
   return `t800-trader-state:${wallet}`;
 }
 
-export function emptyState(config: BotConfig = DEFAULT_CONFIG): AppState {
-  const equity = Math.max(0, config.startingEquity);
+export function emptyState(config: Partial<BotConfig> = DEFAULT_CONFIG): AppState {
+  const normalized = normalizeConfig(config);
+  const equity = Math.max(0, normalized.startingEquity);
   return {
-    config: { ...config, startingEquity: equity },
+    config: { ...normalized, startingEquity: equity },
     bot: { running: false, lastTickAt: null, lastError: null, ticks: 0, startedAt: null },
     portfolio: {
       cashUsd: equity,
@@ -56,6 +74,7 @@ function readBrowserState(wallet: string): AppState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed?.config || !parsed?.portfolio) return null;
+    parsed.config = normalizeConfig(parsed.config);
     return parsed;
   } catch {
     return null;

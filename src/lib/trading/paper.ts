@@ -10,10 +10,15 @@ export function fillPrice(signalPrice: number, side: "long" | "short", action: "
   return side === "long" ? signalPrice - slip : signalPrice + slip;
 }
 
-export function openPosition(state: AppState, signal: Signal, qty: number): AppState {
-  const price = fillPrice(signal.price, signal.side, "open");
+export function openPosition(
+  state: AppState,
+  signal: Signal,
+  qty: number,
+  extra?: { execution?: "paper" | "live"; txSignature?: string | null; price?: number },
+): AppState {
+  const price = extra?.price ?? fillPrice(signal.price, signal.side, "open");
   const notional = qty * price;
-  if (notional > state.portfolio.cashUsd) return state;
+  if (extra?.execution !== "live" && notional > state.portfolio.cashUsd) return state;
 
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
@@ -38,6 +43,8 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     highWater: price,
     lowWater: price,
     notional,
+    execution: extra?.execution ?? "paper",
+    txSignature: extra?.txSignature ?? null,
   };
 
   const trade: Trade = {
@@ -52,7 +59,9 @@ export function openPosition(state: AppState, signal: Signal, qty: number): AppS
     pnlPct: null,
     reason: signal.reason,
     at: new Date().toISOString(),
-    note: signal.thesis,
+    note: extra?.txSignature ? `${signal.thesis} tx ${extra.txSignature}` : signal.thesis,
+    execution: extra?.execution ?? "paper",
+    txSignature: extra?.txSignature ?? null,
   };
 
   return {
@@ -74,10 +83,16 @@ function bookedValue(position: Position): number {
   return position.qty * position.markPrice;
 }
 
-export function closePosition(state: AppState, positionId: string, priceHint: number, reason: Trade["reason"]): AppState {
+export function closePosition(
+  state: AppState,
+  positionId: string,
+  priceHint: number,
+  reason: Trade["reason"],
+  extra?: { execution?: "paper" | "live"; txSignature?: string | null; price?: number },
+): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
-  const price = fillPrice(priceHint, pos.side, "close");
+  const price = extra?.price ?? fillPrice(priceHint, pos.side, "close");
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
   const proceeds = bookedValue(marked);
@@ -93,7 +108,11 @@ export function closePosition(state: AppState, positionId: string, priceHint: nu
     pnlPct: pnl.pct,
     reason,
     at: new Date().toISOString(),
-    note: `${reason} exit from ${pos.reason} entry`,
+    note: extra?.txSignature
+      ? `${reason} exit from ${pos.reason} entry tx ${extra.txSignature}`
+      : `${reason} exit from ${pos.reason} entry`,
+    execution: extra?.execution ?? pos.execution ?? "paper",
+    txSignature: extra?.txSignature ?? null,
   };
 
   const realized = state.portfolio.realizedPnlUsd + pnl.usd;

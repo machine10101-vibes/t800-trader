@@ -22,4 +22,13 @@ describe("bot control", () => {
     assert.equal(reset.portfolio.cashUsd, 1_000);
     assert.equal(reset.positions.length, 0);
   });
+
+  it("kill switch flips the desk back to paper and stops the bot", () => {
+    const started = applyControl(emptyState({ ...config, startingEquity: 1_000, executionMode: "live" }), "start");
+    const killed = applyControl(started, "kill");
+    assert.equal(killed.bot.running, false);
+    assert.equal(killed.config.executionMode, "paper");
+    assert.equal(killed.config.killSwitch, true);
+    assert.equal(killed.portfolio.cashUsd, 1_000);
+  });
 });

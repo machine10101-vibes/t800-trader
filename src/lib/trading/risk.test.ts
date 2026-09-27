@@ -114,6 +114,31 @@ describe("risk", () => {
     assert.equal(reason, "Already in this mint");
   });
 
+  it("refuses a live spot short", () => {
+    const signal = {
+      id: "s",
+      mint: "abc",
+      symbol: "ABC",
+      poolAddress: "p",
+      side: "short",
+      reason: "fade",
+      confidence: 70,
+      price: 1,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 60,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    const reason = canOpen({
+      positions: [],
+      signal,
+      config: { ...DEFAULT_CONFIG, executionMode: "live", allowShorts: true },
+      portfolio: portfolio(),
+    });
+    assert.match(reason ?? "", /perps/);
+  });
+
   it("exits longs on stop, target, trail, and time", () => {
     const base = {
       id: "p",

@@ -5,7 +5,7 @@ Scope: Solana path only. This repository has **no Cronos modules, routes, or con
 
 ## What this repo actually is
 
-T-800 is a **static Next.js (GitHub Pages) research desk** with an in-browser **paper** book. It is not a custody bot, not a Jupiter/Raydium swapper, and it does not place on-chain orders.
+T-800 is a **static Next.js (GitHub Pages) research desk**. Default execution is **PAPER**. **LIVE** builds Jupiter swaps in the browser and asks Phantom/Solflare to sign. No server keys.
 
 | Expected live-trader capability | Present? |
 | --- | --- |
@@ -13,16 +13,20 @@ T-800 is a **static Next.js (GitHub Pages) research desk** with an in-browser **
 | Read-only SOL + USDC balances via public RPC | Yes |
 | Universe / regime / 5m signals | Yes (GeckoTerminal + CoinGecko + DefiLlama + Alternative.me) |
 | Paper buy / sell / marks / risk limits | Yes (`src/lib/trading/*`) |
-| Dry-run / paper mode | **This is the only mode** |
-| Live swap / quote / Jupiter / priority fees | **No — not implemented** |
+| PAPER default + LIVE confirmation | Yes (`LIVE_TRADING.md`, Risk tab) |
+| Jupiter quote + unsigned swap | Yes (`src/lib/solana/jupiter.ts`, lite-api) |
+| Wallet-signed live long buy/sell | Yes (`src/lib/solana/live.ts`) — SKIPPED here without an extension |
+| Spot short / perps | **No** — documented, paper-only |
 | Seed phrase / keypair / secret env | **No — must stay that way** |
 | Cronos | **No code** |
 
-There is no Node API, no CLI trade command, and no `process.env` secret. Optional env (build-time only):
+There is no Node API and no private-key env. Optional public build-time env:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SOLANA_RPC` | No | Prepend a custom read-only JSON-RPC. Defaults: `https://solana.publicnode.com`, `https://solana-rpc.publicnode.com` |
+| `NEXT_PUBLIC_SOLANA_RPC` | No | JSON-RPC for balances, decimals, confirm. PublicNode fallback |
+| `NEXT_PUBLIC_JUPITER_API` | No | Default `https://lite-api.jup.ag/swap/v1` |
+| `NEXT_PUBLIC_JUPITER_API_KEY` | No | Optional `x-api-key` for `api.jup.ag` |
 
 ## Map
 
@@ -31,7 +35,9 @@ src/app/page.tsx          → DeskApp (only UI entry)
 src/lib/client.ts         → loadDesk / controlBot / configureBot
 src/lib/desk.ts           → buildDesk
 src/lib/store.ts          → wallet-scoped localStorage paper book
-src/lib/solana/wallet.ts  → injected wallet + RPC balances / health
+src/lib/solana/wallet.ts  → injected wallet + RPC balances / sign + confirm
+src/lib/solana/jupiter.ts → quote URL / swap body / decode VersionedTransaction
+src/lib/solana/live.ts    → preflight, dry-run plan, execute + confirm
 src/lib/market/*          → Solana universe + public market feeds
 src/lib/research/*        → screen / score / thesis
 src/lib/trading/*         → paper execution, risk, signals, tick loop
@@ -71,8 +77,13 @@ Status after the checks in this PR. `SKIPPED` means the path cannot run here wit
 | `fetchOhlcv` | `market/providers.ts` | SKIPPED (this run) | GeckoTerminal `429` on a follow-up OHLCV pull after `loadMarket` |
 | `loadDesk` / `controlBot` / `configureBot` | `client.ts` | PASS (indirect) | Thin wrappers over store + desk + bot |
 | `buildDesk` | `desk.ts` | PASS (indirect) | Requires attached wallet + feeds |
-| Live Jupiter quote | — | SKIPPED | Not implemented |
-| Live swap / buy / sell on-chain | — | SKIPPED | Not implemented; paper only |
+| `quoteUrl` / `parseQuote` / `swapRequestBody` / `decodeSwapTransaction` | `solana/jupiter.ts` | PASS | Unit tests; no send |
+| `preflightLiveSwap` | `solana/live.ts` | PASS | Paper, kill, short, fees, max size, USDC |
+| `planLiveSwap` dry-run | `solana/live.ts` | PASS | Mocked Jupiter; builds tx, does not sign |
+| `executeLivePlan` + wallet approve | `solana/live.ts` | SKIPPED | Needs Phantom/Solflare on this origin and real USDC |
+| LIVE long buy/sell via Jupiter | `trading/bot.ts` | SKIPPED (wallet) | Wired; CI will not send |
+| LIVE short | `trading/risk.ts` | PASS (refused) | Spot Solana cannot short without perps |
+| Kill switch | `trading/bot.ts` | PASS | Flips to PAPER and stops |
 | Token-2022 USDC balance | `solana/wallet.ts` | SKIPPED | Mainnet USDC mint is still classic Token program |
 | Phantom/Solflare UI connect | `DeskApp.tsx` | SKIPPED | Needs a browser extension on this origin |
 | Cronos | — | SKIPPED | No Cronos code in this repo |
@@ -89,7 +100,7 @@ Status after the checks in this PR. `SKIPPED` means the path cannot run here wit
 8. **Watchlist pool fetch uses `WATCHLIST.slice(0, 12)`.** BONK, WIF, and JLP do not get a dedicated GeckoTerminal token-pool pull (they can still appear in trending/volume). Left as-is to avoid extra public API load; documented, not changed.
 9. **`@solana/web3.js` is used only for `PublicKey` + ATA PDA.** Heavy but valid. No broken import.
 10. **Public RPCs are assumed CORS-ok in the browser.** Node smokes cannot prove GitHub Pages CORS. If a wallet connect fails in production after approve, the next place to look is PublicNode CORS or rate limit — then set `NEXT_PUBLIC_SOLANA_RPC`.
-11. **No live swap stack.** If the goal was an on-chain Solana trader, that entire layer (quote, swap, priority fees, tx send, confirmation) is missing by design. This review does not add it.
+11. **LIVE Jupiter path is now wired** (`jupiter.ts` + `live.ts` + Risk confirmation). Wallet approve and a funded mainnet swap remain SKIPPED in this environment. Spot shorts still cannot go live.
 
 ## Unsafe defaults (accepted vs fixed)
 
@@ -115,8 +126,8 @@ Live smokes hit public Solana RPC and GeckoTerminal only. They skip on timeout/4
 ### Last local run (this PR)
 
 ```
-# tests 38
-# pass 37
+# tests 50
+# pass 49
 # fail 0
 # skipped 1   (fetchOhlcv 429 Too Many Requests)
 ```
@@ -125,7 +136,7 @@ Live smokes hit public Solana RPC and GeckoTerminal only. They skip on timeout/4
 `readBalances` on the WSOL mint succeeded (read-only).  
 `tickBot` completed a paper tick against live Solana feeds with no transaction sent.
 
-`npm run build` compiled, type-checked, linted, and exported the static `/t800-trader` desk.
+`npm run build` compiled, type-checked, linted, and exported the static `/t800-trader` desk after the LIVE layer.
 
 ## Cronos
 

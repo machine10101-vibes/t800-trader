@@ -1,6 +1,6 @@
-import { PublicKey } from "@solana/web3.js";
-import { USDC_MINT } from "@/lib/market/universe";
-import { fetchJson, nullableNum } from "@/lib/utils";
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
+import { fetchJson, nullableNum, sleep } from "@/lib/utils";
 
 const DEFAULT_RPCS = ["https://solana.publicnode.com", "https://solana-rpc.publicnode.com"];
 const RPC_TIMEOUT_MS = 10_000;
@@ -25,6 +25,8 @@ export interface InjectedProvider {
   publicKey?: { toBase58(): string } | null;
   connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toBase58(): string } }>;
   disconnect?: () => Promise<void>;
+  signAndSendTransaction?: (transaction: unknown) => Promise<{ signature: string } | string>;
+  signTransaction?: (transaction: unknown) => Promise<unknown>;
   on?: (event: string, fn: (...args: unknown[]) => void) => void;
   off?: (event: string, fn: (...args: unknown[]) => void) => void;
   removeListener?: (event: string, fn: (...args: unknown[]) => void) => void;
@@ -61,7 +63,7 @@ interface RpcResult<T> {
   error?: { message?: string };
 }
 
-async function rpc<T>(method: string, params: unknown[]): Promise<{ endpoint: string; result: T }> {
+export async function solanaRpc<T>(method: string, params: unknown[]): Promise<{ endpoint: string; result: T }> {
   let last: unknown;
   for (const url of solanaRpcs()) {
     const ctrl = new AbortController();
@@ -105,7 +107,7 @@ export function associatedUsdcAddress(owner: string): string {
 
 async function readUsdc(owner: PublicKey): Promise<number> {
   const ata = usdcAta(owner);
-  const acc = await rpc<{
+  const acc = await solanaRpc<{
     value?: {
       data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
     } | null;
@@ -116,14 +118,14 @@ async function readUsdc(owner: PublicKey): Promise<number> {
 }
 
 export async function pingSolanaRpc(): Promise<{ endpoint: string; result: string }> {
-  const { endpoint, result } = await rpc<string>("getHealth", []);
+  const { endpoint, result } = await solanaRpc<string>("getHealth", []);
   return { endpoint, result };
 }
 
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
   const pk = new PublicKey(address);
   const [lamports, usdc, solPriceUsd] = await Promise.all([
-    rpc<{ value: number }>("getBalance", [pk.toBase58()]),
+    solanaRpc<{ value: number }>("getBalance", [pk.toBase58()]),
     readUsdc(pk),
     liveSolPrice(),
   ]);
@@ -150,4 +152,73 @@ export async function disconnectWallet(provider?: InjectedProvider | null): Prom
   } catch {
     // Wallet may already be closed.
   }
+}
+
+const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+export async function readMintDecimals(mint: string): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+  if (mint === USDC_MINT) return 6;
+  const acc = await solanaRpc<{
+    value?: { data?: { parsed?: { info?: { decimals?: number } } } } | null;
+  }>("getAccountInfo", [mint, { encoding: "jsonParsed" }]);
+  const decimals = acc.result.value?.data?.parsed?.info?.decimals;
+  if (typeof decimals === "number" && Number.isFinite(decimals)) return decimals;
+  throw new Error(`Could not read decimals for mint ${mint}`);
+}
+
+export async function readTokenUiAmount(owner: string, mint: string): Promise<number> {
+  if (mint === SOL_MINT) {
+    const bal = await readBalances(owner);
+    return bal.sol;
+  }
+  const pk = new PublicKey(owner);
+  const programs = [TOKEN_PROGRAM.toBase58(), TOKEN_2022_PROGRAM];
+  let total = 0;
+  for (const programId of programs) {
+    const acc = await solanaRpc<{
+      value?: { account?: { data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } } } }[];
+    }>("getTokenAccountsByOwner", [pk.toBase58(), { mint, programId }, { encoding: "jsonParsed" }]);
+    for (const row of acc.result.value ?? []) {
+      const amt = row.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
+      if (typeof amt === "number" && Number.isFinite(amt)) total += amt;
+    }
+  }
+  return total;
+}
+
+function signatureFromWallet(result: { signature: string } | string): string {
+  if (typeof result === "string" && result.length > 0) return result;
+  if (typeof result === "object" && result && "signature" in result && result.signature) return result.signature;
+  throw new Error("Wallet signed but did not return a transaction signature");
+}
+
+export async function signAndSendVersionedTx(
+  provider: InjectedProvider,
+  transaction: VersionedTransaction,
+): Promise<string> {
+  if (provider.signAndSendTransaction) {
+    return signatureFromWallet(await provider.signAndSendTransaction(transaction));
+  }
+  if (!provider.signTransaction) {
+    throw new Error("Wallet cannot sign a swap. Use Phantom or Solflare.");
+  }
+  const signed = (await provider.signTransaction(transaction)) as VersionedTransaction;
+  const raw = Buffer.from(signed.serialize()).toString("base64");
+  const sent = await solanaRpc<string>("sendRawTransaction", [raw, { encoding: "base64", skipPreflight: false }]);
+  return sent.result;
+}
+
+export async function confirmSignature(signature: string, timeoutMs = 60_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const res = await solanaRpc<{
+      value?: { confirmationStatus?: string; err?: unknown }[] | null;
+    }>("getSignatureStatuses", [[signature], { searchTransactionHistory: true }]);
+    const status = res.result.value?.[0];
+    if (status?.err) throw new Error(`Swap landed with an error: ${JSON.stringify(status.err)}`);
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return;
+    await sleep(1_400);
+  }
+  throw new Error(`Swap not confirmed in time. Signature ${signature}`);
 }

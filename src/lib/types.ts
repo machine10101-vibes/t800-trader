@@ -14,6 +14,8 @@ export type Sector =
   | "Unknown";
 
 export type Side = "long" | "short";
+export type ExecutionMode = "paper" | "live";
+export type ExecutionVenue = "paper" | "live";
 export type TradeReason =
   | "breakout"
   | "reclaim"
@@ -181,6 +183,8 @@ export interface Position {
   highWater: number;
   lowWater: number;
   notional: number;
+  execution?: ExecutionVenue;
+  txSignature?: string | null;
 }
 
 export interface Trade {
@@ -196,6 +200,8 @@ export interface Trade {
   reason: TradeReason;
   at: string;
   note: string;
+  execution?: ExecutionVenue;
+  txSignature?: string | null;
 }
 
 export interface BotConfig {
@@ -209,6 +215,11 @@ export interface BotConfig {
   allowShorts: boolean;
   allowMemes: boolean;
   scanSeconds: number;
+  executionMode: ExecutionMode;
+  slippageBps: number;
+  maxLiveNotionalUsd: number;
+  minSolForFees: number;
+  killSwitch: boolean;
 }
 
 export interface BotState {
@@ -272,4 +283,5 @@ export interface DeskPayload {
   whatCouldBeWrong: string[];
   tapeDots: TapeDot[];
   generatedAt: string;
+  liveSessionArmed: boolean;
 }

@@ -1,9 +1,18 @@
 "use client";
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/desk/charts";
-import { attachWallet, configureBot, controlBot, detachWallet, loadDesk } from "@/lib/client";
+import {
+  attachWallet,
+  configureBot,
+  confirmLiveMode,
+  controlBot,
+  detachWallet,
+  loadDesk,
+  setLiveRuntime,
+  setPaperMode,
+} from "@/lib/client";
 import { fetchOhlcv } from "@/lib/market/providers";
-import { connectWallet, disconnectWallet, walletInstalled, type WalletSession } from "@/lib/solana/wallet";
+import { connectWallet, disconnectWallet, readBalances, walletInstalled, type WalletSession } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,6 +40,9 @@ export function DeskApp() {
   const [thesis, setThesis] = useState<ResearchThesis | null>(null);
   const [clock, setClock] = useState("");
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [livePrompt, setLivePrompt] = useState(false);
+  const [liveTyped, setLiveTyped] = useState("");
+  const [liveAck, setLiveAck] = useState(false);
 
   const applyDesk = useCallback((next: DeskPayload) => {
     setDesk(next);
@@ -41,7 +53,9 @@ export function DeskApp() {
   const refresh = useCallback(async () => {
     if (!wallet) return;
     try {
-      applyDesk(await loadDesk());
+      const [next, balances] = await Promise.all([loadDesk(), readBalances(wallet.address).catch(() => null)]);
+      applyDesk(next);
+      if (balances) setWallet((cur) => (cur ? { ...cur, ...balances, provider: cur.provider } : cur));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Desk refresh failed");
     } finally {
@@ -64,7 +78,22 @@ export function DeskApp() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!wallet) {
+      setLiveRuntime(null);
+      return;
+    }
+    setLiveRuntime({
+      address: wallet.address,
+      sol: wallet.sol,
+      usdc: wallet.usdc,
+      provider: wallet.provider,
+      send: true,
+    });
+  }, [wallet]);
+
   const disconnect = useCallback(async () => {
+    setLiveRuntime(null);
     await disconnectWallet(wallet?.provider);
     detachWallet();
     setWallet(null);
@@ -113,7 +142,7 @@ export function DeskApp() {
 
   useEffect(() => {
     if (!wallet || !desk?.bot.running) return;
-    const seconds = Math.max(6, desk.config.scanSeconds);
+    const seconds = Math.max(desk.config.executionMode === "live" ? 20 : 6, desk.config.scanSeconds);
     const id = setInterval(async () => {
       try {
         applyDesk(await controlBot("tick"));
@@ -122,7 +151,7 @@ export function DeskApp() {
       }
     }, seconds * 1000);
     return () => clearInterval(id);
-  }, [applyDesk, desk?.bot.running, desk?.config.scanSeconds, wallet]);
+  }, [applyDesk, desk?.bot.running, desk?.config.executionMode, desk?.config.scanSeconds, wallet]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -137,7 +166,7 @@ export function DeskApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desk?.bot.running, wallet]);
 
-  const control = async (action: "start" | "stop" | "reset" | "tick") => {
+  const control = async (action: "start" | "stop" | "reset" | "tick" | "kill") => {
     if (!wallet) {
       setError("Connect a Solana wallet to trade.");
       return;
@@ -145,6 +174,16 @@ export function DeskApp() {
     if (action === "start" && wallet.equityUsd <= 0) {
       setError("Wallet has no priced SOL/USDC. Fund it, then arm.");
       return;
+    }
+    if (action === "start" && desk?.config.executionMode === "live") {
+      if (desk.config.killSwitch) {
+        setError("Kill switch is on. Turn it off from Risk, then re-confirm LIVE.");
+        return;
+      }
+      if (!desk.liveSessionArmed) {
+        setLivePrompt(true);
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -163,6 +202,37 @@ export function DeskApp() {
       applyDesk(await configureBot(config));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Config failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestLive = () => {
+    setLiveTyped("");
+    setLiveAck(false);
+    setLivePrompt(true);
+  };
+
+  const confirmLive = async () => {
+    if (liveTyped.trim().toUpperCase() !== "LIVE" || !liveAck) return;
+    setBusy(true);
+    try {
+      applyDesk(await confirmLiveMode());
+      setLivePrompt(false);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not arm LIVE");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const goPaper = async () => {
+    setBusy(true);
+    try {
+      applyDesk(await setPaperMode());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not return to PAPER");
     } finally {
       setBusy(false);
     }
@@ -197,7 +267,7 @@ export function DeskApp() {
             {walletBusy ? "Waiting on wallet…" : walletInstalled() ? "Connect Solana wallet" : "Install Phantom or Solflare"}
           </button>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
-            Fills stay simulated at live marks. The wallet is required so the account is yours, not a $10k dummy.
+            Default is PAPER. LIVE Jupiter swaps need an explicit confirmation on the Risk tab — the wallet signs in-browser only.
           </p>
         </div>
       </div>
@@ -251,6 +321,13 @@ export function DeskApp() {
           </div>
           <div className="ml-auto flex items-center gap-3 text-sm">
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+            <Pill tone={desk.config.executionMode === "live" ? "crimson" : "mint"}>
+              {desk.config.executionMode === "live"
+                ? desk.liveSessionArmed
+                  ? "LIVE"
+                  : "LIVE locked"
+                : "PAPER"}
+            </Pill>
             <Pill tone={desk.bot.running ? "mint" : "default"}>
               <span className={`pulse-dot ${desk.bot.running ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
               {desk.bot.running ? "Armed" : "Standby"}
@@ -259,6 +336,14 @@ export function DeskApp() {
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Wallet</div>
               <div className="num">{usd(wallet.equityUsd)}</div>
             </div>
+            {desk.config.executionMode === "live" ? (
+              <button
+                onClick={() => void control("kill")}
+                className="hidden border border-[rgba(255,59,143,0.4)] px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-[var(--crimson)] sm:block"
+              >
+                Kill
+              </button>
+            ) : null}
             <button onClick={() => void disconnect()} className="hidden text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:block">
               Disconnect
             </button>
@@ -299,7 +384,10 @@ export function DeskApp() {
             {desk.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
           <p className="mt-3 px-2 text-[11px] leading-5 text-[var(--faint)]">
-            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC. Simulated fills at live marks.
+            {wallet.sol.toFixed(3)} SOL · {wallet.usdc.toFixed(2)} USDC.{" "}
+            {desk.config.executionMode === "live"
+              ? "LIVE spends USDC via Jupiter after you approve in the wallet."
+              : "PAPER fills are simulated at live marks."}
           </p>
         </aside>
 
@@ -309,6 +397,15 @@ export function DeskApp() {
               {error}
             </div>
           ) : null}
+          {desk.config.executionMode === "live" && !desk.liveSessionArmed ? (
+            <div className="border border-[rgba(255,59,143,0.3)] bg-[rgba(255,59,143,0.08)] px-4 py-3 text-sm">
+              LIVE preference is saved, but this session is locked.{" "}
+              <button className="underline" onClick={requestLive}>
+                Re-confirm to send Jupiter swaps
+              </button>
+              .
+            </div>
+          ) : null}
 
           {tab === "overview" ? (
             <Overview desk={desk} wallet={wallet} candles={candles} winRate={winRate} onOpen={setThesis} onArm={() => void control("start")} />
@@ -316,11 +413,32 @@ export function DeskApp() {
           {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
           {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
           {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} /> : null}
-          {tab === "risk" ? <RiskView desk={desk} busy={busy} onSave={saveConfig} onReset={() => void control("reset")} /> : null}
+          {tab === "risk" ? (
+            <RiskView
+              desk={desk}
+              busy={busy}
+              onSave={saveConfig}
+              onReset={() => void control("reset")}
+              onRequestLive={requestLive}
+              onPaper={() => void goPaper()}
+              onKill={() => void control("kill")}
+            />
+          ) : null}
         </main>
       </div>
 
       {thesis ? <ThesisDrawer thesis={thesis} onClose={() => setThesis(null)} /> : null}
+      {livePrompt ? (
+        <LiveConfirmModal
+          typed={liveTyped}
+          ack={liveAck}
+          busy={busy}
+          onTyped={setLiveTyped}
+          onAck={setLiveAck}
+          onCancel={() => setLivePrompt(false)}
+          onConfirm={() => void confirmLive()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -548,7 +666,7 @@ function BotView({
 }: {
   desk: DeskPayload;
   busy: boolean;
-  onControl: (a: "start" | "stop" | "reset" | "tick") => void;
+  onControl: (a: "start" | "stop" | "reset" | "tick" | "kill") => void;
   onOpen: (t: ResearchThesis) => void;
 }) {
   return (
@@ -559,8 +677,9 @@ function BotView({
             <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? "Scanning Solana" : "Idle"}</Pill>
             <h2 className="mt-3 text-3xl font-medium">Wallet-gated ticks. Time-boxed.</h2>
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-              The bot only trades names that survive the live screen, and only after a real wallet is connected. No dummy
-              account.
+              {desk.config.executionMode === "live"
+                ? "LIVE: a passing long can open a Jupiter USDC→token swap. Phantom or Solflare must approve each transaction. Shorts stay paper."
+                : "PAPER: fills are simulated at live marks. Switch to LIVE on the Risk tab only if you intend to spend real USDC."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -631,7 +750,7 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
   return (
     <div className="space-y-4 boot-fade">
       <div className="grid gap-4 md:grid-cols-3">
-        <Stat label="Sim book" value={usd(desk.portfolio.equityUsd)} sub={<Spark values={curve} />} />
+        <Stat label={desk.config.executionMode === "live" ? "Live book" : "Paper book"} value={usd(desk.portfolio.equityUsd)} sub={<Spark values={curve} />} />
         <Stat label="Wallet mark" value={usd(wallet.equityUsd)} sub={`${wallet.sol.toFixed(3)} SOL · ${wallet.usdc.toFixed(2)} USDC`} />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} />
       </div>
@@ -650,12 +769,13 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
               <th>Target</th>
               <th>Notional</th>
               <th>P&L</th>
+              <th>Venue</th>
             </tr>
           </thead>
           <tbody>
             {desk.positions.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={9}>
                   Flat. No live position.
                 </td>
               </tr>
@@ -673,6 +793,24 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
                     <td className="num">{usd(p.notional)}</td>
                     <td>
                       <Tone value={pnlPct} />
+                    </td>
+                    <td className="text-[11px] text-[var(--muted)]">
+                      {p.execution === "live" ? (
+                        p.txSignature ? (
+                          <a
+                            className="underline"
+                            href={`https://solscan.io/tx/${p.txSignature}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            tx
+                          </a>
+                        ) : (
+                          "live"
+                        )
+                      ) : (
+                        "paper"
+                      )}
                     </td>
                   </tr>
                 );
@@ -695,12 +833,13 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
               <th>Price</th>
               <th>P&L</th>
               <th>Why</th>
+              <th>Tx</th>
             </tr>
           </thead>
           <tbody>
             {desk.trades.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={7}>
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
                   No tickets.
                 </td>
               </tr>
@@ -714,6 +853,15 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
                   <td className="num">{priceFmt(t.price)}</td>
                   <td>{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</td>
                   <td className="text-[var(--muted)]">{t.reason}</td>
+                  <td className="text-[11px]">
+                    {t.txSignature ? (
+                      <a className="underline" href={`https://solscan.io/tx/${t.txSignature}`} target="_blank" rel="noreferrer">
+                        {t.txSignature.slice(0, 6)}…
+                      </a>
+                    ) : (
+                      t.execution ?? "paper"
+                    )}
+                  </td>
                 </tr>
               ))
             )}
@@ -729,17 +877,53 @@ function RiskView({
   busy,
   onSave,
   onReset,
+  onRequestLive,
+  onPaper,
+  onKill,
 }: {
   desk: DeskPayload;
   busy: boolean;
   onSave: (c: Partial<BotConfig>) => void;
   onReset: () => void;
+  onRequestLive: () => void;
+  onPaper: () => void;
+  onKill: () => void;
 }) {
   const [local, setLocal] = useState(desk.config);
   useEffect(() => setLocal(desk.config), [desk.config]);
 
   return (
     <div className="space-y-4 boot-fade">
+      <div className="neon p-6">
+        <h2 className="text-2xl font-medium">Execution mode</h2>
+        <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+          Default is <strong>PAPER</strong>. LIVE sends Jupiter swaps signed by Phantom or Solflare in this browser. There
+          is no seed phrase and no server key. Spot Solana cannot short — live shorts are refused.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button
+            disabled={busy || desk.config.executionMode === "paper"}
+            onClick={onPaper}
+            className={`px-5 py-2.5 text-sm ${desk.config.executionMode === "paper" ? "bg-white text-black" : "border border-[var(--line-2)]"}`}
+          >
+            PAPER
+          </button>
+          <button
+            disabled={busy}
+            onClick={onRequestLive}
+            className={`px-5 py-2.5 text-sm ${desk.config.executionMode === "live" ? "bg-[var(--crimson)] text-white" : "border border-[var(--line-2)]"}`}
+          >
+            {desk.liveSessionArmed ? "LIVE armed" : "Enable LIVE…"}
+          </button>
+          <button disabled={busy} onClick={onKill} className="border border-[rgba(255,59,143,0.4)] px-5 py-2.5 text-sm text-[var(--crimson)]">
+            Kill switch
+          </button>
+        </div>
+        <p className="mt-3 text-[11px] text-[var(--faint)]">
+          {desk.config.killSwitch ? "Kill switch is on — bot will not send swaps." : "Kill switch is off."} Slippage{" "}
+          {local.slippageBps} bps · max live size ${local.maxLiveNotionalUsd}.
+        </p>
+      </div>
       <div className="neon p-6">
         <h2 className="text-2xl font-medium">Risk is the product</h2>
         <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
@@ -751,11 +935,13 @@ function RiskView({
           <Slider label="Daily loss limit" suffix="%" min={2} max={12} step={0.5} value={local.dailyLossLimitPct} onChange={(v) => setLocal({ ...local, dailyLossLimitPct: v })} />
           <Slider label="Max positions" min={1} max={6} step={1} value={local.maxPositions} onChange={(v) => setLocal({ ...local, maxPositions: v })} />
           <Slider label="Min liquidity" suffix="k" min={50} max={500} step={10} value={local.minLiquidityUsd / 1000} onChange={(v) => setLocal({ ...local, minLiquidityUsd: v * 1000 })} />
+          <Slider label="Live slippage" suffix=" bps" min={10} max={300} step={10} value={local.slippageBps} onChange={(v) => setLocal({ ...local, slippageBps: v })} />
+          <Slider label="Max live size" suffix="" min={10} max={500} step={10} value={local.maxLiveNotionalUsd} onChange={(v) => setLocal({ ...local, maxLiveNotionalUsd: v })} />
         </div>
         <div className="mt-5 flex flex-wrap gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={local.allowShorts} onChange={(e) => setLocal({ ...local, allowShorts: e.target.checked })} />
-            Allow simulated shorts
+            Allow simulated shorts (paper only)
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={local.allowMemes} onChange={(e) => setLocal({ ...local, allowMemes: e.target.checked })} />
@@ -778,6 +964,60 @@ function RiskView({
             <li key={w}>— {w}</li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+function LiveConfirmModal({
+  typed,
+  ack,
+  busy,
+  onTyped,
+  onAck,
+  onCancel,
+  onConfirm,
+}: {
+  typed: string;
+  ack: boolean;
+  busy: boolean;
+  onTyped: (v: string) => void;
+  onAck: (v: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ready = typed.trim().toUpperCase() === "LIVE" && ack && !busy;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4" onClick={onCancel}>
+      <div className="neon w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <Pill tone="crimson">LIVE confirmation</Pill>
+        <h3 className="mt-3 text-2xl font-medium">This spends real USDC</h3>
+        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+          Enabling LIVE lets the armed bot request Jupiter swaps. Phantom or Solflare signs each transaction in this
+          browser. No mnemonic is stored. Failed or rejected approvals skip the trade. Shorts cannot go live on spot
+          Solana.
+        </p>
+        <label className="mt-5 flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={ack} onChange={(e) => onAck(e.target.checked)} className="mt-1" />
+          I understand I can lose the USDC I swap, plus SOL fees.
+        </label>
+        <label className="mt-4 block text-sm">
+          Type LIVE to confirm
+          <input
+            value={typed}
+            onChange={(e) => onTyped(e.target.value)}
+            className="mt-2 w-full border border-[var(--line-2)] bg-transparent px-3 py-2"
+            autoComplete="off"
+          />
+        </label>
+        <div className="mt-5 flex gap-2">
+          <button disabled={!ready} onClick={onConfirm} className="bg-[var(--crimson)] px-5 py-2.5 text-sm text-white disabled:opacity-40">
+            {busy ? "Arming…" : "Go LIVE"}
+          </button>
+          <button onClick={onCancel} className="border border-[var(--line-2)] px-5 py-2.5 text-sm">
+            Stay on PAPER
+          </button>
+        </div>
       </div>
     </div>
   );
