@@ -32,7 +32,7 @@ function loadingRegime(): MarketRegime {
   };
 }
 
-/** One 5-minute tape for each name on this chain's book, deepest pool first. */
+/** One 1-minute tape for each name on this chain's book, deepest pool first. */
 export function watchlistTapes(candidates: TokenCandidate[], chain: ChainId = "solana"): TapeCard[] {
   const rank = new Map(bookTokens(chain).map((token, index) => [token.mint.toLowerCase(), index]));
   const best = new Map<string, TokenCandidate>();

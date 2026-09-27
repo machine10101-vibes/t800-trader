@@ -1,6 +1,6 @@
 import type { Candle, TokenCandidate } from "@/lib/types";
 
-/** Close-to-close percent move over `barsBack` completed 5-minute bars. */
+/** Close-to-close percent move over `barsBack` completed 1-minute bars. */
 export function candleChangePct(candles: Candle[], barsBack: number): number | null {
   if (candles.length <= barsBack) return null;
   const last = candles[candles.length - 1]?.close ?? 0;
@@ -9,7 +9,7 @@ export function candleChangePct(candles: Candle[], barsBack: number): number | n
   return ((last - prev) / prev) * 100;
 }
 
-/** Replace the short windows with the same 5-minute bars the chart draws. */
+/** Replace the short windows with the 1-minute bars the chart draws. 5m is five closes, 15m is fifteen. */
 export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | null | undefined): TokenCandidate {
   if (!candles?.length) return candidate;
   const flows = { ...candidate.flows };
@@ -18,11 +18,31 @@ export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | nu
     if (change === null) return;
     flows[tf] = { ...flows[tf], priceChangePct: Number(change.toFixed(4)) };
   };
-  apply("m5", 1);
-  apply("m15", 3);
-  apply("m30", 6);
-  apply("h1", 12);
+  apply("m5", 5);
+  apply("m15", 15);
+  apply("m30", 30);
+  apply("h1", 60);
   return { ...candidate, flows };
+}
+
+/** Group 1-minute bars into N-minute OHLC. Indicators stay on the 5-minute clock. */
+export function foldCandles(candles: Candle[], minutes: number): Candle[] {
+  if (minutes <= 1 || candles.length < 2) return candles;
+  const span = minutes * 60;
+  const out: Candle[] = [];
+  for (const candle of candles) {
+    const bucket = Math.floor(candle.time / span) * span;
+    const last = out[out.length - 1];
+    if (!last || last.time !== bucket) {
+      out.push({ ...candle, time: bucket });
+      continue;
+    }
+    last.high = Math.max(last.high, candle.high);
+    last.low = Math.min(last.low, candle.low);
+    last.close = candle.close;
+    last.volume += candle.volume;
+  }
+  return out;
 }
 
 /** A clearly red 15m stays in cash. A flat 15m can still take 5x or 10x when the 5m is not red. */

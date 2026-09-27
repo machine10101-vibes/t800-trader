@@ -380,12 +380,12 @@ async function readOhlcv(url: string): Promise<Candle[]> {
 }
 
 async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
-  const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=${limit}`;
+  const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/minute?aggregate=1&limit=${limit}`;
   const poolRows = await readOhlcv(poolUrl);
   if (poolRows.length) return poolRows;
   const mint = poolMint.get(poolAddress);
   if (!mint) return poolRows;
-  const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/tokens/${mint}/ohlcv/minute?aggregate=5&limit=${limit}`;
+  const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/tokens/${mint}/ohlcv/minute?aggregate=1&limit=${limit}`;
   return readOhlcv(tokenUrl).catch(() => poolRows);
 }
 
@@ -410,7 +410,7 @@ const ohlcvInflight = new Map<string, Promise<Candle[]>>();
 
 export async function fetchOhlcv(
   poolAddress: string,
-  limit = 80,
+  limit = 120,
   chain: ChainId = "solana",
   opts?: { maxAge?: number },
 ): Promise<Candle[]> {
@@ -429,7 +429,7 @@ async function loadOhlcv(poolAddress: string, limit: number, chain: ChainId, max
   const missedAt = ohlcvMiss.get(poolAddress);
   if (missedAt && Date.now() - missedAt < OHLCV_MISS_MS) return staleCandles(poolAddress) ?? [];
   try {
-    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, Math.min(limit, 70), chain));
+    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, Math.min(limit, 140), chain));
     if (rows.length) {
       ohlcvCache.set(poolAddress, { at: Date.now(), rows });
       ohlcvMiss.delete(poolAddress);
@@ -443,7 +443,7 @@ async function loadOhlcv(poolAddress: string, limit: number, chain: ChainId, max
   }
 }
 
-export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 80): Promise<Candle[]> {
+export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 120): Promise<Candle[]> {
   const ordered = uniqueBy([...poolAddresses.filter(Boolean), ...SOL_USDC_POOLS], (p) => p);
   for (const pool of ordered) {
     const hit = ohlcvCache.get(pool);
@@ -634,7 +634,7 @@ async function drainCandles(): Promise<void> {
       if (missed) missedAt.set(job.pool, missed);
       const due = poolsToCandle([{ address: job.pool, pinned: job.pinned }], freshAt, missedAt, Date.now(), 1);
       if (!due.length) continue;
-      await fetchOhlcv(job.pool, 48, job.chain, { maxAge: job.pinned ? CORE_CANDLE_MS : POPULAR_CANDLE_MS });
+      await fetchOhlcv(job.pool, 120, job.chain, { maxAge: job.pinned ? CORE_CANDLE_MS : POPULAR_CANDLE_MS });
       await sleep(1_400);
     }
   } finally {

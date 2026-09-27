@@ -22,6 +22,7 @@ import {
 } from "@/lib/client";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
+import { CORE_CANDLE_MS, POPULAR_CANDLE_MS } from "@/lib/market/ohlcvPlan";
 import { cachedOhlcv, candleFetchedAt, requestBookCandles } from "@/lib/market/providers";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
@@ -1127,7 +1128,8 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
       if (!live) return;
       const stale = pools.filter((pool) => {
         const at = candleFetchedAt(pool);
-        return at === null || Date.now() - at > 90_000;
+        const freshMs = pinnedSet.has(pool) ? CORE_CANDLE_MS : POPULAR_CANDLE_MS;
+        return at === null || Date.now() - at >= freshMs;
       });
       requestBookCandles(stale, chain, pinnedSet);
       setBars((cur) => {
@@ -1287,7 +1289,7 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-3 lg:border-t-0 lg:border-l">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 5m` : "5m tape"}</span>
+                <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 1m` : "1m tape"}</span>
                 <span className="flex gap-1.5 tracking-normal normal-case">
                   <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
                   <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
@@ -1314,7 +1316,7 @@ function Overview({
 
       <section className="neon p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-          <Label>5-minute tapes</Label>
+          <Label>1-minute tapes</Label>
           <span className="text-[11px] text-[var(--faint)]">
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
           </span>

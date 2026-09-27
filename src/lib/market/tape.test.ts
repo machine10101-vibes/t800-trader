@@ -1,14 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, foldCandles, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
-  return { time: index * 300, open: close, high: close, low: close, close, volume: 1 };
+  return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
 }
 
 describe("candle tape", () => {
-  it("reads a 15-minute rise and a 15-minute drop off the 5-minute bars", () => {
+  it("reads a close-to-close rise and drop across a window of bars", () => {
     const up = [1, 1, 1, 1.01].map(bar);
     const down = [1, 1.02, 1.01, 0.99].map(bar);
     assert.ok((candleChangePct(up, 3) ?? 0) > 0.9);
@@ -16,8 +16,31 @@ describe("candle tape", () => {
     assert.equal(candleChangePct(up, 12), null);
   });
 
-  it("stamps the chart's 15-minute move onto the pool tape", () => {
-    const candles = [1, 1, 1, 1.02].map(bar);
+  it("folds five 1-minute bars into one 5-minute bar", () => {
+    const start = 1_700_003_100;
+    const closes = [1, 1.4, 0.8, 1.1, 1.2, 1.3];
+    const candles = closes.map((close, i) => ({
+      time: start + i * 60,
+      open: close,
+      high: close + 0.1,
+      low: close - 0.1,
+      close,
+      volume: 2,
+    }));
+    const folded = foldCandles(candles, 5);
+    assert.equal(folded.length, 2);
+    assert.equal(folded[0].time, start);
+    assert.equal(folded[0].open, 1);
+    assert.equal(folded[0].close, 1.2);
+    assert.equal(folded[0].high, 1.5);
+    assert.equal(folded[0].low, 0.7);
+    assert.equal(folded[0].volume, 10);
+    assert.equal(folded[1].open, 1.3);
+    assert.equal(folded[1].close, 1.3);
+  });
+
+  it("stamps the 5-minute and 15-minute moves from 1-minute bars", () => {
+    const candles = Array.from({ length: 16 }, (_, i) => bar(i === 15 ? 1.02 : 1, i));
     const candidate = {
       flows: {
         m5: { buys: 1, sells: 1, buyers: 1, sellers: 1, volumeUsd: 1, priceChangePct: 0 },
@@ -29,6 +52,7 @@ describe("candle tape", () => {
       },
     } as TokenCandidate;
     const stamped = withCandleTape(candidate, candles);
+    assert.ok(stamped.flows.m5.priceChangePct > 1.9);
     assert.ok(stamped.flows.m15.priceChangePct > 1.9);
     assert.equal(stamped.flows.h1.priceChangePct, 4);
     assert.equal(stamped.flows.h24.priceChangePct, 3);

@@ -31,7 +31,7 @@ describe("shellDesk", () => {
 });
 
 describe("watchlistTapes", () => {
-  it("keeps one 5-minute tape per watchlist name and drops everything else", () => {
+  it("keeps one 1-minute tape per watchlist name and drops everything else", () => {
     const sol = WATCHLIST.find((token) => token.symbol === "SOL")!;
     const jup = WATCHLIST.find((token) => token.symbol === "JUP")!;
     const zbcn = WATCHLIST.find((token) => token.symbol === "ZBCN")!;

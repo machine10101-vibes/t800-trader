@@ -38,7 +38,7 @@ const ALL_LAYERS: ChartLayers = { ema9: true, ema21: true, vwap: true };
 export function CandleChart({ candles, layers = ALL_LAYERS }: { candles: Candle[]; layers?: ChartLayers }) {
   const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
-    return <EmptyPlot label="Waiting on the 5-minute tape" waiting />;
+    return <EmptyPlot label="Waiting on the 1-minute tape" waiting />;
   }
   const w = 520;
   const h = 168;

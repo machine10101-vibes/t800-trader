@@ -1,7 +1,7 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { GAS_CRO } from "@/lib/cronos/constants";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { foldCandles, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -283,9 +283,10 @@ export async function tickBot(
             continue;
           }
           const candles = cachedOhlcv(token.poolAddress);
+          const folded = candles ? foldCandles(candles, 5) : [];
           const found = entrySignals(
             token,
-            candles && candles.length >= 20 ? snapshotTechnical(candles) : null,
+            folded.length >= 20 ? snapshotTechnical(folded) : null,
             token.researchScore,
             next.config.allowShorts,
             tapeCtx,

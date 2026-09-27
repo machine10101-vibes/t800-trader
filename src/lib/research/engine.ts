@@ -1,7 +1,7 @@
 import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
-import { tapeRead } from "@/lib/market/tape";
+import { foldCandles, tapeRead } from "@/lib/market/tape";
 import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
@@ -244,7 +244,8 @@ const RESEARCH_CACHE_MS = 6_000;
 
 function structureFor(candidate: TokenCandidate): TechnicalSnapshot {
   const candles = cachedOhlcv(candidate.poolAddress);
-  if (candles && candles.length >= 20) return snapshotTechnical(candles);
+  const folded = candles ? foldCandles(candles, 5) : [];
+  if (folded.length >= 20) return snapshotTechnical(folded);
   return technicalFromFlows(candidate);
 }
 
