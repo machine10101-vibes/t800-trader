@@ -13,8 +13,8 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "T-800 Trader — Solana desk",
-  description: "Research-first Solana paper trading desk for fast, calculated short-term trades.",
+  title: "T-800 Trader — Solana and Cronos",
+  description: "Research-first desk for short-term SOL, Zebec, and CRO trades. Solana and Cronos can both stay armed.",
   metadataBase: new URL("https://machine10101-vibes.github.io/t800-trader"),
   icons: {
     icon: "/t800-trader/favicon.svg",

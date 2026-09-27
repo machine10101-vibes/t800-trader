@@ -101,6 +101,7 @@ export async function fetchJson<T>(
   for (let attempt = 0; attempt < retries; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? 12_000);
+    let paceMs = 400 * 2 ** attempt + Math.floor(Math.random() * 200);
     try {
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -116,6 +117,7 @@ export async function fetchJson<T>(
         headers,
       });
       if (res.status === 429 || res.status >= 500) {
+        if (res.status === 429) paceMs = 1_800 * 2 ** attempt;
         throw new Error(`${res.status} ${res.statusText} for ${url}`);
       }
       if (!res.ok) {
@@ -125,7 +127,7 @@ export async function fetchJson<T>(
     } catch (error) {
       lastError = error;
       if (attempt < retries - 1) {
-        await sleep(400 * 2 ** attempt + Math.floor(Math.random() * 200));
+        await sleep(paceMs);
       }
     } finally {
       clearTimeout(timer);
@@ -149,4 +151,29 @@ export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: 
 
 export function settled<T>(results: PromiseSettledResult<T>[]): T[] {
   return results.filter((r): r is PromiseFulfilledResult<T> => r.status === "fulfilled").map((r) => r.value);
+}
+
+/** Resolve with the first accepted result. A miss or rejection waits for the rest. */
+export function firstSuccess<T>(tasks: Promise<T>[], accept: (value: T) => boolean): Promise<T | null> {
+  if (!tasks.length) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let pending = tasks.length;
+    let settled = false;
+    const finish = (value: T | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    for (const task of tasks) {
+      task
+        .then((value) => {
+          if (accept(value)) finish(value);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          pending -= 1;
+          if (pending === 0) finish(null);
+        });
+    }
+  });
 }
