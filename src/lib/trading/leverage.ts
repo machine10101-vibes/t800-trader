@@ -1,4 +1,4 @@
-import { SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
 import { sameMint } from "@/lib/chain";
 import type { ChainFill, ChainOrder, Position } from "@/lib/types";
 
@@ -35,7 +35,10 @@ export function pickMultiplier(enabled: readonly Multiplier[], confidence: numbe
   return null;
 }
 
-/** SOL, Zebec, and CRO take 5x or 10x. Anything else in the book stays spot. */
+/**
+ * SOL, Zebec, CRO, and every name on Jupiter's popular list take 5x or 10x.
+ * SOL is a Jupiter perp. The other names post collateral as a spot bag marked at the multiplier.
+ */
 export function multiplierFor(
   multipliers: unknown,
   confidence: number,
@@ -44,6 +47,7 @@ export function multiplierFor(
   mint: string,
 ): 1 | Multiplier {
   const levered =
+    isActiveBook(mint, "solana") ||
     symbol === "SOL" ||
     symbol === "ZBCN" ||
     symbol === "CRO" ||

@@ -18,7 +18,7 @@ describe("multipliers", () => {
     assert.equal(pickMultiplier([], 90, "breakout"), null);
   });
 
-  it("levers Solana and Zebec, and leaves every other name at spot", () => {
+  it("levers Solana, Zebec, and CRO, and leaves a name that is not on the book at spot", () => {
     assert.equal(multiplierFor([5, 10], 80, "breakout", "SOL", SOL_MINT), 10);
     assert.equal(multiplierFor([5, 10], 60, "reclaim", "ZBCN", ZBCN_MINT), 5);
     assert.equal(multiplierFor([5, 10], 80, "breakout", "ZBCN", ZBCN_MINT), 10);

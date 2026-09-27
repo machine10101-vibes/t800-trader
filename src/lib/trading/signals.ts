@@ -331,7 +331,13 @@ export function buildFlowSignals(
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
   if (h1 <= -6 || m15 <= -0.25 || m5 <= -1.2 || solDump) return [];
-  if (token.sector === "Meme" && (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))) return [];
+  if (
+    token.sector === "Meme" &&
+    !token.watchlist &&
+    (defensive || stance !== "risk-on" || (fearGreed !== null && fearGreed >= 75))
+  ) {
+    return [];
+  }
   if (!token.watchlist && (defensive || token.sector === "Unknown")) return [];
 
   // A clearly rising watchlist name can print more sells than buys and still be the long.

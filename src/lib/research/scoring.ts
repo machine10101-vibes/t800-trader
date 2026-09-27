@@ -1,6 +1,6 @@
 import type { ChainId } from "@/lib/chain";
 import type { ScoredCandidate, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
-import { isForeignOrWrapped } from "@/lib/market/universe";
+import { isActiveBook, isForeignOrWrapped } from "@/lib/market/universe";
 import { venueAllowed, venueForDex, venueLabel } from "@/lib/market/venues";
 import { clamp } from "@/lib/utils";
 
@@ -32,7 +32,7 @@ export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | 
   if (cfg.venues && !venueAllowed(c.dex, cfg.venues)) {
     return `Venue ${venueLabel(venueForDex(c.dex))} is off`;
   }
-  if (isForeignOrWrapped(c.symbol, c.name)) {
+  if (!isActiveBook(c.mint, c.chain ?? "solana") && isForeignOrWrapped(c.symbol, c.name)) {
     return "Wrapped or non-Solana-native asset";
   }
   return null;

@@ -22,8 +22,26 @@ export const CRONOS_USDC = "0xc21223249ca28397b4b6541dffaecc539bff0c59";
 /** Deep VVS WCRO/USDC pool. GeckoTerminal network id is `cro`. */
 export const CRO_POOL = "0xe61db569e231b3f5530168aa2c9d50246525b6d6";
 
-/** The only names the Solana desk monitors and trades. */
+/** Pinned names. Jupiter's popular list is added beside these on Solana. */
 export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT] as const;
+
+/** Jupiter most-traded names currently on the Solana book, beside SOL and Zebec. */
+let popularBook: WatchToken[] = [];
+
+export function notePopular(tokens: readonly WatchToken[]): void {
+  const seen = new Set<string>(ACTIVE_BOOK);
+  const next: WatchToken[] = [];
+  for (const token of tokens) {
+    if (!token.mint || seen.has(token.mint)) continue;
+    seen.add(token.mint);
+    next.push(token);
+  }
+  popularBook = next;
+}
+
+export function popularTokens(): WatchToken[] {
+  return popularBook;
+}
 
 const CRONOS_BOOK: WatchToken[] = [{ symbol: "CRO", name: "Cronos", mint: WCRO_MINT, sector: "L1" }];
 
@@ -115,9 +133,15 @@ export function classifySector(symbol: string, name: string): Sector {
   return "Unknown";
 }
 
+export function coreBookMints(chain: ChainId = "solana"): string[] {
+  if (chain === "cronos") return [WCRO_MINT];
+  return [...ACTIVE_BOOK];
+}
+
 export function bookTokens(chain: ChainId = "solana"): WatchToken[] {
   if (chain === "cronos") return CRONOS_BOOK;
-  return ACTIVE_BOOK.map((mint) => WATCH_BY_MINT.get(mint)).filter((token): token is WatchToken => Boolean(token));
+  const core = ACTIVE_BOOK.map((mint) => WATCH_BY_MINT.get(mint)).filter((token): token is WatchToken => Boolean(token));
+  return [...core, ...popularBook];
 }
 
 export function bookPools(chain: ChainId = "solana"): { mint: string; pool: string }[] {
@@ -134,6 +158,7 @@ export function headlineFor(chain: ChainId = "solana"): { symbol: string; label:
   return [
     { symbol: "SOL", label: "SOL" },
     { symbol: "ZBCN", label: "Zebec" },
+    ...popularBook.slice(0, 6).map((token) => ({ symbol: token.symbol, label: token.symbol })),
   ];
 }
 

@@ -2,6 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
+import { loadJupiterPopular } from "./jupiterPopular";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
@@ -11,8 +12,10 @@ import {
   bookPools,
   bookTokens,
   classifySector,
+  coreBookMints,
   geckoNetwork,
   isActiveBook,
+  notePopular,
   isQuote,
   isStable,
   SOL_MINT,
@@ -97,7 +100,7 @@ function bookKey(mint: string): string {
 
 /** A missed GeckoTerminal read must not erase the last print on this chain. */
 function bookComplete(rows: TokenCandidate[], chain: ChainId): boolean {
-  return bookMints(chain).every((mint) => rows.some((row) => sameMint(row.mint, mint)));
+  return coreBookMints(chain).every((mint) => rows.some((row) => sameMint(row.mint, mint)));
 }
 
 function fillActiveBook(rows: TokenCandidate[], chain: ChainId): TokenCandidate[] {
@@ -546,6 +549,10 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
+  if (chain === "solana") {
+    const popular = await loadJupiterPopular().catch(() => null);
+    if (popular) notePopular(popular);
+  }
   const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
   const regimePromise = fetchRegime();
   let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
