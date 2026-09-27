@@ -704,7 +704,7 @@ function ChainDesk({
         trading={trading}
       />
 
-      <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-4 px-3 py-4 sm:gap-5 sm:px-4 sm:py-5 lg:grid-cols-[228px_1fr]">
+      <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[200px_1fr]">
         <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
           <div className="flex flex-wrap gap-1 lg:block">
           {NAV.map((item) => (
@@ -717,7 +717,7 @@ function ChainDesk({
                 setThesis(null);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              className="nav-item mb-1 flex w-auto items-center justify-between whitespace-nowrap px-3 py-2.5 text-left hover:bg-[var(--nav-hover)] lg:w-full lg:py-3"
+              className="nav-item mb-1 flex w-auto items-center justify-between whitespace-nowrap px-3 py-2 text-left hover:bg-[var(--nav-hover)] lg:w-full"
             >
               <span>
                 <span className="mr-2 hidden text-[11px] text-[var(--faint)] lg:inline">{item.kicker}</span>
@@ -747,7 +747,7 @@ function ChainDesk({
                 : "Send profits"}
             </button>
           ) : null}
-          {desk?.bot.lastNote ? <p className="mt-3 line-clamp-3 px-2 text-[11px] leading-5 text-[var(--magenta)] lg:line-clamp-none">{desk.bot.lastNote}</p> : null}
+          {desk?.bot.lastNote ? <p className="mt-3 line-clamp-2 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
           <p className="mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)]">
             {trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
@@ -760,7 +760,7 @@ function ChainDesk({
           </button>
         </aside>
 
-        <main className="min-w-0 space-y-5 pt-1">
+        <main className="min-w-0 space-y-3 pt-1">
           {error ? (
             <div className="rounded-[18px] border border-[var(--danger-line)] bg-[var(--danger-fill)] px-4 py-3 text-sm text-[var(--crimson)]">
               {error}
@@ -1216,6 +1216,7 @@ function Overview({
 }) {
   const [layers, setLayers] = useState<ChartLayers>({ ema9: true, ema21: true, vwap: true });
   const [tapeFilter, setTapeFilter] = useState<"all" | "live" | "up" | "down">("all");
+  const [noteOpen, setNoteOpen] = useState(false);
   const [priceTick, setPriceTick] = useState(0);
   const [priceDir, setPriceDir] = useState<"up" | "down" | null>(null);
   const lastPrice = useRef<number | null>(null);
@@ -1246,11 +1247,10 @@ function Overview({
   const realized = fills.filter((trade) => trade.action === "close").reduce((sum, trade) => sum + (trade.pnlUsd ?? 0), 0);
   const unrealized = swaps ? open.reduce((sum, position) => sum + rowPnl(position), 0) : desk.portfolio.unrealizedPnlUsd;
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <section className="neon overflow-hidden">
-          <div className="grid lg:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
-            <div className="p-5">
+    <div className="space-y-3">
+      <section className="neon overflow-hidden">
+        <div className="grid lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)]">
+          <div className="flex flex-col p-3">
               <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
                 <span>{focus ? focus.ticker : "NO FINALIST"}</span>
                 <Pill tone="magenta">
@@ -1258,10 +1258,10 @@ function Overview({
                   Live
                 </Pill>
               </div>
-              <div key={priceTick} className={`hero-price mt-4 num text-4xl ${priceDir === "up" ? "price-up" : priceDir === "down" ? "price-down" : ""}`}>
+              <div key={priceTick} className={`hero-price mt-2 num text-3xl ${priceDir === "up" ? "price-up" : priceDir === "down" ? "price-down" : ""}`}>
                 {focus ? priceFmt(focus.price) : "—"}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
                 {focusTape ? (
                   <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
@@ -1270,12 +1270,12 @@ function Overview({
                 ) : null}
               </div>
               {desk.research.length > 1 ? (
-                <div className="mt-4 flex flex-wrap gap-1.5">
+                <div className="mt-2 flex flex-wrap gap-1">
                   {desk.research.slice(0, 6).map((r) => (
                     <button
                       key={r.id}
                       onClick={() => onFocus(r.candidate.mint)}
-                      className={`rounded-full px-2.5 py-1 text-[11px] ${
+                      className={`rounded-full px-2 py-0.5 text-[11px] ${
                         focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
                       }`}
                     >
@@ -1284,17 +1284,26 @@ function Overview({
                   ))}
                 </div>
               ) : null}
+              <div className="mt-3 flex items-end justify-between gap-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Trades</div>
+                  <div className="num text-xl">{swaps ? fills.length : desk.portfolio.tradeCount}</div>
+                  <div className="text-[11px] text-[var(--muted)]">
+                    {swaps ? `${stats.closedTrades} signed` : `${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} · hit {winRate.toFixed(0)}%
+                  </div>
+                </div>
+                <Spark values={equitySeries} />
+              </div>
               <button
                 disabled={busy}
                 onClick={onArm}
-                className={`btn mt-5 w-full ${desk.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"}`}
+                className={`btn mt-3 w-full py-2 ${desk.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"}`}
               >
                 {armButton(desk.bot.running).label}
               </button>
-              {desk.bot.lastNote ? <p className="mt-3 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
             </div>
-            <div className="border-t border-[var(--line)] p-3 lg:border-t-0 lg:border-l">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+            <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
                 <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 1m` : "1m tape"}</span>
                 <span className="flex gap-1.5 tracking-normal normal-case">
                   <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
@@ -1302,23 +1311,12 @@ function Overview({
                   <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
                 </span>
               </div>
-              <div className="h-[210px]">
+              <div className="h-[168px]">
                 <CandleChart candles={focusCandles} layers={layers} />
               </div>
             </div>
-          </div>
-        </section>
-        <section className="neon p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]"># trades · live stream</div>
-          <div className="mt-3 flex items-end justify-between">
-            <div className="num text-4xl">{swaps ? fills.length : desk.portfolio.tradeCount}</div>
-            <Spark values={equitySeries} />
-          </div>
-          <div className="mt-3 text-xs text-[var(--muted)]">
-            {swaps ? `${stats.closedTrades} signed closes` : `${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} · hit {winRate.toFixed(0)}%
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       <section className="neon p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
@@ -1327,10 +1325,15 @@ function Overview({
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
           </span>
         </div>
-        <p className="mb-3 px-1 text-sm leading-6 text-[var(--text)]">
+        <button
+          type="button"
+          aria-expanded={noteOpen}
+          onClick={() => setNoteOpen((open) => !open)}
+          className={`mb-2 w-full px-1 text-left text-xs leading-5 text-[var(--text)] ${noteOpen ? "" : "line-clamp-2"}`}
+        >
           {desk.bot.lastNote ?? copy.waitingTick}
-        </p>
-        <div className="mb-3 flex flex-wrap gap-1.5 px-1">
+        </button>
+        <div className="mb-2 flex flex-wrap gap-1.5 px-1">
           {(
             [
               ["all", "All"],
@@ -1344,7 +1347,7 @@ function Overview({
             </button>
           ))}
         </div>
-        <div className={`grid gap-3 ${bookTokens(chain).length > 1 ? "sm:grid-cols-2 xl:grid-cols-3" : ""}`}>
+        <div className={bookTokens(chain).length > 3 ? "tape-grid" : bookTokens(chain).length > 1 ? "grid gap-2 sm:grid-cols-2" : ""}>
           {bookTokens(chain).filter((token) => {
             const tape = desk.tapes.find((row) => row.symbol === token.symbol);
             const live = desk.signals.some((row) => row.symbol === token.symbol);
@@ -1379,8 +1382,8 @@ function Overview({
                   <span className="uppercase tracking-[0.12em] text-[var(--faint)]">15m</span>
                   {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
                 </div>
-                <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
-                <div className="h-[168px]">
+                <p className={`mb-1 line-clamp-2 px-1 text-xs leading-4 ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
+                <div className="h-[112px]">
                   {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} layers={layers} /> : <div className="grid h-full place-items-center text-[11px] tracking-[0.12em] text-[var(--faint)]">Finding the pool</div>}
                 </div>
               </button>
@@ -1415,37 +1418,36 @@ function Overview({
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-2">
           <Label>Live tape</Label>
           <span className="min-w-0 text-[11px] text-[var(--faint)]">
-            Universe {desk.universeSize || "—"} · screened {desk.eliminated || "—"} · scored {desk.candidatesScanned || "—"}
+            Universe {desk.universeSize || "—"} · screened {desk.eliminated || "—"} · scored {desk.candidatesScanned || "—"} · click a name to focus it
           </span>
         </div>
-        <div className="h-[220px]">
+        <div className="h-[150px]">
           <ScatterTape dots={desk.tapeDots} onPick={onFocus} />
-          <p className="px-2 pb-1 text-[11px] tracking-[0.12em] text-[var(--faint)]">Click a name to focus it. Hover reads the score.</p>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-3 lg:grid-cols-2">
         <div className="neon p-3">
           <Label>Wallet equity curve</Label>
-          <div className="h-[110px]">
+          <div className="h-[88px]">
             <EquityPath values={equitySeries} />
           </div>
         </div>
         <div className="neon p-3">
           <Label>Pool volume</Label>
-          <div className="h-[110px]">
+          <div className="h-[88px]">
             <VolumeBars candles={focusCandles} />
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="neon p-5">
+      <section className="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="neon p-3">
           <div className="flex items-center justify-between">
             <Pill tone={stanceTone}>{desk.regime.stance.replace("-", " ")}</Pill>
             <span className="text-xs text-[var(--faint)]">{shortAddress(wallet.address)}</span>
           </div>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{desk.regime.overview}</p>
+          <p className="mt-2 text-sm leading-5 text-[var(--muted)]">{desk.regime.overview}</p>
           {(desk.regime.yields ?? []).length ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {(desk.regime.yields ?? []).map((y) => (
@@ -1474,7 +1476,7 @@ function Overview({
             </div>
           </div>
         </div>
-        <div className="neon p-5">
+        <div className="neon p-3">
           <Label>Execution log</Label>
           {fills.length === 0 ? (
             <div className="space-y-2 text-sm text-[var(--muted)]">
@@ -1483,7 +1485,6 @@ function Overview({
                   ? copy.noSwaps
                   : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
               </p>
-              {desk.bot.lastNote ? <p className="text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
               {desk.signals.slice(0, 4).map((s) => (
                 <p key={s.id} className="font-mono text-[11px]">
                   SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
@@ -1503,7 +1504,6 @@ function Overview({
                   SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
                 </div>
               ))}
-              {desk.bot.lastNote ? <div>{desk.bot.lastNote}</div> : null}
             </div>
           )}
           <div className="mt-4 space-y-2">
@@ -1533,8 +1533,8 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-2xl font-medium tracking-tight">Research radar</h2>
-        <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
+        <h2 className="text-xl font-medium tracking-tight">Research radar</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
       </div>
       <div className="space-y-3 md:hidden">
         {desk.research.length === 0 ? (
@@ -1678,12 +1678,11 @@ function BotView({
   const closed = shownFills(desk.trades, swaps).filter((trade) => trade.action === "close");
   return (
     <div className="space-y-4">
-      <section className="neon p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+      <section className="neon p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <Pill tone={desk.bot.running ? "mint" : "magenta"}>{desk.bot.running ? CHAIN_COPY[chain].scanning : "Idle"}</Pill>
-            <h2 className="mt-3 text-2xl font-medium sm:text-3xl">Wallet-gated ticks. Time-boxed.</h2>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+            <p className="mt-2 max-w-2xl text-sm leading-5 text-[var(--muted)]">
               {desk.bot.lastNote ??
                 "One new ticket per tick. Breakouts must clear the prior high. Winners scale at 1R; stops move to breakeven at 0.8R."}
             </p>
@@ -1697,7 +1696,7 @@ function BotView({
             </button>
           </div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <Stat label="Ticks" value={desk.bot.ticks} sub={desk.bot.lastTickAt ? new Date(desk.bot.lastTickAt).toLocaleTimeString() : "—"} />
           <Stat
             label="Open / closed"
@@ -1954,8 +1953,8 @@ function Book({
   const losses = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) <= 0).length : desk.portfolio.lossCount;
   return (
     <div className="space-y-4">
-      <div className="neon p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="neon p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <Label>{swaps ? "Wallet swaps" : "Simulated book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">

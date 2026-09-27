@@ -42,9 +42,9 @@ export function Stat({
   const color =
     tone === "mint" ? "text-[var(--mint)]" : tone === "crimson" ? "text-[var(--crimson)]" : tone === "amber" ? "text-[var(--amber)]" : "";
   return (
-    <div className="stat-card neon hairline p-4">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">{label}</div>
-      <div className={`mt-2 break-words text-xl num sm:text-2xl ${color}`}>{value}</div>
+    <div className="stat-card neon hairline p-3">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{label}</div>
+      <div className={`mt-1 break-words text-xl num ${color}`}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-[var(--muted)]">{sub}</div> : null}
     </div>
   );

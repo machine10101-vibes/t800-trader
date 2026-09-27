@@ -397,6 +397,12 @@ input[type="range"] {
   backdrop-filter: blur(8px);
 }
 
+.tape-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
 .tape-card {
   background: rgba(255, 255, 255, 0.02);
   transition:
