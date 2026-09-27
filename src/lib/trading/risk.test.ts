@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook } from "./risk";
+import { alignBracket, canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, favorableMovePct, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook, withUserBracket } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -742,5 +742,107 @@ describe("LIVE gates and short trail", () => {
       scaled: false,
     } as Position;
     assert.equal(exitReason(pos, opened + 5 * 60_000), "trail");
+  });
+});
+
+function held(over: Partial<Position> = {}): Position {
+  return {
+    id: "p",
+    mint: "m",
+    symbol: "SOL",
+    poolAddress: "x",
+    sector: "L1",
+    side: "long",
+    qty: 10,
+    entryPrice: 100,
+    markPrice: 100,
+    stopPrice: 90,
+    targetPrice: 200,
+    openedAt: new Date().toISOString(),
+    lastUpdate: new Date().toISOString(),
+    reason: "reclaim",
+    researchScore: 70,
+    highWater: 100,
+    lowWater: 100,
+    notional: 1000,
+    initialStop: 90,
+    scaled: false,
+    ...over,
+  };
+}
+
+describe("settings stop and target", () => {
+  it("closes a long once the live mark hits the stop loss percent, even if the stamped stop is wider", () => {
+    const plan = managePosition(held({ markPrice: 97.5, lowWater: 97.5 }), Date.now(), {
+      stopLossPct: 2,
+      targetProfitPct: 8,
+    });
+    assert.equal(plan.exit, "stop");
+    assert.equal(plan.scale, undefined);
+  });
+
+  it("sells the whole long once target profit is reached, instead of leaving a runner", () => {
+    const plan = managePosition(held({ markPrice: 104, highWater: 104 }), Date.now(), {
+      stopLossPct: 2,
+      targetProfitPct: 4,
+    });
+    assert.equal(plan.exit, "target");
+    assert.equal(plan.scale, undefined);
+  });
+
+  it("closes a short at the stop loss percent and sells it at the target profit", () => {
+    const stop = managePosition(
+      held({ side: "short", markPrice: 103, highWater: 103, stopPrice: 140, targetPrice: 40, initialStop: 140 }),
+      Date.now(),
+      { stopLossPct: 2.5, targetProfitPct: 6 },
+    );
+    assert.equal(stop.exit, "stop");
+    const target = managePosition(
+      held({ side: "short", markPrice: 94, highWater: 94, lowWater: 110, stopPrice: 140, targetPrice: 40, initialStop: 140 }),
+      Date.now(),
+      { stopLossPct: 2.5, targetProfitPct: 6 },
+    );
+    assert.equal(target.exit, "target");
+  });
+
+  it("leaves a ticket alone while price is between the stop and the target", () => {
+    const plan = managePosition(held({ markPrice: 101 }), Date.now(), { stopLossPct: 2, targetProfitPct: 4 });
+    assert.equal(plan.exit, undefined);
+    assert.ok(Math.abs(favorableMovePct(held({ markPrice: 101 })) - 1) < 1e-9);
+  });
+
+  it("keeps a trailed stop tighter than the settings stop and still aims the target at the settings percent", () => {
+    const aligned = alignBracket(
+      held({ stopPrice: 101, initialStop: 98, markPrice: 102, highWater: 102 }),
+      { stopLossPct: 3, targetProfitPct: 5 },
+    );
+    assert.equal(aligned.stopPrice, 101);
+    assert.equal(aligned.initialStop, 97);
+    assert.equal(aligned.targetPrice, 105);
+    const plan = managePosition(aligned, Date.now(), { stopLossPct: 3, targetProfitPct: 5 });
+    assert.equal(plan.exit, undefined);
+  });
+
+  it("stamps new tickets with the settings stop and target", () => {
+    const signal = {
+      id: "s",
+      mint: "abc",
+      symbol: "ABC",
+      poolAddress: "p",
+      sector: "DEX" as const,
+      side: "long" as const,
+      reason: "breakout" as const,
+      confidence: 80,
+      price: 1,
+      stopPct: 1.25,
+      targetPct: 2.25,
+      thesis: "",
+      researchScore: 70,
+      createdAt: new Date().toISOString(),
+    };
+    const stamped = withUserBracket(signal, { stopLossPct: 1.5, targetProfitPct: 3.5 });
+    assert.equal(stamped.stopPct, 1.5);
+    assert.equal(stamped.targetPct, 3.5);
+    assert.equal(signal.stopPct, 1.25);
   });
 });

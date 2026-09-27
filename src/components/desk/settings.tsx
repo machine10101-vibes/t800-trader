@@ -34,8 +34,9 @@ export function SettingsPanel({
           <div className="max-w-2xl">
             <h2 className="text-2xl font-medium">Desk policy</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              These controls change the next scan. The wallet mark still sizes the book. Saving keeps open tickets where
-              they are. {copy.settingsReset}
+              These controls change the next scan. The wallet mark still sizes the book. Stop loss and target profit are
+              checked against the live mark on every scan, including tickets already open, and a hit sells that ticket.{" "}
+              {copy.settingsReset}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
@@ -372,6 +373,26 @@ export function SettingsPanel({
       </Section>
 
       <Section title="Management" hint="What the bot does with a ticket after it is open.">
+        <Field
+          label="Stop loss"
+          hint="Sell the whole ticket once price has moved this percent against the entry. A stop that already trailed tighter stays tighter."
+          suffix="%"
+          min={0.4}
+          max={15}
+          step={0.1}
+          value={local.stopLossPct}
+          onChange={(v) => set({ stopLossPct: v })}
+        />
+        <Field
+          label="Target profit"
+          hint="Sell the whole ticket once price has moved this percent in your favor. This is a full exit, not a partial scale-out."
+          suffix="%"
+          min={0.5}
+          max={30}
+          step={0.1}
+          value={local.targetProfitPct}
+          onChange={(v) => set({ targetProfitPct: v })}
+        />
         <Field
           label="Breakeven at"
           hint="Move the stop to a small profit once the trade reaches this R multiple."

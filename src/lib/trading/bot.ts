@@ -10,6 +10,7 @@ import { clamp } from "@/lib/utils";
 import { emptyState, mutateState } from "@/lib/store";
 import { advise, studyTape } from "./learn";
 import {
+  alignBracket,
   canOpen,
   cashConcentration,
   consecutiveLosses,
@@ -26,6 +27,7 @@ import {
   shouldScratch,
   sizePosition,
   walletRiskBook,
+  withUserBracket,
   type WalletBudget,
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
@@ -100,6 +102,10 @@ export async function tickBot(
       const prices = await marksForPositions(state.positions, market.candidates, chain);
 
       next = markBook(state, prices);
+      next = {
+        ...next,
+        positions: next.positions.map((pos) => alignBracket(pos, next.config)),
+      };
       next = { ...next, portfolio: rollSession(next.portfolio) };
       if (next.bot.skipReentry && !reentryBlocked(next.bot.skipReentry, next.bot.skipReentry.mint)) {
         next = { ...next, bot: { ...next.bot, skipReentry: null } };
@@ -190,8 +196,8 @@ export async function tickBot(
                 reason: resting.reason,
                 confidence: resting.confidence,
                 price: looked.price,
-                stopPct: resting.stopPct,
-                targetPct: resting.targetPct,
+                stopPct: next.config.stopLossPct,
+                targetPct: next.config.targetProfitPct,
                 thesis: resting.thesis,
                 researchScore: resting.researchScore,
                 createdAt: resting.placedAt,
@@ -341,11 +347,14 @@ export async function tickBot(
             continue;
           }
           const advice = advise(signal, next.memory, market.regime.stance);
-          const learned: Signal = {
-            ...signal,
-            confidence: clamp(signal.confidence + advice.confidenceDelta, 1, 97),
-            thesis: advice.note ? `${signal.thesis} Learned: ${advice.note}.` : signal.thesis,
-          };
+          const learned: Signal = withUserBracket(
+            {
+              ...signal,
+              confidence: clamp(signal.confidence + advice.confidenceDelta, 1, 97),
+              thesis: advice.note ? `${signal.thesis} Learned: ${advice.note}.` : signal.thesis,
+            },
+            next.config,
+          );
           shown.push(learned);
           if (balanceUnread) continue;
           if (reentryBlocked(next.bot.skipReentry, learned.mint)) {

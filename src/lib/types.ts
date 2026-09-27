@@ -253,6 +253,10 @@ export interface BotConfig {
   scaleFractionPct: number;
   lockAtR: number;
   lockProfitR: number;
+  /** Close the ticket once price has moved this percent against the entry. */
+  stopLossPct: number;
+  /** Sell the whole ticket once price has moved this percent in favor of the entry. */
+  targetProfitPct: number;
   timeCapMin: number;
   memeTimeCapMin: number;
   staleMin: number;
