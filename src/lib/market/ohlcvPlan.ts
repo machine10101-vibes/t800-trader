@@ -4,10 +4,10 @@ export const CORE_POOL_MS = 12_000;
 export const POPULAR_POOL_MS = 55_000;
 /** A missed pool read waits before it spends another GeckoTerminal call. */
 export const POOL_MISS_MS = 18_000;
-/** Pinned 1-minute candles refresh well inside a minute. */
-export const CORE_CANDLE_MS = 20_000;
-/** Popular names refresh inside a minute so a new bar is not a minute late. */
-export const POPULAR_CANDLE_MS = 30_000;
+/** Pinned 1-minute candles refresh inside a minute without crowding the rate limit. */
+export const CORE_CANDLE_MS = 40_000;
+/** Popular charts refresh about once a minute so the first paint is not starved. */
+export const POPULAR_CANDLE_MS = 50_000;
 /** After a 429 or an empty chart, leave that pool alone. */
 export const CANDLE_COOL_MS = 40_000;
 

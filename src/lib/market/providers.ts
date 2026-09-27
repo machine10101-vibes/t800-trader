@@ -7,7 +7,7 @@ import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
 import { CANDLE_COOL_MS, CORE_CANDLE_MS, mintsToFetch, POPULAR_CANDLE_MS, poolsToCandle } from "./ohlcvPlan";
-import { withCandleTape } from "./tape";
+import { pushTapeMark, withCandleTape } from "./tape";
 import {
   bookMints,
   bookPools,
@@ -196,16 +196,43 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string,
   };
 }
 
+const GECKO_GAP_MS = 2_100;
+const GECKO_COOL_MS = 8_000;
+let geckoTail: Promise<void> = Promise.resolve();
+let geckoNotBefore = 0;
+
+/** One GeckoTerminal call at a time. A 429 pauses the whole book so candles are not burned. */
+function paceGecko<T>(task: () => Promise<T>): Promise<T> {
+  const run = geckoTail.then(async () => {
+    const wait = geckoNotBefore - Date.now();
+    if (wait > 0) await sleep(wait);
+    try {
+      return await task();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
+      throw error;
+    } finally {
+      geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
+    }
+  });
+  geckoTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 async function gtPools(path: string, source: string, chain: ChainId): Promise<TokenCandidate[]> {
   const url = `https://api.geckoterminal.com/api/v2/${path}${path.includes("?") ? "&" : "?"}include=base_token,quote_token`;
-  const json = await fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 6_000, retries: 1 });
+  const json = await paceGecko(() => fetchJson<{ data: GtPool[]; included?: GtToken[] }>(url, { timeoutMs: 6_000, retries: 1 }));
   const tokens = tokenMap(json.included);
   return json.data.map((p) => toCandidate(p, tokens, source, chain)).filter((x): x is TokenCandidate => Boolean(x));
 }
 
 async function gtPool(address: string, source: string, chain: ChainId): Promise<TokenCandidate | null> {
   const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${address}?include=base_token,quote_token`;
-  const json = await fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 });
+  const json = await paceGecko(() => fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 }));
   return toCandidate(json.data, tokenMap(json.included), source, chain);
 }
 
@@ -370,9 +397,11 @@ function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
 }
 
 async function readOhlcv(url: string): Promise<Candle[]> {
-  const json = await fetchJson<{
-    data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 6_000, retries: 0 });
+  const json = await paceGecko(() =>
+    fetchJson<{
+      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+    }>(url, { timeoutMs: 8_000, retries: 0 }),
+  );
   const list = json.data?.attributes?.ohlcv_list ?? [];
   return list
     .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
@@ -404,6 +433,20 @@ export function cachedOhlcv(poolAddress: string): Candle[] | null {
 export function candleFetchedAt(poolAddress: string): number | null {
   const hit = ohlcvCache.get(poolAddress);
   return hit?.rows.length ? hit.at : null;
+}
+
+const tapeMarkCache = new Map<string, Candle[]>();
+
+/** Keep the last live prints for a pool so the card can draw before OHLCV returns. */
+export function rememberTapeMark(poolAddress: string, price: number, at = Date.now()): Candle[] {
+  if (!poolAddress) return [];
+  const next = pushTapeMark(tapeMarkCache.get(poolAddress) ?? [], price, at);
+  tapeMarkCache.set(poolAddress, next);
+  return next;
+}
+
+export function cachedTapeMarks(poolAddress: string): Candle[] {
+  return tapeMarkCache.get(poolAddress) ?? [];
 }
 
 const ohlcvInflight = new Map<string, Promise<Candle[]>>();
@@ -610,12 +653,19 @@ interface CandleJob {
 const candleQueue: CandleJob[] = [];
 let drainingCandles = false;
 
-/** One candle read at a time. Fresh charts and cooling pools are left alone. */
+/** One candle read at a time. Charts with no bars jump the queue. */
 export function requestBookCandles(pools: string[], chain: ChainId, pinned: ReadonlySet<string> = new Set()): void {
+  const missing: CandleJob[] = [];
+  const fresh: CandleJob[] = [];
   for (const pool of pools) {
     if (!pool || candleQueue.some((job) => job.pool === pool && job.chain === chain)) continue;
-    candleQueue.push({ pool, chain, pinned: pinned.has(pool) });
+    const job = { pool, chain, pinned: pinned.has(pool) };
+    if (cachedOhlcv(pool)?.length) fresh.push(job);
+    else missing.push(job);
   }
+  missing.sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  candleQueue.unshift(...missing);
+  candleQueue.push(...fresh);
   if (drainingCandles) return;
   drainingCandles = true;
   void drainCandles();
@@ -635,7 +685,7 @@ async function drainCandles(): Promise<void> {
       const due = poolsToCandle([{ address: job.pool, pinned: job.pinned }], freshAt, missedAt, Date.now(), 1);
       if (!due.length) continue;
       await fetchOhlcv(job.pool, 120, job.chain, { maxAge: job.pinned ? CORE_CANDLE_MS : POPULAR_CANDLE_MS });
-      await sleep(1_400);
+      await sleep(250);
     }
   } finally {
     drainingCandles = false;

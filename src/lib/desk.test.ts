@@ -42,6 +42,7 @@ describe("watchlistTapes", () => {
         mint: token.mint,
         poolAddress: pool,
         liquidityUsd,
+        priceUsd: 120,
         watchlist: true,
         flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
       }) as TokenCandidate;
@@ -55,6 +56,7 @@ describe("watchlistTapes", () => {
       tapes.map((tape) => tape.symbol),
       ["SOL"],
     );
+    assert.equal(tapes[0]?.price, 120);
     assert.equal(tapes[0]?.change5m, 0.4);
     assert.equal(tapes[0]?.change15m, 0.4);
     assert.equal(tapes.some((tape) => tape.symbol === "JUP"), false);

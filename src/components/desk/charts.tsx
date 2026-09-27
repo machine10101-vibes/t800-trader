@@ -138,7 +138,7 @@ export function CandleChart({ candles, layers = ALL_LAYERS }: { candles: Candle[
             <circle cx={xOf(hover)} cy={y(hot.close)} r="3.2" fill="var(--text)" />
           </g>
         ) : null}
-        <text x={w - pad} y={14} textAnchor="end" fill={up ? "var(--mint)" : "var(--crimson)"} fontSize="10" className="num">
+        <text x={w - pad} y={16} textAnchor="end" fill={up ? "var(--mint)" : "var(--crimson)"} fontSize="13" className="num">
           {priceFmt(last.close)}
         </text>
       </svg>

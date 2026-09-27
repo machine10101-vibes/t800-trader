@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, foldCandles, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, foldCandles, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
@@ -14,6 +14,22 @@ describe("candle tape", () => {
     assert.ok((candleChangePct(up, 3) ?? 0) > 0.9);
     assert.ok((candleChangePct(down, 3) ?? 0) < 0);
     assert.equal(candleChangePct(up, 12), null);
+  });
+
+  it("draws a live print before the 1-minute fetch arrives", () => {
+    const first = pushTapeMark([], 120, 1_700_000_000_000);
+    assert.equal(first.length, 1);
+    assert.equal(first[0]?.close, 120);
+    const same = pushTapeMark(first, 120, 1_700_000_002_000);
+    assert.equal(same, first);
+    const moved = pushTapeMark(first, 121, 1_700_000_003_000);
+    assert.equal(moved.length, 1);
+    assert.equal(moved[0]?.high, 121);
+    assert.equal(moved[0]?.close, 121);
+    const next = pushTapeMark(moved, 122, 1_700_000_008_000);
+    assert.equal(next.length, 2);
+    assert.equal(next[1]?.open, 121);
+    assert.equal(next[1]?.close, 122);
   });
 
   it("folds five 1-minute bars into one 5-minute bar", () => {

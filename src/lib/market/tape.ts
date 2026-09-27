@@ -25,6 +25,28 @@ export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | nu
   return { ...candidate, flows };
 }
 
+/**
+ * Append a live print so a tape can draw before the 1-minute fetch lands.
+ * Prints inside 4 seconds update the last bar instead of adding another one.
+ */
+export function pushTapeMark(rows: Candle[], price: number, atMs: number): Candle[] {
+  if (!(price > 0)) return rows;
+  const sec = Math.floor(atMs / 1000);
+  const last = rows[rows.length - 1];
+  if (last && last.close === price && sec - last.time < 4) return rows;
+  if (last && sec - last.time < 4) {
+    return [
+      ...rows.slice(0, -1),
+      { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price },
+    ];
+  }
+  const open = last?.close ?? price;
+  return [
+    ...rows,
+    { time: sec, open, high: Math.max(open, price), low: Math.min(open, price), close: price, volume: 0 },
+  ].slice(-90);
+}
+
 /** Group 1-minute bars into N-minute OHLC. Indicators stay on the 5-minute clock. */
 export function foldCandles(candles: Candle[], minutes: number): Candle[] {
   if (minutes <= 1 || candles.length < 2) return candles;

@@ -23,7 +23,7 @@ import {
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { CORE_CANDLE_MS, POPULAR_CANDLE_MS } from "@/lib/market/ohlcvPlan";
-import { cachedOhlcv, candleFetchedAt, requestBookCandles } from "@/lib/market/providers";
+import { cachedOhlcv, cachedTapeMarks, candleFetchedAt, rememberTapeMark, requestBookCandles } from "@/lib/market/providers";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -1118,6 +1118,8 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
 function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle[]> {
   const key = tapes.map((tape) => tape.poolAddress).join("|");
   const pinned = tapes.filter((tape) => tape.symbol === "SOL" || tape.symbol === "ZBCN" || tape.symbol === "CRO").map((tape) => tape.poolAddress).join("|");
+  const tapesRef = useRef(tapes);
+  tapesRef.current = tapes;
   const [bars, setBars] = useState<Record<string, Candle[]>>({});
   useEffect(() => {
     if (!key) return;
@@ -1126,6 +1128,9 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
     let live = true;
     const paint = () => {
       if (!live) return;
+      for (const tape of tapesRef.current) {
+        if (tape.poolAddress && tape.price) rememberTapeMark(tape.poolAddress, tape.price);
+      }
       const stale = pools.filter((pool) => {
         const at = candleFetchedAt(pool);
         const freshMs = pinnedSet.has(pool) ? CORE_CANDLE_MS : POPULAR_CANDLE_MS;
@@ -1136,8 +1141,9 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
         let changed = false;
         const next = { ...cur };
         for (const pool of pools) {
-          const rows = cachedOhlcv(pool);
-          if (!rows?.length || next[pool] === rows) continue;
+          const fetched = cachedOhlcv(pool);
+          const rows = fetched?.length ? fetched : cachedTapeMarks(pool);
+          if (!rows.length || next[pool] === rows) continue;
           next[pool] = rows;
           changed = true;
         }
@@ -1360,17 +1366,18 @@ function Overview({
                 onClick={() => tape && onFocus(tape.mint)}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
-                <div className="mb-1 flex items-center justify-between gap-2 px-1">
+                <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
                   <span className="flex items-center gap-1.5 text-sm font-medium">
                     {live ? <span className="pulse-dot bg-[var(--mint)] text-[var(--mint)]" /> : null}
                     {tapeLabel(symbol)}
                   </span>
-                  <span className="flex items-center gap-2 text-[11px]">
-                    <span className="uppercase tracking-[0.12em] text-[var(--faint)]">5m</span>
-                    {tape && tape.change5m !== undefined ? <Tone value={tape.change5m} /> : <span className="text-[var(--faint)]">—</span>}
-                    <span className="uppercase tracking-[0.12em] text-[var(--faint)]">15m</span>
-                    {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
-                  </span>
+                  <span className="num text-lg text-[var(--text)]">{tape?.price ? priceFmt(tape.price) : "—"}</span>
+                </div>
+                <div className="mb-1 flex items-center justify-end gap-2 px-1 text-[11px]">
+                  <span className="uppercase tracking-[0.12em] text-[var(--faint)]">5m</span>
+                  {tape && tape.change5m !== undefined ? <Tone value={tape.change5m} /> : <span className="text-[var(--faint)]">—</span>}
+                  <span className="uppercase tracking-[0.12em] text-[var(--faint)]">15m</span>
+                  {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
                 </div>
                 <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[168px]">
