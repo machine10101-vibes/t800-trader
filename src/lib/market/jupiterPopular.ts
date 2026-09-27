@@ -14,6 +14,16 @@ export interface JupiterListedToken {
   name?: string;
   liquidity?: number;
   organicScore?: number;
+  usdPrice?: number;
+  graduatedPool?: string;
+  stats5m?: { priceChange?: number };
+}
+
+function listedPool(value: string | undefined, mint: string): string | undefined {
+  const pool = value?.trim() ?? "";
+  if (pool.length < 32 || pool === mint) return undefined;
+  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(pool)) return undefined;
+  return pool;
 }
 
 let cache: { at: number; tokens: WatchToken[] } | null = null;
@@ -33,11 +43,16 @@ export function selectPopular(rows: JupiterListedToken[], coreMints: readonly st
     if (!((row.liquidity ?? 0) >= MIN_LIQUIDITY_USD)) continue;
     if (!((row.organicScore ?? 0) >= MIN_ORGANIC)) continue;
     seen.add(mint);
+    const price = row.usdPrice;
+    const change = row.stats5m?.priceChange;
     out.push({
       symbol,
       name: row.name?.trim() || symbol,
       mint,
       sector: classifySector(symbol, row.name?.trim() || symbol),
+      priceUsd: price && price > 0 ? price : undefined,
+      pool: listedPool(row.graduatedPool, mint),
+      change5m: typeof change === "number" && Number.isFinite(change) ? change : undefined,
     });
     if (out.length >= POPULAR_CAP) break;
   }

@@ -299,7 +299,7 @@ async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
       })),
       snaps,
       now,
-      1,
+      2,
     ),
   );
   const pools: TokenCandidate[] = [];
@@ -313,7 +313,7 @@ async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
     }
     if (paced) await sleep(450);
     paced = true;
-    const pin = pins.find((row) => sameMint(row.mint, token.mint))?.pool;
+    const pin = pins.find((row) => sameMint(row.mint, token.mint))?.pool ?? token.pool;
     let rows: TokenCandidate[] = [];
     try {
       const pinned = pin ? await pinnedPool(token.mint, token.symbol, pin, chain) : null;

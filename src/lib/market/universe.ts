@@ -6,6 +6,12 @@ export interface WatchToken {
   name: string;
   mint: string;
   sector: Sector;
+  /** Jupiter mark, shown before the pool tape arrives. */
+  priceUsd?: number;
+  /** Jupiter's graduated pool, so the chart does not wait on a pool search. */
+  pool?: string;
+  /** Five-minute move from Jupiter, until the candle tape replaces it. */
+  change5m?: number;
 }
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";

@@ -125,7 +125,7 @@ export function CandleChart({ candles, layers = ALL_LAYERS }: { candles: Candle[
                 opacity={hover === null || active ? 1 : 0.45}
               >
                 <title>
-                  {new Date(c.time * 1000).toLocaleString()} · O {c.open} H {c.high} L {c.low} C {c.close}
+                  {new Date(c.time * 1000).toLocaleString()} · O {priceFmt(c.open)} H {priceFmt(c.high)} L {priceFmt(c.low)} C {priceFmt(c.close)}
                 </title>
               </rect>
             </g>

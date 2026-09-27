@@ -96,6 +96,20 @@ describe("candle tape", () => {
     assert.doesNotMatch(tickHeadline(2, signals, blocked, true), /arm to send/);
   });
 
+  it("groups names that are still waiting on the same pool", () => {
+    const names = [
+      { symbol: "SOL", label: "SOL" },
+      { symbol: "PUMP", label: "PUMP" },
+      { symbol: "PAID", label: "PAID" },
+    ];
+    const blocked = ["PUMP: pool tape has not arrived", "PAID: pool tape has not arrived"];
+    const signals = [{ symbol: "SOL", side: "long", reason: "reclaim", confidence: 68 }];
+    assert.match(
+      tickHeadline(1, signals, blocked, true, names),
+      /Tick 1 · SOL long reclaim 68 · PUMP, PAID pool tape has not arrived/,
+    );
+  });
+
   it("names CRO on a Cronos tick", () => {
     const blocked = ["CRO: 15m is red (-0.40%), staying in cash"];
     assert.match(tickHeadline(3, [], blocked, false, [{ symbol: "CRO", label: "CRO" }]), /Tick 3 · CRO .*red.* · arm to send/);

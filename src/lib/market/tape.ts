@@ -113,6 +113,14 @@ export function tickHeadline(
   ],
 ): string {
   const arm = armed ? "" : " · arm to send";
-  const body = names.map((name) => `${name.label} ${assetCall(name.symbol, signals, blocked)}`).join(" · ");
-  return `Tick ${tick} · ${body}${arm}`;
+  const parts = names.map((name) => ({ label: name.label, call: assetCall(name.symbol, signals, blocked) }));
+  const lines: string[] = [];
+  for (let i = 0; i < parts.length; ) {
+    let j = i + 1;
+    while (j < parts.length && parts[j].call === parts[i].call) j += 1;
+    const labels = parts.slice(i, j).map((part) => part.label);
+    lines.push(labels.length > 1 ? `${labels.join(", ")} ${parts[i].call}` : `${labels[0]} ${parts[i].call}`);
+    i = j;
+  }
+  return `Tick ${tick} · ${lines.join(" · ")}${arm}`;
 }

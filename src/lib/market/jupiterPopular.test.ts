@@ -11,7 +11,16 @@ describe("Jupiter popular tokens", () => {
     const rows = [
       { id: SOL_MINT, symbol: "SOL", name: "Solana", liquidity: 50_000_000, organicScore: 99 },
       { id: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", symbol: "USDC", name: "USD Coin", liquidity: 80_000_000, organicScore: 99 },
-      { id: PUMP, symbol: "PUMP", name: "Pump", liquidity: 37_000_000, organicScore: 98 },
+      {
+        id: PUMP,
+        symbol: "PUMP",
+        name: "Pump",
+        liquidity: 37_000_000,
+        organicScore: 98,
+        usdPrice: 0.0042,
+        graduatedPool: "5DKFn27xzpiWQBoauSkWsw115SyMFFkbDNVHDGSXNHJ5",
+        stats5m: { priceChange: 1.25 },
+      },
       { id: "dust", symbol: "MIGR", name: "Migr", liquidity: 13_000, organicScore: 70 },
       { id: "thin", symbol: "manifest", name: "manifest", liquidity: 200_000, organicScore: 40 },
       { id: "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS", symbol: "KMNO", name: "Kamino", liquidity: 2_900_000, organicScore: 90 },
@@ -27,6 +36,10 @@ describe("Jupiter popular tokens", () => {
       ["PUMP", "KMNO", "CBBTC", "PAID", "STONK", "EXTRA"],
     );
     assert.equal(picked.find((token) => token.symbol === "KMNO")?.sector, "Lending");
+    const pump = picked.find((token) => token.symbol === "PUMP");
+    assert.equal(pump?.priceUsd, 0.0042);
+    assert.equal(pump?.pool, "5DKFn27xzpiWQBoauSkWsw115SyMFFkbDNVHDGSXNHJ5");
+    assert.equal(pump?.change5m, 1.25);
   });
 
   it("puts a Jupiter popular name on the book at 5x or 10x", () => {

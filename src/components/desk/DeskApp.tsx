@@ -1222,7 +1222,21 @@ function Overview({
   const lastPrice = useRef<number | null>(null);
   const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
-  const bars = useWatchTapes(desk.tapes, chain);
+  const watchTapes = desk.tapes.slice();
+  const seenMint = new Set(watchTapes.map((tape) => tape.mint));
+  for (const token of bookTokens(chain)) {
+    if (!token.pool || seenMint.has(token.mint)) continue;
+    seenMint.add(token.mint);
+    watchTapes.push({
+      symbol: token.symbol,
+      mint: token.mint,
+      poolAddress: token.pool,
+      price: token.priceUsd,
+      change5m: token.change5m,
+      change15m: 0,
+    });
+  }
+  const bars = useWatchTapes(watchTapes, chain);
   const focusPrice = focus?.price ?? null;
   useEffect(() => {
     const prev = lastPrice.current;
@@ -1232,8 +1246,15 @@ function Overview({
     }
     lastPrice.current = focusPrice;
   }, [focusPrice]);
-  const focusTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? desk.tapes[0] ?? null;
-  const focusCandles = focusTape ? bars[focusTape.poolAddress] ?? [] : [];
+  const matchedTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? null;
+  const focusTape = matchedTape ?? desk.tapes[0] ?? null;
+  const focusName =
+    matchedTape?.symbol ?? bookTokens(chain).find((token) => token.mint === focus?.candidate.mint)?.symbol ?? focusTape?.symbol;
+  const focusPool =
+    matchedTape?.poolAddress ??
+    bookTokens(chain).find((token) => token.mint === focus?.candidate.mint)?.pool ??
+    focusTape?.poolAddress;
+  const focusCandles = focusPool ? (bars[focusPool] ?? []) : [];
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
@@ -1263,9 +1284,9 @@ function Overview({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
-                {focusTape ? (
+                {matchedTape ? (
                   <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
-                    5m {focusTape.change5m !== undefined ? <Tone value={focusTape.change5m} /> : "—"} · 15m <Tone value={focusTape.change15m} />
+                    5m {matchedTape.change5m !== undefined ? <Tone value={matchedTape.change5m} /> : "—"} · 15m <Tone value={matchedTape.change15m} />
                   </span>
                 ) : null}
               </div>
@@ -1304,7 +1325,7 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 1m` : "1m tape"}</span>
+                <span>{focusName ? `${tapeLabel(focusName)} 1m` : "1m tape"}</span>
                 <span className="flex gap-1.5 tracking-normal normal-case">
                   <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
                   <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
@@ -1349,7 +1370,7 @@ function Overview({
         </div>
         <div className={bookTokens(chain).length > 3 ? "tape-grid" : bookTokens(chain).length > 1 ? "grid gap-2 sm:grid-cols-2" : ""}>
           {bookTokens(chain).filter((token) => {
-            const tape = desk.tapes.find((row) => row.symbol === token.symbol);
+            const tape = desk.tapes.find((row) => row.mint === token.mint);
             const live = desk.signals.some((row) => row.symbol === token.symbol);
             if (tapeFilter === "live") return live;
             if (tapeFilter === "up") return (tape?.change15m ?? 0) > 0.05;
@@ -1357,16 +1378,19 @@ function Overview({
             return true;
           }).map((token) => {
             const symbol = token.symbol;
-            const tape = desk.tapes.find((row) => row.symbol === symbol);
+            const tape = desk.tapes.find((row) => row.mint === token.mint);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
-            const selected = Boolean(tape && focusTape?.poolAddress === tape.poolAddress);
+            const pool = tape?.poolAddress ?? token.pool;
+            const price = tape?.price ?? token.priceUsd;
+            const change5m = tape?.change5m ?? token.change5m;
+            const selected = token.mint === (focus?.candidate.mint ?? focusTape?.mint);
             return (
               <button
-                key={symbol}
+                key={token.mint}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => tape && onFocus(tape.mint)}
+                onClick={() => onFocus(token.mint)}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
@@ -1374,24 +1398,24 @@ function Overview({
                     {live ? <span className="pulse-dot bg-[var(--mint)] text-[var(--mint)]" /> : null}
                     {tapeLabel(symbol)}
                   </span>
-                  <span className="num text-lg text-[var(--text)]">{tape?.price ? priceFmt(tape.price) : "—"}</span>
+                  <span className="num text-lg text-[var(--text)]">{price ? priceFmt(price) : "—"}</span>
                 </div>
                 <div className="mb-1 flex items-center justify-end gap-2 px-1 text-[11px]">
                   <span className="uppercase tracking-[0.12em] text-[var(--faint)]">5m</span>
-                  {tape && tape.change5m !== undefined ? <Tone value={tape.change5m} /> : <span className="text-[var(--faint)]">—</span>}
+                  {change5m !== undefined ? <Tone value={change5m} /> : <span className="text-[var(--faint)]">—</span>}
                   <span className="uppercase tracking-[0.12em] text-[var(--faint)]">15m</span>
                   {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
                 </div>
                 <p className={`mb-1 line-clamp-2 px-1 text-xs leading-4 ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
-                <div className="h-[112px]">
-                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} layers={layers} /> : <div className="grid h-full place-items-center text-[11px] tracking-[0.12em] text-[var(--faint)]">Finding the pool</div>}
+                <div className={pool ? "h-[112px]" : "flex h-8 items-center px-1 text-[11px] tracking-[0.12em] text-[var(--faint)]"}>
+                  {pool ? <CandleChart candles={bars[pool] ?? []} layers={layers} /> : "Finding the pool"}
                 </div>
               </button>
             );
           })}
         </div>
         {tapeFilter !== "all" && bookTokens(chain).every((token) => {
-          const tape = desk.tapes.find((row) => row.symbol === token.symbol);
+          const tape = desk.tapes.find((row) => row.mint === token.mint);
           const live = desk.signals.some((row) => row.symbol === token.symbol);
           if (tapeFilter === "live") return !live;
           if (tapeFilter === "up") return !((tape?.change15m ?? 0) > 0.05);
