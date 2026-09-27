@@ -1,4 +1,8 @@
+"use client";
+
 import type { Candle, TapeDot } from "@/lib/types";
+import { priceFmt } from "@/lib/utils";
+import { useState } from "react";
 
 function rollingEma(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = values.map(() => null);
@@ -24,6 +28,7 @@ function linePath(
 }
 
 export function CandleChart({ candles }: { candles: Candle[] }) {
+  const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
     return <EmptyPlot label="No live OHLCV for this pool" />;
   }
@@ -38,7 +43,8 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
   const max = Math.max(...highs);
   const span = max - min || 1;
   const bw = Math.max(2.2, (w - pad * 2) / slice.length - 1.4);
-  const xOf = (i: number) => pad + (i + 0.5) * ((w - pad * 2) / slice.length);
+  const slot = (w - pad * 2) / slice.length;
+  const xOf = (i: number) => pad + (i + 0.5) * slot;
   const y = (v: number) => pad + ((max - v) / span) * (h - pad * 2);
   const last = slice[slice.length - 1];
   const up = last.close >= last.open;
@@ -52,51 +58,88 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
     vwVol += c.volume;
     return vwVol > 0 ? vwPv / vwVol : null;
   });
+  const hot = hover === null ? null : slice[hover];
+  const prevClose = hot && hover !== null && hover > 0 ? slice[hover - 1].close : hot?.open ?? 0;
+  const hotChg = hot && prevClose ? ((hot.close - prevClose) / prevClose) * 100 : 0;
+  const pick = (clientX: number, svg: SVGSVGElement) => {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const x = ((clientX - rect.left) / rect.width) * w;
+    const i = Math.floor((x - pad) / slot);
+    setHover(Math.max(0, Math.min(slice.length - 1, i)));
+  };
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
-      {[0.25, 0.5, 0.75].map((p) => (
-        <line
-          key={p}
-          x1={pad}
-          x2={w - pad}
-          y1={pad + (h - pad * 2) * p}
-          y2={pad + (h - pad * 2) * p}
-          stroke="var(--chart-grid)"
-        />
-      ))}
-      <path d={linePath(vwap, xOf, y)} fill="none" stroke="rgba(243,193,91,0.55)" strokeWidth="1.2" strokeDasharray="3 3" />
-      <path d={linePath(ema21, xOf, y)} fill="none" stroke="rgba(121,212,255,0.7)" strokeWidth="1.3" />
-      <path d={linePath(ema9, xOf, y)} fill="none" stroke="var(--magenta)" strokeWidth="1.4" />
-      {slice.map((c, i) => {
-        const x = xOf(i);
-        const green = c.close >= c.open;
-        const color = green ? "var(--mint)" : "var(--crimson)";
-        return (
-          <g key={`${c.time}-${i}`}>
-            <line x1={x} x2={x} y1={y(c.high)} y2={y(c.low)} stroke={color} strokeWidth="1.2" />
-            <rect
-              x={x - bw / 2}
-              y={y(Math.max(c.open, c.close))}
-              width={bw}
-              height={Math.max(1.4, Math.abs(y(c.open) - y(c.close)))}
-              rx="1"
-              fill={color}
-            >
-              <title>
-                {new Date(c.time * 1000).toLocaleString()} · O {c.open} H {c.high} L {c.low} C {c.close}
-              </title>
-            </rect>
+    <div className="relative h-full w-full">
+      {hot ? (
+        <div className="chart-readout num">
+          <span>{new Date(hot.time * 1000).toLocaleTimeString()}</span>
+          <span>O {priceFmt(hot.open)}</span>
+          <span>H {priceFmt(hot.high)}</span>
+          <span>L {priceFmt(hot.low)}</span>
+          <span>C {priceFmt(hot.close)}</span>
+          <span className={hotChg >= 0 ? "pos" : "neg"}>{hotChg >= 0 ? "+" : ""}{hotChg.toFixed(2)}%</span>
+        </div>
+      ) : null}
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-full w-full touch-pan-y"
+        onPointerMove={(event) => pick(event.clientX, event.currentTarget)}
+        onPointerLeave={() => setHover(null)}
+      >
+        {[0.25, 0.5, 0.75].map((p) => (
+          <line
+            key={p}
+            x1={pad}
+            x2={w - pad}
+            y1={pad + (h - pad * 2) * p}
+            y2={pad + (h - pad * 2) * p}
+            stroke="var(--chart-grid)"
+          />
+        ))}
+        <path d={linePath(vwap, xOf, y)} fill="none" stroke="rgba(243,193,91,0.55)" strokeWidth="1.2" strokeDasharray="3 3" />
+        <path d={linePath(ema21, xOf, y)} fill="none" stroke="rgba(121,212,255,0.7)" strokeWidth="1.3" />
+        <path d={linePath(ema9, xOf, y)} fill="none" stroke="var(--magenta)" strokeWidth="1.4" />
+        {slice.map((c, i) => {
+          const x = xOf(i);
+          const green = c.close >= c.open;
+          const color = green ? "var(--mint)" : "var(--crimson)";
+          const active = i === hover;
+          return (
+            <g key={`${c.time}-${i}`}>
+              <line x1={x} x2={x} y1={y(c.high)} y2={y(c.low)} stroke={color} strokeWidth={active ? 1.8 : 1.2} />
+              <rect
+                x={x - bw / 2}
+                y={y(Math.max(c.open, c.close))}
+                width={bw}
+                height={Math.max(1.4, Math.abs(y(c.open) - y(c.close)))}
+                rx="1"
+                fill={color}
+                opacity={hover === null || active ? 1 : 0.45}
+              >
+                <title>
+                  {new Date(c.time * 1000).toLocaleString()} · O {c.open} H {c.high} L {c.low} C {c.close}
+                </title>
+              </rect>
+            </g>
+          );
+        })}
+        {hover !== null && hot ? (
+          <g pointerEvents="none">
+            <line x1={xOf(hover)} x2={xOf(hover)} y1={pad} y2={h - pad} stroke="var(--magenta)" strokeOpacity="0.45" />
+            <line x1={pad} x2={w - pad} y1={y(hot.close)} y2={y(hot.close)} stroke="var(--ice)" strokeOpacity="0.35" />
+            <circle cx={xOf(hover)} cy={y(hot.close)} r="3.2" fill="var(--text)" />
           </g>
-        );
-      })}
-      <text x={w - pad} y={14} textAnchor="end" fill={up ? "var(--mint)" : "var(--crimson)"} fontSize="10" className="num">
-        {last.close}
-      </text>
-    </svg>
+        ) : null}
+        <text x={w - pad} y={14} textAnchor="end" fill={up ? "var(--mint)" : "var(--crimson)"} fontSize="10" className="num">
+          {priceFmt(last.close)}
+        </text>
+      </svg>
+    </div>
   );
 }
 
 export function ScatterTape({ dots }: { dots: TapeDot[] }) {
+  const [hotMint, setHotMint] = useState<string | null>(null);
   if (dots.length === 0) return <EmptyPlot label="No live pool dots this cycle" />;
   const w = 920;
   const h = 220;
@@ -109,27 +152,43 @@ export function ScatterTape({ dots }: { dots: TapeDot[] }) {
   const sx = (s: number) => 28 + ((s - minS) / (maxS - minS || 1)) * (w - 56);
   const sy = (c: number) => 22 + (1 - (c - minC) / (maxC - minC || 1)) * (h - 44);
   const r = (liq: number) => Math.min(16, 3 + Math.sqrt(Math.max(liq, 0)) / 180);
+  const hot = dots.find((d) => d.mint === hotMint) ?? null;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
-      <line x1={28} x2={w - 28} y1={h / 2} y2={h / 2} stroke="var(--chart-grid)" />
-      <line x1={w / 2} x2={w / 2} y1={16} y2={h - 16} stroke="var(--chart-grid)" />
-      {dots.map((d) => {
-        const up = d.change24h >= 0;
-        const color = up ? "var(--mint)" : "var(--crimson)";
-        return (
-          <g key={d.mint}>
-            <circle cx={sx(d.score)} cy={sy(d.change24h)} r={r(d.liquidityUsd) + 7} fill={color} opacity="0.1" />
-            <circle cx={sx(d.score)} cy={sy(d.change24h)} r={r(d.liquidityUsd)} fill={color} opacity="0.88" />
-            <text x={sx(d.score) + 9} y={sy(d.change24h) - 8} className="num" fill="var(--chart-label)" fontSize="10">
-              {d.symbol}
-            </text>
-            <title>
-              {d.symbol} · score {d.score.toFixed(1)} · {d.change24h.toFixed(2)}%
-            </title>
-          </g>
-        );
-      })}
-    </svg>
+    <div className="relative h-full w-full">
+      {hot ? (
+        <div className="chart-readout num">
+          <span>{hot.symbol}</span>
+          <span>score {hot.score.toFixed(1)}</span>
+          <span className={hot.change24h >= 0 ? "pos" : "neg"}>
+            {hot.change24h >= 0 ? "+" : ""}
+            {hot.change24h.toFixed(2)}%
+          </span>
+          <span>liq {Math.round(hot.liquidityUsd).toLocaleString()}</span>
+        </div>
+      ) : null}
+      <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full">
+        <line x1={28} x2={w - 28} y1={h / 2} y2={h / 2} stroke="var(--chart-grid)" />
+        <line x1={w / 2} x2={w / 2} y1={16} y2={h - 16} stroke="var(--chart-grid)" />
+        {dots.map((d) => {
+          const up = d.change24h >= 0;
+          const color = up ? "var(--mint)" : "var(--crimson)";
+          const active = d.mint === hotMint;
+          const radius = r(d.liquidityUsd) * (active ? 1.35 : 1);
+          return (
+            <g key={d.mint} onPointerEnter={() => setHotMint(d.mint)} onPointerLeave={() => setHotMint(null)} style={{ cursor: "pointer" }}>
+              <circle cx={sx(d.score)} cy={sy(d.change24h)} r={radius + 7} fill={color} opacity={active ? 0.22 : 0.1} />
+              <circle cx={sx(d.score)} cy={sy(d.change24h)} r={radius} fill={color} opacity={hotMint && !active ? 0.35 : 0.88} />
+              <text x={sx(d.score) + 9} y={sy(d.change24h) - 8} className="num" fill={active ? "var(--text)" : "var(--chart-label)"} fontSize={active ? 12 : 10}>
+                {d.symbol}
+              </text>
+              <title>
+                {d.symbol} · score {d.score.toFixed(1)} · {d.change24h.toFixed(2)}%
+              </title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -160,6 +219,7 @@ export function EquityPath({ values }: { values: number[] }) {
       </defs>
       <polygon fill="url(#eqFill)" points={area} />
       <polyline fill="none" stroke={stroke} strokeWidth="2.2" strokeLinejoin="round" points={line} />
+      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="3.4" fill={stroke} />
     </svg>
   );
 }

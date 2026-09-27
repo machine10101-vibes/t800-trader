@@ -446,6 +446,7 @@ export interface TapeCard {
   symbol: string;
   mint: string;
   poolAddress: string;
+  change5m?: number;
   change15m: number;
 }
 

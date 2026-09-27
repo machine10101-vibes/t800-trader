@@ -47,6 +47,7 @@ export function watchlistTapes(candidates: TokenCandidate[], chain: ChainId = "s
       symbol: candidate.symbol,
       mint: candidate.mint,
       poolAddress: candidate.poolAddress,
+      change5m: candidate.flows.m5.priceChangePct,
       change15m: candidate.flows.m15.priceChangePct,
     }));
 }

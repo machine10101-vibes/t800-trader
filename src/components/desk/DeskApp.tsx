@@ -780,6 +780,7 @@ function ChainDesk({
                   chain={chain}
                   onFocus={setFocusMint}
                   onOpen={setThesis}
+                  onOpenPosition={setDetailId}
                   onArm={() => void control(armButton(desk.bot.running).action)}
                   busy={busy}
                 />
@@ -875,11 +876,11 @@ function ChainSwitch({
     <button
       type="button"
       onClick={() => onSwitch(id)}
-      className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.12em] sm:min-h-0 sm:py-1 sm:tracking-[0.16em] ${
-        chain === id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)]"
+      className={`chain-pill flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.12em] sm:min-h-0 sm:py-1 sm:tracking-[0.16em] ${
+        chain === id ? "chain-pill-on bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)]"
       }`}
     >
-      {armed ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mint)]" /> : null}
+      {armed ? <span className="pulse-dot shrink-0 bg-[var(--mint)] text-[var(--mint)]" /> : null}
       {label}
     </button>
   );
@@ -931,7 +932,7 @@ function Header({
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent-chip)] text-sm font-semibold text-[var(--magenta)]">
+            <div className="brand-mark grid h-9 w-9 shrink-0 place-items-center rounded-xl text-sm font-semibold text-[var(--magenta)]">
               T8
             </div>
             <div className="min-w-0">
@@ -955,10 +956,10 @@ function Header({
             {desk?.regime.fearGreed ? <Ticker label="F&G" value={`${desk.regime.fearGreed.value}`} hint={desk.regime.fearGreed.label} /> : null}
           </div>
           <div className="ml-auto hidden flex-wrap items-center justify-end gap-3 text-sm sm:flex">
-            <button onClick={onRefresh} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+            <button onClick={onRefresh} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Refresh
             </button>
-            <button onClick={onWatch} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+            <button onClick={onWatch} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Watch
             </button>
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
@@ -970,7 +971,7 @@ function Header({
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
               <div className="num">{equity}</div>
             </div>
-            <button onClick={onDisconnect} className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+            <button onClick={onDisconnect} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Disconnect
             </button>
             {desk ? (
@@ -995,13 +996,13 @@ function Header({
             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
             <div className="num text-xs">{equity}</div>
           </div>
-          <button onClick={onRefresh} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+          <button onClick={onRefresh} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Refresh
           </button>
-          <button onClick={onWatch} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+          <button onClick={onWatch} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Watch
           </button>
-          <button onClick={onDisconnect} className="min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+          <button onClick={onDisconnect} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Disconnect
           </button>
         </div>
@@ -1046,13 +1047,13 @@ function rowPnl(position: Position): number {
   return position.qty * position.entryPrice * (pnlPct / 100);
 }
 
-function PositionRail({ positions }: { positions: Position[] }) {
+function PositionRail({ positions, onOpen }: { positions: Position[]; onOpen: (id: string) => void }) {
   return (
     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       {positions.map((p) => {
         const pnlPct = ((p.markPrice - p.entryPrice) / p.entryPrice) * 100 * (p.side === "long" ? 1 : -1);
         return (
-          <div key={p.id} className="neon p-4">
+          <button key={p.id} type="button" onClick={() => onOpen(p.id)} className="pos-card neon p-4 text-left">
             <div className="flex items-center justify-between">
               <div className="font-medium">
                 {p.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(p.side, p.leverage)}</span>
@@ -1066,7 +1067,8 @@ function PositionRail({ positions }: { positions: Position[] }) {
             <div className="mt-3">
               <RangeBar position={p} />
             </div>
-          </div>
+            <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-[var(--faint)]">Open ticket</div>
+          </button>
         );
       })}
     </section>
@@ -1077,9 +1079,21 @@ function RangeBar({ position }: { position: Position }) {
   const pts = [position.stopPrice, position.entryPrice, position.markPrice, position.targetPrice];
   const lo = Math.min(...pts);
   const hi = Math.max(...pts);
-  const x = (v: number) => `${((v - lo) / (hi - lo || 1)) * 100}%`;
+  const pctOf = (v: number) => ((v - lo) / (hi - lo || 1)) * 100;
+  const x = (v: number) => `${pctOf(v)}%`;
+  const entry = pctOf(position.entryPrice);
+  const mark = pctOf(position.markPrice);
+  const winning = position.side === "long" ? position.markPrice >= position.entryPrice : position.markPrice <= position.entryPrice;
   return (
-    <div className="range-track">
+    <div className="range-track" title="Stop · entry · mark · target">
+      <span
+        className="range-fill"
+        style={{
+          left: `${Math.min(entry, mark)}%`,
+          width: `${Math.abs(mark - entry)}%`,
+          background: winning ? "var(--mint)" : "var(--crimson)",
+        }}
+      />
       <span className="range-mark bg-[var(--crimson)]" style={{ left: x(position.stopPrice) }} />
       <span className="range-mark bg-white" style={{ left: x(position.entryPrice) }} />
       <span className="range-mark bg-[var(--magenta)]" style={{ left: x(position.markPrice) }} />
@@ -1149,6 +1163,7 @@ function Overview({
   chain,
   onFocus,
   onOpen,
+  onOpenPosition,
   onArm,
   busy,
 }: {
@@ -1160,6 +1175,7 @@ function Overview({
   chain: ChainId;
   onFocus: (mint: string) => void;
   onOpen: (t: ResearchThesis) => void;
+  onOpenPosition: (id: string) => void;
   onArm: () => void;
   busy: boolean;
 }) {
@@ -1183,38 +1199,63 @@ function Overview({
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <section className="neon p-5">
-          <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-            <span>{focus ? focus.ticker : "NO FINALIST"}</span>
-            <Pill tone="magenta">Live</Pill>
-          </div>
-          <div className="mt-4 num text-4xl">{focus ? priceFmt(focus.price) : "—"}</div>
-          <div className="mt-2 text-sm">
-            {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
-          </div>
-          {desk.research.length > 1 ? (
-            <div className="mt-4 flex flex-wrap gap-1.5">
-              {desk.research.slice(0, 6).map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => onFocus(r.candidate.mint)}
-                  className={`rounded-full px-2.5 py-1 text-[11px] ${
-                    focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
-                  }`}
-                >
-                  {r.ticker}
-                </button>
-              ))}
+        <section className="neon overflow-hidden">
+          <div className="grid lg:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
+            <div className="p-5">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
+                <span>{focus ? focus.ticker : "NO FINALIST"}</span>
+                <Pill tone="magenta">
+                  <span className="pulse-dot bg-[var(--magenta)] text-[var(--magenta)]" />
+                  Live
+                </Pill>
+              </div>
+              <div className="hero-price mt-4 num text-4xl">{focus ? priceFmt(focus.price) : "—"}</div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                {focus ? <Tone value={focus.candidate.flows.h24.priceChangePct} /> : <span className="text-[var(--faint)]">Waiting on live pools</span>}
+                {focusTape ? (
+                  <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
+                    5m {focusTape.change5m !== undefined ? <Tone value={focusTape.change5m} /> : "—"} · 15m <Tone value={focusTape.change15m} />
+                  </span>
+                ) : null}
+              </div>
+              {desk.research.length > 1 ? (
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  {desk.research.slice(0, 6).map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => onFocus(r.candidate.mint)}
+                      className={`rounded-full px-2.5 py-1 text-[11px] ${
+                        focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                      }`}
+                    >
+                      {r.ticker}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                disabled={busy}
+                onClick={onArm}
+                className={`btn mt-5 w-full ${desk.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"}`}
+              >
+                {armButton(desk.bot.running).label}
+              </button>
+              {desk.bot.lastNote ? <p className="mt-3 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
             </div>
-          ) : null}
-          <button
-            disabled={busy}
-            onClick={onArm}
-            className={`btn mt-5 w-full ${desk.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"}`}
-          >
-            {armButton(desk.bot.running).label}
-          </button>
-          {desk.bot.lastNote ? <p className="mt-3 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
+            <div className="border-t border-[var(--line)] p-3 lg:border-t-0 lg:border-l">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
+                <span>{focusTape ? `${tapeLabel(focusTape.symbol)} 5m` : "5m tape"}</span>
+                <span className="flex gap-3 tracking-normal normal-case">
+                  <span className="text-[var(--magenta)]">EMA 9</span>
+                  <span className="text-[var(--ice)]">EMA 21</span>
+                  <span className="text-[var(--amber)]">VWAP</span>
+                </span>
+              </div>
+              <div className="h-[210px]">
+                <CandleChart candles={focusCandles} />
+              </div>
+            </div>
+          </div>
         </section>
         <section className="neon p-5">
           <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]"># trades · live stream</div>
@@ -1238,23 +1279,32 @@ function Overview({
         <p className="mb-3 px-1 text-sm leading-6 text-[var(--text)]">
           {desk.bot.lastNote ?? copy.waitingTick}
         </p>
-        <div className={`grid gap-3 ${bookTokens(chain).length > 1 ? "md:grid-cols-2" : ""}`}>
+        <div className={`grid gap-3 ${bookTokens(chain).length > 1 ? "sm:grid-cols-2 xl:grid-cols-3" : ""}`}>
           {bookTokens(chain).map((token) => {
             const symbol = token.symbol;
             const tape = desk.tapes.find((row) => row.symbol === symbol);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
+            const selected = Boolean(tape && focusTape?.poolAddress === tape.poolAddress);
             return (
               <button
                 key={symbol}
+                type="button"
+                aria-pressed={selected}
                 onClick={() => tape && onFocus(tape.mint)}
-                className={`rounded-2xl border p-2 text-left ${
-                  tape && focusTape?.poolAddress === tape.poolAddress ? "border-[var(--magenta)]" : "border-[var(--line)]"
-                }`}
+                className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
-                <div className="mb-1 flex items-center justify-between px-1">
-                  <span className="text-sm font-medium">{tapeLabel(symbol)}</span>
-                  {tape ? <Tone value={tape.change15m} /> : <span className="text-[11px] text-[var(--faint)]">—</span>}
+                <div className="mb-1 flex items-center justify-between gap-2 px-1">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    {live ? <span className="pulse-dot bg-[var(--mint)] text-[var(--mint)]" /> : null}
+                    {tapeLabel(symbol)}
+                  </span>
+                  <span className="flex items-center gap-2 text-[11px]">
+                    <span className="uppercase tracking-[0.12em] text-[var(--faint)]">5m</span>
+                    {tape && tape.change5m !== undefined ? <Tone value={tape.change5m} /> : <span className="text-[var(--faint)]">—</span>}
+                    <span className="uppercase tracking-[0.12em] text-[var(--faint)]">15m</span>
+                    {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
+                  </span>
                 </div>
                 <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[132px]">
@@ -1266,7 +1316,7 @@ function Overview({
         </div>
       </section>
 
-      {open.length ? <PositionRail positions={open} /> : null}
+      {open.length ? <PositionRail positions={open} onOpen={onOpenPosition} /> : null}
 
       <section className="grid gap-3 md:grid-cols-4">
         <Stat label={swaps ? "Realized" : "Day P&L"} value={<Tone value={swaps ? realized : desk.portfolio.dayPnlUsd}>{usd(swaps ? realized : desk.portfolio.dayPnlUsd)}</Tone>} sub={swaps ? `${stats.closedTrades} signed closes` : `DD ${desk.stats.maxDrawdownPct.toFixed(1)}%`} />

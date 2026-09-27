@@ -55,6 +55,8 @@ describe("watchlistTapes", () => {
       tapes.map((tape) => tape.symbol),
       ["SOL"],
     );
+    assert.equal(tapes[0]?.change5m, 0.4);
+    assert.equal(tapes[0]?.change15m, 0.4);
     assert.equal(tapes.some((tape) => tape.symbol === "JUP"), false);
     const withZebec = watchlistTapes([
       row(jup, "jup-deep", 9_000),
