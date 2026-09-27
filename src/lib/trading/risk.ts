@@ -25,6 +25,8 @@ export const POLICY = {
   scaleFractionPct: 50,
   lockAtR: 1.5,
   lockProfitR: 0.45,
+  stopLossPct: 2,
+  targetProfitPct: 4,
   timeCapMin: 120,
   memeTimeCapMin: 40,
   staleMin: 45,
@@ -279,10 +281,18 @@ export function markPosition(position: Position, price: number): Position {
   };
 }
 
+/** Dollars the ticket was worth at entry. Stop and target are a percent of this price. */
+export function ticketEntryUsd(position: Pick<Position, "qty" | "entryPrice" | "notional">): number {
+  const fromFill = position.qty * position.entryPrice;
+  if (fromFill > 0) return fromFill;
+  return position.notional > 0 ? position.notional : 0;
+}
+
 export function unrealizedPnl(position: Position): { usd: number; pct: number } {
   const dir = position.side === "long" ? 1 : -1;
   const pct = ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * dir;
-  const usd = position.qty * position.entryPrice * (pct / 100);
+  const basis = ticketEntryUsd(position);
+  const usd = basis > 0 ? basis * (pct / 100) : 0;
   return { usd, pct };
 }
 
@@ -361,11 +371,75 @@ export function rMultiple(position: Position): number {
   return ((position.markPrice - position.entryPrice) * dir) / risk;
 }
 
+/** Percent the live mark has moved in the ticket's favor. Negative means the trade is losing. */
+export function favorableMovePct(position: Pick<Position, "side" | "entryPrice" | "markPrice">): number {
+  if (!(position.entryPrice > 0) || !(position.markPrice > 0)) return 0;
+  const dir = position.side === "long" ? 1 : -1;
+  return ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * dir;
+}
+
+function priceFromEntry(entry: number, side: Position["side"], pct: number, kind: "stop" | "target"): number {
+  const frac = pct / 100;
+  if (side === "long") return kind === "stop" ? entry * (1 - frac) : entry * (1 + frac);
+  return kind === "stop" ? entry * (1 + frac) : entry * (1 - frac);
+}
+
+/**
+ * Lock the settings stop and target onto a ticket once.
+ * A later change to those percents does not move a bracket that is already preset.
+ * A stop already trailed tighter than the original stays tighter on that first lock.
+ */
+export function alignBracket(position: Position, config?: Partial<BotConfig>): Position {
+  const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
+  const targetProfitPct = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
+  if (!(position.entryPrice > 0)) return position;
+  const configuredStop = priceFromEntry(position.entryPrice, position.side, stopLossPct, "stop");
+  const configuredTarget = priceFromEntry(position.entryPrice, position.side, targetProfitPct, "target");
+  const trailed =
+    position.side === "long"
+      ? position.stopPrice > position.initialStop + 1e-9
+      : position.stopPrice < position.initialStop - 1e-9;
+  const stopPrice = trailed
+    ? position.side === "long"
+      ? Math.max(position.stopPrice, configuredStop)
+      : Math.min(position.stopPrice, configuredStop)
+    : configuredStop;
+  return {
+    ...position,
+    stopPrice,
+    initialStop: configuredStop,
+    targetPrice: configuredTarget,
+  };
+}
+
+/** First scan locks the settings bracket. After that the prices stay on the ticket. */
+export function presetBracket(position: Position, config?: Partial<BotConfig>): Position {
+  if (position.bracketPreset) return position;
+  const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
+  const targetProfitPct = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
+  return { ...alignBracket(position, config), bracketPreset: true, stopLossPct, targetProfitPct };
+}
+
+/** New tickets use the settings stop and target, not the signal's built-in percents. */
+export function withUserBracket<T extends { stopPct: number; targetPct: number }>(
+  signal: T,
+  config?: Partial<BotConfig>,
+): T {
+  return {
+    ...signal,
+    stopPct: policyNum(config?.stopLossPct, POLICY.stopLossPct),
+    targetPct: policyNum(config?.targetProfitPct, POLICY.targetProfitPct),
+  };
+}
+
 export function managePosition(
   position: Position,
   nowMs = Date.now(),
   config?: Partial<BotConfig>,
 ): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
+  const pnlPct = unrealizedPnl(position).pct;
+  if (typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) return { exit: "target" };
+  if (typeof position.stopLossPct === "number" && pnlPct <= -position.stopLossPct + 1e-6) return { exit: "stop" };
   const meme = (position.sector ?? "Unknown") === "Meme";
   const timeCap = meme
     ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)

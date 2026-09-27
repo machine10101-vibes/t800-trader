@@ -1,10 +1,11 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
+import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS, venueSummary } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export function SettingsPanel({
   chain = "solana",
@@ -21,10 +22,13 @@ export function SettingsPanel({
 }) {
   const copy = CHAIN_COPY[chain];
   const [local, setLocal] = useState(() => normalizeConfig(desk.config));
-  useEffect(() => setLocal(normalizeConfig(desk.config)), [desk.config]);
-
   const saved = useMemo(() => normalizeConfig(desk.config), [desk.config]);
   const dirty = JSON.stringify(local) !== JSON.stringify(saved);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    setLocal((cur) => nextSettingsDraft(cur, saved, dirtyRef.current));
+  }, [saved]);
   const set = (patch: Partial<BotConfig>) => setLocal((cur) => normalizeConfig({ ...cur, ...patch }));
 
   return (
@@ -34,8 +38,8 @@ export function SettingsPanel({
           <div className="max-w-2xl">
             <h2 className="text-2xl font-medium">Desk policy</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              These controls change the next scan. The wallet mark still sizes the book. Saving keeps open tickets where
-              they are. {copy.settingsReset}
+              Stop loss and take profit are a percent of the ticket price. They lock on when the ticket opens. A fill
+              sells that ticket and does not start a new one. Everything else is under All options. {copy.settingsReset}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
@@ -68,6 +72,50 @@ export function SettingsPanel({
         </p>
       </div>
 
+      <Section title="Ticket" hint="These three are the whole trade. Stop and take profit are percents of the ticket price, locked at entry.">
+        <Field
+          label="Stop loss"
+          hint="Percent of the ticket price. A 5% stop on a $100 ticket sells after a $5 loss."
+          suffix="%"
+          min={0.4}
+          max={15}
+          step={0.1}
+          value={local.stopLossPct}
+          onChange={(v) => set({ stopLossPct: v })}
+        />
+        <Field
+          label="Take profit"
+          hint="Percent of the ticket price. A 4% target on a $100 ticket sells after a $4 gain."
+          suffix="%"
+          min={0.5}
+          max={30}
+          step={0.1}
+          value={local.targetProfitPct}
+          onChange={(v) => set({ targetProfitPct: v })}
+        />
+        <Field
+          label="Max ticket"
+          hint="Largest LIVE ticket, in dollars. The default cap is $250. Type 5 and it stays at $5."
+          kind="number"
+          suffix=" USD"
+          min={5}
+          max={10_000}
+          step={1}
+          value={local.maxLiveNotionalUsd}
+          onChange={(v) => {
+            const cap = commitTicketCap(String(v), local.maxLiveNotionalUsd);
+            set({ maxLiveNotionalUsd: cap });
+            if (cap !== saved.maxLiveNotionalUsd) onSave({ maxLiveNotionalUsd: cap });
+          }}
+        />
+      </Section>
+
+      <details className="neon p-5 sm:p-6">
+        <summary className="cursor-pointer text-lg font-medium">All options</summary>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">
+          Scan, venues, sizing, and the rest of the policy. Saving still writes every control, including the ones above.
+        </p>
+        <div className="mt-4 space-y-4">
       <Section
         title="Execution"
         hint="PAPER is the default. LIVE still needs you to type LIVE in the confirm sheet this session. Arming then asks the wallet to fund a trading key; that key sends Jupiter swaps. A reload locks LIVE again until you re-confirm."
@@ -91,16 +139,6 @@ export function SettingsPanel({
           step={10}
           suffix=" bps"
           onChange={(v) => set({ slippageBps: v })}
-        />
-        <Field
-          label="Max live ticket"
-          hint="Hard cap on a single LIVE open."
-          value={local.maxLiveNotionalUsd}
-          min={5}
-          max={500}
-          step={5}
-          suffix=" USD"
-          onChange={(v) => set({ maxLiveNotionalUsd: v })}
         />
         <Field
           label="Min SOL for fees"
@@ -371,7 +409,7 @@ export function SettingsPanel({
         />
       </Section>
 
-      <Section title="Management" hint="What the bot does with a ticket after it is open.">
+      <Section title="Management" hint="What the bot does with a ticket after the preset stop and take profit.">
         <Field
           label="Breakeven at"
           hint="Move the stop to a small profit once the trade reaches this R multiple."
@@ -463,6 +501,8 @@ export function SettingsPanel({
           onChange={(v) => set({ memeTimeCapMin: v })}
         />
       </Section>
+        </div>
+      </details>
 
       <div className="neon p-6">
         <h3 className="text-lg font-medium">What could I be wrong about?</h3>
@@ -495,6 +535,7 @@ function Field({
   step,
   suffix,
   disabled,
+  kind = "range",
   onChange,
 }: {
   label: string;
@@ -505,10 +546,29 @@ function Field({
   step: number;
   suffix?: string;
   disabled?: boolean;
+  kind?: "range" | "number";
   onChange: (value: number) => void;
 }) {
   const digits = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
   const shown = digits === 0 ? String(Math.round(value)) : value.toFixed(digits);
+  const [draft, setDraft] = useState(shown);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(shown);
+  }, [shown]);
+  const commitDraft = () => {
+    focused.current = false;
+    const text = draft.trim();
+    const next = text ? Number(text) : Number.NaN;
+    if (!Number.isFinite(next)) {
+      setDraft(shown);
+      return;
+    }
+    const resolved = Math.min(max, Math.max(min, next));
+    const printed = digits === 0 ? String(Math.round(resolved)) : resolved.toFixed(digits);
+    setDraft(printed);
+    if (resolved !== value) onChange(resolved);
+  };
   return (
     <label className={`block rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${disabled ? "opacity-50" : ""}`}>
       <div className="flex items-start justify-between gap-3 text-sm">
@@ -519,16 +579,40 @@ function Field({
         </span>
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
-      <input
-        type="range"
-        className="mt-3 w-full"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      {kind === "number" ? (
+        <input
+          type="number"
+          inputMode="decimal"
+          className="num mt-3 w-full rounded-xl border border-[var(--line)] bg-transparent px-3 py-2 text-sm"
+          min={min}
+          max={max}
+          step={step}
+          value={focused.current ? draft : shown}
+          disabled={disabled}
+          onFocus={() => {
+            focused.current = true;
+            setDraft(shown);
+          }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      ) : (
+        <input
+          type="range"
+          className="mt-3 w-full"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+      )}
     </label>
   );
 }

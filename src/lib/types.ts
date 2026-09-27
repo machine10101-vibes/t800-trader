@@ -199,6 +199,12 @@ export interface Position {
   notional: number;
   initialStop: number;
   scaled: boolean;
+  /** Stop and target were locked at entry. Later setting changes do not move them. */
+  bracketPreset?: boolean;
+  /** Preset loss as a percent of the ticket price (qty × entry). */
+  stopLossPct?: number;
+  /** Preset profit as a percent of the ticket price (qty × entry). */
+  targetProfitPct?: number;
   /** Set when a wallet signed the open. Missing means the ticket never left this browser. */
   signature?: string;
   tokenDecimals?: number;
@@ -253,6 +259,10 @@ export interface BotConfig {
   scaleFractionPct: number;
   lockAtR: number;
   lockProfitR: number;
+  /** Close the ticket once price has moved this percent against the entry. */
+  stopLossPct: number;
+  /** Sell the whole ticket once price has moved this percent in favor of the entry. */
+  targetProfitPct: number;
   timeCapMin: number;
   memeTimeCapMin: number;
   staleMin: number;
@@ -345,8 +355,10 @@ export interface BotState {
   blocked: string[];
   /** Set when the wallet declines a signature, so the next scan does not pop the prompt again immediately. */
   swapHoldUntil?: string | null;
-  /** A hand close. The scan will not reopen this mint until `until`. */
-  skipReentry?: { mint: string; until: string } | null;
+  /** A preset stop, preset target, or hand close. The scan will not reopen this mint until `until`. */
+  skipReentry?: { mint: string; until: string; why?: "hand" | "stop" | "target" } | null;
+  /** After a preset stop or target fills, no new ticket is opened until this time. */
+  bracketQuietUntil?: string | null;
   /** A Jupiter limit bid waiting for a taker. The position is booked only after it fills. */
   resting?: RestingQuote | null;
   /** Signature of the arm transaction that funded the browser trading key. */

@@ -54,6 +54,10 @@ describe("store", () => {
     assert.equal(next.minConfidence, 58);
     assert.equal(next.autoCash, true);
     assert.equal(next.beR, 0.8);
+    assert.equal(next.stopLossPct, 2);
+    assert.equal(next.targetProfitPct, 4);
+    assert.equal(normalizeConfig({ stopLossPct: 0.1, targetProfitPct: 80 }).stopLossPct, 0.4);
+    assert.equal(normalizeConfig({ stopLossPct: 0.1, targetProfitPct: 80 }).targetProfitPct, 30);
     assert.equal(next.venues.includes("raydium"), true);
     assert.equal(next.venues.includes("pump"), true);
     assert.deepEqual(normalizeConfig({ venues: ["orca", "nope"] }).venues, ["orca"]);

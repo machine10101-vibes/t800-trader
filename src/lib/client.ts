@@ -19,7 +19,7 @@ import type { CronosSession } from "@/lib/cronos/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
-import { isAlreadyFlat, reentryHold } from "@/lib/trading/close";
+import { applyHandClose, isAlreadyFlat } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
@@ -269,17 +269,6 @@ export async function withdrawTradingProfit(session: DeskSession, chain: ChainId
   return buildDesk(false, chain);
 }
 
-function withHandClose<T extends { bot: { lastNote: string | null; skipReentry?: { mint: string; until: string } | null } }>(
-  state: T,
-  mint: string,
-  note: string,
-): T {
-  return {
-    ...state,
-    bot: { ...state.bot, lastNote: note, skipReentry: reentryHold(mint) },
-  };
-}
-
 export async function closeTicket(positionId: string, session?: DeskSession | null, chain: ChainId = "solana"): Promise<DeskPayload> {
   const executor =
     chain === "cronos"
@@ -296,17 +285,14 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
         const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-        const closed = pushEquity(closePosition(state, pos.id, fill.price, "manual", fill.signature));
-        return withHandClose(closed, pos.mint, `Closed ${pos.symbol} by hand`);
+        return applyHandClose(state, pos.id, fill.price, fill.signature);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Close failed";
         if (!isAlreadyFlat(message)) throw error;
-        const closed = pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
-        return withHandClose(closed, pos.mint, `Closed ${pos.symbol} — the trading key was already flat`);
+        return applyHandClose(state, pos.id, pos.markPrice, undefined, `Closed ${pos.symbol} — the trading key was already flat`);
       }
     }
-    const closed = pushEquity(closePosition(state, pos.id, pos.markPrice, "manual"));
-    return withHandClose(closed, pos.mint, `Closed ${pos.symbol} by hand`);
+    return applyHandClose(state, pos.id, pos.markPrice);
   }, chain);
   try {
     return await buildDesk(false, chain);

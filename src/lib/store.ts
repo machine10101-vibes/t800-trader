@@ -68,6 +68,8 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     scaleFractionPct: clampNum(src.scaleFractionPct, POLICY.scaleFractionPct, 25, 75, true),
     lockAtR: clampNum(src.lockAtR, POLICY.lockAtR, 1, 4),
     lockProfitR: clampNum(src.lockProfitR, POLICY.lockProfitR, 0.05, 1.5),
+    stopLossPct: clampNum(src.stopLossPct, POLICY.stopLossPct, 0.4, 15),
+    targetProfitPct: clampNum(src.targetProfitPct, POLICY.targetProfitPct, 0.5, 30),
     timeCapMin: clampNum(src.timeCapMin, POLICY.timeCapMin, 30, 360, true),
     memeTimeCapMin: clampNum(src.memeTimeCapMin, POLICY.memeTimeCapMin, 10, 180, true),
     staleMin: clampNum(src.staleMin, POLICY.staleMin, 10, 240, true),
