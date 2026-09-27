@@ -22,7 +22,7 @@ import {
 } from "@/lib/client";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { fetchOhlcv } from "@/lib/market/providers";
+import { cachedOhlcv, candleFetchedAt, requestBookCandles } from "@/lib/market/providers";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -1116,41 +1116,39 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
 
 function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle[]> {
   const key = tapes.map((tape) => tape.poolAddress).join("|");
+  const pinned = tapes.filter((tape) => tape.symbol === "SOL" || tape.symbol === "ZBCN" || tape.symbol === "CRO").map((tape) => tape.poolAddress).join("|");
   const [bars, setBars] = useState<Record<string, Candle[]>>({});
   useEffect(() => {
     if (!key) return;
-    const pools = key.split("|");
+    const pools = key.split("|").filter(Boolean);
+    const pinnedSet = new Set(pinned.split("|").filter(Boolean));
     let live = true;
-    const pull = async () => {
-      const rows = await Promise.all(
-        pools.map(async (poolAddress) => {
-          try {
-            const candles = await fetchOhlcv(poolAddress, 48, chain);
-            return [poolAddress, candles] as const;
-          } catch {
-            return [poolAddress, null] as const;
-          }
-        }),
-      );
+    const paint = () => {
       if (!live) return;
+      const stale = pools.filter((pool) => {
+        const at = candleFetchedAt(pool);
+        return at === null || Date.now() - at > 90_000;
+      });
+      requestBookCandles(stale, chain, pinnedSet);
       setBars((cur) => {
-        const next = { ...cur };
         let changed = false;
-        for (const [poolAddress, candles] of rows) {
-          if (!candles?.length || next[poolAddress] === candles) continue;
-          next[poolAddress] = candles;
+        const next = { ...cur };
+        for (const pool of pools) {
+          const rows = cachedOhlcv(pool);
+          if (!rows?.length || next[pool] === rows) continue;
+          next[pool] = rows;
           changed = true;
         }
         return changed ? next : cur;
       });
     };
-    void pull();
-    const id = setInterval(() => void pull(), 15_000);
+    paint();
+    const id = setInterval(paint, 2_000);
     return () => {
       live = false;
       clearInterval(id);
     };
-  }, [chain, key]);
+  }, [chain, key, pinned]);
   return bars;
 }
 
@@ -1307,8 +1305,8 @@ function Overview({
                   </span>
                 </div>
                 <p className={`mb-1 px-1 text-sm ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
-                <div className="h-[132px]">
-                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} /> : null}
+                <div className="h-[168px]">
+                  {tape ? <CandleChart candles={bars[tape.poolAddress] ?? []} /> : <div className="grid h-full place-items-center text-[11px] tracking-[0.12em] text-[var(--faint)]">Finding the pool</div>}
                 </div>
               </button>
             );

@@ -30,7 +30,7 @@ function linePath(
 export function CandleChart({ candles }: { candles: Candle[] }) {
   const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
-    return <EmptyPlot label="No live OHLCV for this pool" />;
+    return <EmptyPlot label="Waiting on the 5-minute tape" waiting />;
   }
   const w = 520;
   const h = 168;
@@ -254,10 +254,18 @@ export function VolumeBars({ candles }: { candles: Candle[] }) {
   );
 }
 
-function EmptyPlot({ label }: { label: string }) {
+function EmptyPlot({ label, waiting = false }: { label: string; waiting?: boolean }) {
+  if (!waiting) {
+    return (
+      <div className="grid h-full min-h-[88px] place-items-center px-3 text-center text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
+        {label}
+      </div>
+    );
+  }
   return (
-    <div className="grid h-full min-h-[88px] place-items-center px-3 text-center text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-      {label}
+    <div className="flex h-full min-h-[88px] flex-col justify-end px-2 pb-2">
+      <div className="skel h-16 w-full" />
+      <div className="mt-2 text-center text-[11px] tracking-[0.12em] text-[var(--muted)]">{label}</div>
     </div>
   );
 }

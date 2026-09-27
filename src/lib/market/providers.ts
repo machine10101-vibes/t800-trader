@@ -6,6 +6,7 @@ import { loadJupiterPopular } from "./jupiterPopular";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
+import { CANDLE_COOL_MS, CORE_CANDLE_MS, mintsToFetch, POPULAR_CANDLE_MS, poolsToCandle } from "./ohlcvPlan";
 import { withCandleTape } from "./tape";
 import {
   bookMints,
@@ -236,22 +237,66 @@ async function pinnedPool(mint: string, symbol: string, pin: string, chain: Chai
   return null;
 }
 
+interface PoolSnap {
+  at: number;
+  rows: TokenCandidate[];
+}
+
+const poolSnaps = new Map<string, PoolSnap>();
+const poolMint = new Map<string, string>();
+
+function snapId(chain: ChainId, mint: string): string {
+  return `${chain}:${bookKey(mint)}`;
+}
+
+function rememberRows(rows: TokenCandidate[]): void {
+  for (const row of rows) {
+    if (row.poolAddress && row.mint) poolMint.set(row.poolAddress, row.mint);
+  }
+}
+
 async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
   const book = bookTokens(chain);
+  const pins = bookPools(chain);
+  const now = Date.now();
+  const snaps = new Map<string, { at: number; ok: boolean }>();
+  for (const token of book) {
+    const snap = poolSnaps.get(snapId(chain, token.mint));
+    if (snap) snaps.set(token.mint, { at: snap.at, ok: snap.rows.length > 0 });
+  }
+  const due = new Set(
+    mintsToFetch(
+      book.map((token) => ({
+        mint: token.mint,
+        pinned: pins.some((row) => sameMint(row.mint, token.mint)),
+      })),
+      snaps,
+      now,
+      1,
+    ),
+  );
   const pools: TokenCandidate[] = [];
-  for (const t of book) {
-    if (pools.length) await sleep(350);
-    const pin = bookPools(chain).find((row) => sameMint(row.mint, t.mint))?.pool;
-    const row = pin ? await pinnedPool(t.mint, t.symbol, pin, chain) : null;
-    if (row) {
-      pools.push(row);
+  let paced = false;
+  for (const token of book) {
+    const key = snapId(chain, token.mint);
+    const snap = poolSnaps.get(key);
+    if (!due.has(token.mint)) {
+      if (snap?.rows.length) pools.push(...snap.rows);
       continue;
     }
+    if (paced) await sleep(450);
+    paced = true;
+    const pin = pins.find((row) => sameMint(row.mint, token.mint))?.pool;
+    let rows: TokenCandidate[] = [];
     try {
-      pools.push(...(await poolsForMint(t.mint, t.symbol, chain)));
+      const pinned = pin ? await pinnedPool(token.mint, token.symbol, pin, chain) : null;
+      rows = pinned ? [pinned] : await poolsForMint(token.mint, token.symbol, chain);
     } catch {
-      // This name waits for the next tick.
+      rows = [];
     }
+    poolSnaps.set(key, { at: Date.now(), rows });
+    rememberRows(rows);
+    pools.push(...rows);
   }
   const best = new Map<string, TokenCandidate>();
   for (const p of pools) {
@@ -288,10 +333,10 @@ function mergeCandidates(groups: TokenCandidate[][]): TokenCandidate[] {
 
 const ohlcvCache = new Map<string, { at: number; rows: Candle[] }>();
 const ohlcvMiss = new Map<string, number>();
-const OHLCV_TTL_MS = 45_000;
+const OHLCV_TTL_MS = POPULAR_CANDLE_MS;
 const OHLCV_STALE_MS = 20 * 60_000;
-const OHLCV_MISS_MS = 20_000;
-const OHLCV_PARALLEL = 2;
+const OHLCV_MISS_MS = CANDLE_COOL_MS;
+const OHLCV_PARALLEL = 1;
 let ohlcvActive = 0;
 const ohlcvWaiters: (() => void)[] = [];
 
@@ -324,21 +369,24 @@ function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
-async function fetchOhlcvOnce(
-  poolAddress: string,
-  timeframe: "minute" | "hour",
-  aggregate: number,
-  limit: number,
-  chain: ChainId,
-): Promise<Candle[]> {
-  const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=${limit}`;
+async function readOhlcv(url: string): Promise<Candle[]> {
   const json = await fetchJson<{
     data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 6_000, retries: 1 });
+  }>(url, { timeoutMs: 6_000, retries: 0 });
   const list = json.data?.attributes?.ohlcv_list ?? [];
   return list
     .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
     .sort((a, b) => a.time - b.time);
+}
+
+async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
+  const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=${limit}`;
+  const poolRows = await readOhlcv(poolUrl);
+  if (poolRows.length) return poolRows;
+  const mint = poolMint.get(poolAddress);
+  if (!mint) return poolRows;
+  const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/tokens/${mint}/ohlcv/minute?aggregate=5&limit=${limit}`;
+  return readOhlcv(tokenUrl).catch(() => poolRows);
 }
 
 function staleCandles(poolAddress: string): Candle[] | null {
@@ -353,30 +401,45 @@ export function cachedOhlcv(poolAddress: string): Candle[] | null {
   return null;
 }
 
-export async function fetchOhlcv(poolAddress: string, limit = 80, chain: ChainId = "solana"): Promise<Candle[]> {
+export function candleFetchedAt(poolAddress: string): number | null {
   const hit = ohlcvCache.get(poolAddress);
-  if (hit && Date.now() - hit.at < OHLCV_TTL_MS && hit.rows.length) return hit.rows;
+  return hit?.rows.length ? hit.at : null;
+}
+
+const ohlcvInflight = new Map<string, Promise<Candle[]>>();
+
+export async function fetchOhlcv(
+  poolAddress: string,
+  limit = 80,
+  chain: ChainId = "solana",
+  opts?: { maxAge?: number },
+): Promise<Candle[]> {
+  const inflight = ohlcvInflight.get(poolAddress);
+  if (inflight) return inflight;
+  const run = loadOhlcv(poolAddress, limit, chain, opts?.maxAge ?? OHLCV_TTL_MS).finally(() => {
+    if (ohlcvInflight.get(poolAddress) === run) ohlcvInflight.delete(poolAddress);
+  });
+  ohlcvInflight.set(poolAddress, run);
+  return run;
+}
+
+async function loadOhlcv(poolAddress: string, limit: number, chain: ChainId, maxAge: number): Promise<Candle[]> {
+  const hit = ohlcvCache.get(poolAddress);
+  if (hit?.rows.length && Date.now() - hit.at < maxAge) return hit.rows;
   const missedAt = ohlcvMiss.get(poolAddress);
-  if (missedAt && Date.now() - missedAt < OHLCV_MISS_MS) {
-    const stale = staleCandles(poolAddress);
-    if (stale) return stale;
-    throw new Error(`429 cooling down for ${poolAddress}`);
-  }
+  if (missedAt && Date.now() - missedAt < OHLCV_MISS_MS) return staleCandles(poolAddress) ?? [];
   try {
-    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, "minute", 5, Math.min(limit, 70), chain));
+    const rows = await enqueueOhlcv(() => fetchOhlcvOnce(poolAddress, Math.min(limit, 70), chain));
     if (rows.length) {
       ohlcvCache.set(poolAddress, { at: Date.now(), rows });
       ohlcvMiss.delete(poolAddress);
       return rows;
     }
-    const stale = staleCandles(poolAddress);
-    if (stale) return stale;
-    return rows;
-  } catch (error) {
     ohlcvMiss.set(poolAddress, Date.now());
-    const stale = staleCandles(poolAddress);
-    if (stale) return stale;
-    throw error;
+    return staleCandles(poolAddress) ?? rows;
+  } catch {
+    ohlcvMiss.set(poolAddress, Date.now());
+    return staleCandles(poolAddress) ?? [];
   }
 }
 
@@ -538,9 +601,45 @@ export async function loadMarket(force = false, chain: ChainId = "solana"): Prom
   return run;
 }
 
-async function warmBookCandles(poolAddresses: string[], chain: ChainId): Promise<void> {
-  for (const pool of poolAddresses) {
-    await fetchOhlcv(pool, 48, chain).catch(() => [] as Candle[]);
+interface CandleJob {
+  pool: string;
+  chain: ChainId;
+  pinned: boolean;
+}
+
+const candleQueue: CandleJob[] = [];
+let drainingCandles = false;
+
+/** One candle read at a time. Fresh charts and cooling pools are left alone. */
+export function requestBookCandles(pools: string[], chain: ChainId, pinned: ReadonlySet<string> = new Set()): void {
+  for (const pool of pools) {
+    if (!pool || candleQueue.some((job) => job.pool === pool && job.chain === chain)) continue;
+    candleQueue.push({ pool, chain, pinned: pinned.has(pool) });
+  }
+  if (drainingCandles) return;
+  drainingCandles = true;
+  void drainCandles();
+}
+
+async function drainCandles(): Promise<void> {
+  try {
+    while (candleQueue.length) {
+      const job = candleQueue.shift();
+      if (!job) break;
+      const freshAt = new Map<string, number>();
+      const missedAt = new Map<string, number>();
+      const fetched = candleFetchedAt(job.pool);
+      if (fetched !== null) freshAt.set(job.pool, fetched);
+      const missed = ohlcvMiss.get(job.pool);
+      if (missed) missedAt.set(job.pool, missed);
+      const due = poolsToCandle([{ address: job.pool, pinned: job.pinned }], freshAt, missedAt, Date.now(), 1);
+      if (!due.length) continue;
+      await fetchOhlcv(job.pool, 48, job.chain, { maxAge: job.pinned ? CORE_CANDLE_MS : POPULAR_CANDLE_MS });
+      await sleep(1_400);
+    }
+  } finally {
+    drainingCandles = false;
+    if (candleQueue.length) requestBookCandles([], "solana");
   }
 }
 
@@ -568,14 +667,19 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     }
   }
   merged = fillActiveBook(merged, chain);
-  const candlePools = uniqueBy(
+  const candleRows = uniqueBy(
     merged.filter((candidate) => candidate.poolAddress),
     (candidate) => candidate.mint,
-  ).map((candidate) => candidate.poolAddress);
+  );
+  const pinnedPools = new Set(bookPools(chain).map((row) => row.pool));
+  requestBookCandles(
+    candleRows.map((candidate) => candidate.poolAddress),
+    chain,
+    pinnedPools,
+  );
   const [regime, crossed] = await Promise.all([
     regimePromise,
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
-    warmBookCandles(candlePools, chain),
   ]);
   const candidates = fillActiveBook(
     crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
