@@ -377,8 +377,9 @@ function priceFromEntry(entry: number, side: Position["side"], pct: number, kind
 }
 
 /**
- * Point the ticket at the stop loss % and target profit in settings.
- * A stop already trailed tighter than the original stays tighter.
+ * Lock the settings stop and target onto a ticket once.
+ * A later change to those percents does not move a bracket that is already preset.
+ * A stop already trailed tighter than the original stays tighter on that first lock.
  */
 export function alignBracket(position: Position, config?: Partial<BotConfig>): Position {
   const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
@@ -403,6 +404,12 @@ export function alignBracket(position: Position, config?: Partial<BotConfig>): P
   };
 }
 
+/** First scan locks the settings bracket. After that the prices stay on the ticket. */
+export function presetBracket(position: Position, config?: Partial<BotConfig>): Position {
+  if (position.bracketPreset) return position;
+  return { ...alignBracket(position, config), bracketPreset: true };
+}
+
 /** New tickets use the settings stop and target, not the signal's built-in percents. */
 export function withUserBracket<T extends { stopPct: number; targetPct: number }>(
   signal: T,
@@ -416,16 +423,10 @@ export function withUserBracket<T extends { stopPct: number; targetPct: number }
 }
 
 export function managePosition(
-  raw: Position,
+  position: Position,
   nowMs = Date.now(),
   config?: Partial<BotConfig>,
 ): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
-  const position = alignBracket(raw, config);
-  const move = favorableMovePct(position);
-  const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
-  const targetProfitPct = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
-  if (move >= targetProfitPct - 1e-6) return { exit: "target" };
-  if (move <= -stopLossPct + 1e-6) return { exit: "stop" };
   const meme = (position.sector ?? "Unknown") === "Meme";
   const timeCap = meme
     ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)

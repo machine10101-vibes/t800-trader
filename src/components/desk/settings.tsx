@@ -35,7 +35,7 @@ export function SettingsPanel({
             <h2 className="text-2xl font-medium">Desk policy</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               These controls change the next scan. The wallet mark still sizes the book. Stop loss and target profit are
-              checked against the live mark on every scan, including tickets already open, and a hit sells that ticket.{" "}
+              locked onto a ticket when it opens. A fill of either one sells that ticket and does not start a new trade.{" "}
               {copy.settingsReset}
             </p>
           </div>
@@ -375,7 +375,7 @@ export function SettingsPanel({
       <Section title="Management" hint="What the bot does with a ticket after it is open.">
         <Field
           label="Stop loss"
-          hint="Sell the whole ticket once price has moved this percent against the entry. A stop that already trailed tighter stays tighter."
+          hint="Locked onto the ticket at entry. The position sells at this loss. It does not get replaced with a new trade."
           suffix="%"
           min={0.4}
           max={15}
@@ -385,7 +385,7 @@ export function SettingsPanel({
         />
         <Field
           label="Target profit"
-          hint="Sell the whole ticket once price has moved this percent in your favor. This is a full exit, not a partial scale-out."
+          hint="Locked onto the ticket at entry. The position sells at this profit. The scan does not open another trade off that fill."
           suffix="%"
           min={0.5}
           max={30}

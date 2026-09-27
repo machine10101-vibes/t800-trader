@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { alignBracket, canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, favorableMovePct, managePosition, marginCashUsd, MIN_TICKET_USD, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, walletRiskBook, withUserBracket } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -772,55 +772,58 @@ function held(over: Partial<Position> = {}): Position {
 }
 
 describe("settings stop and target", () => {
-  it("closes a long once the live mark hits the stop loss percent, even if the stamped stop is wider", () => {
-    const plan = managePosition(held({ markPrice: 97.5, lowWater: 97.5 }), Date.now(), {
-      stopLossPct: 2,
-      targetProfitPct: 8,
-    });
-    assert.equal(plan.exit, "stop");
-    assert.equal(plan.scale, undefined);
+  it("locks the settings stop and target onto the ticket once, then leaves them there", () => {
+    const locked = presetBracket(held(), { stopLossPct: 2, targetProfitPct: 4 });
+    assert.equal(locked.bracketPreset, true);
+    assert.ok(Math.abs(locked.stopPrice - 98) < 1e-9);
+    assert.ok(Math.abs(locked.targetPrice - 104) < 1e-9);
+    const later = presetBracket({ ...locked, markPrice: 110 }, { stopLossPct: 10, targetProfitPct: 20 });
+    assert.equal(later.stopPrice, locked.stopPrice);
+    assert.equal(later.targetPrice, locked.targetPrice);
   });
 
-  it("sells the whole long once target profit is reached, instead of leaving a runner", () => {
-    const plan = managePosition(held({ markPrice: 104, highWater: 104 }), Date.now(), {
+  it("sells at the preset target and stops at the preset stop, not at a newer setting", () => {
+    const locked = presetBracket(held(), { stopLossPct: 2, targetProfitPct: 4 });
+    const target = managePosition({ ...locked, markPrice: 104, highWater: 104 }, Date.now(), {
       stopLossPct: 2,
+      targetProfitPct: 20,
+    });
+    assert.equal(target.exit, "target");
+    assert.equal(target.scale, undefined);
+    const stop = managePosition({ ...locked, markPrice: 97.5, lowWater: 97.5 }, Date.now(), {
+      stopLossPct: 20,
       targetProfitPct: 4,
     });
-    assert.equal(plan.exit, "target");
-    assert.equal(plan.scale, undefined);
-  });
-
-  it("closes a short at the stop loss percent and sells it at the target profit", () => {
-    const stop = managePosition(
-      held({ side: "short", markPrice: 103, highWater: 103, stopPrice: 140, targetPrice: 40, initialStop: 140 }),
-      Date.now(),
-      { stopLossPct: 2.5, targetProfitPct: 6 },
-    );
     assert.equal(stop.exit, "stop");
-    const target = managePosition(
-      held({ side: "short", markPrice: 94, highWater: 94, lowWater: 110, stopPrice: 140, targetPrice: 40, initialStop: 140 }),
-      Date.now(),
+    const inside = managePosition({ ...locked, markPrice: 99 }, Date.now(), {
+      stopLossPct: 0.5,
+      targetProfitPct: 0.5,
+    });
+    assert.equal(inside.exit, undefined);
+  });
+
+  it("sells a short at the preset stop and the preset target", () => {
+    const locked = presetBracket(
+      held({ side: "short", markPrice: 100, highWater: 100, lowWater: 100, stopPrice: 140, targetPrice: 40, initialStop: 140 }),
       { stopLossPct: 2.5, targetProfitPct: 6 },
     );
-    assert.equal(target.exit, "target");
+    assert.ok(Math.abs(locked.stopPrice - 102.5) < 1e-9);
+    assert.ok(Math.abs(locked.targetPrice - 94) < 1e-9);
+    assert.equal(managePosition({ ...locked, markPrice: 103, highWater: 103 }, Date.now()).exit, "stop");
+    assert.equal(managePosition({ ...locked, markPrice: 94, highWater: 94 }, Date.now()).exit, "target");
   });
 
-  it("leaves a ticket alone while price is between the stop and the target", () => {
-    const plan = managePosition(held({ markPrice: 101 }), Date.now(), { stopLossPct: 2, targetProfitPct: 4 });
-    assert.equal(plan.exit, undefined);
-    assert.ok(Math.abs(favorableMovePct(held({ markPrice: 101 })) - 1) < 1e-9);
-  });
-
-  it("keeps a trailed stop tighter than the settings stop and still aims the target at the settings percent", () => {
-    const aligned = alignBracket(
-      held({ stopPrice: 101, initialStop: 98, markPrice: 102, highWater: 102 }),
-      { stopLossPct: 3, targetProfitPct: 5 },
-    );
-    assert.equal(aligned.stopPrice, 101);
-    assert.equal(aligned.initialStop, 97);
-    assert.equal(aligned.targetPrice, 105);
-    const plan = managePosition(aligned, Date.now(), { stopLossPct: 3, targetProfitPct: 5 });
-    assert.equal(plan.exit, undefined);
+  it("keeps a trailed stop on the first lock and does not move it when settings change", () => {
+    const locked = presetBracket(held({ stopPrice: 101, initialStop: 98, markPrice: 102, highWater: 102 }), {
+      stopLossPct: 3,
+      targetProfitPct: 5,
+    });
+    assert.equal(locked.stopPrice, 101);
+    assert.equal(locked.targetPrice, 105);
+    const later = presetBracket(locked, { stopLossPct: 8, targetProfitPct: 15 });
+    assert.equal(later.stopPrice, 101);
+    assert.equal(later.targetPrice, 105);
+    assert.equal(managePosition({ ...later, markPrice: 102 }, Date.now(), { stopLossPct: 0.4, targetProfitPct: 1 }).exit, undefined);
   });
 
   it("stamps new tickets with the settings stop and target", () => {

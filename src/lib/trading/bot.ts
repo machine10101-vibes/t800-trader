@@ -10,7 +10,6 @@ import { clamp } from "@/lib/utils";
 import { emptyState, mutateState } from "@/lib/store";
 import { advise, studyTape } from "./learn";
 import {
-  alignBracket,
   canOpen,
   cashConcentration,
   consecutiveLosses,
@@ -22,6 +21,7 @@ import {
   marginCashUsd,
   payableUsd,
   walletMarkUsd,
+  presetBracket,
   rollSession,
   shouldFlattenMeme,
   shouldScratch,
@@ -33,7 +33,7 @@ import {
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition } from "./leverage";
-import { isAlreadyFlat, reentryBlocked } from "./close";
+import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
 
@@ -104,13 +104,17 @@ export async function tickBot(
       next = markBook(state, prices);
       next = {
         ...next,
-        positions: next.positions.map((pos) => alignBracket(pos, next.config)),
+        positions: next.positions.map((pos) => presetBracket(pos, next.config)),
       };
       next = { ...next, portfolio: rollSession(next.portfolio) };
       if (next.bot.skipReentry && !reentryBlocked(next.bot.skipReentry, next.bot.skipReentry.mint)) {
         next = { ...next, bot: { ...next.bot, skipReentry: null } };
       }
+      if (next.bot.bracketQuietUntil && !bracketQuiet(next.bot.bracketQuietUntil)) {
+        next = { ...next, bot: { ...next.bot, bracketQuietUntil: null } };
+      }
       let closed = 0;
+      let presetFilled = false;
       let croAlreadyLive = false;
       const blocked: string[] = [];
 
@@ -129,7 +133,20 @@ export async function tickBot(
         if (plan.exit) {
           const before = next.positions.length;
           next = await walletExit(next, pos, plan.exit, executor, blocked);
-          if (next.positions.length < before) closed += 1;
+          if (next.positions.length < before) {
+            closed += 1;
+            if (plan.exit === "stop" || plan.exit === "target") {
+              presetFilled = true;
+              next = {
+                ...next,
+                bot: {
+                  ...next.bot,
+                  skipReentry: reentryHold(pos.mint, Date.now(), plan.exit),
+                  bracketQuietUntil: bracketQuietUntil(),
+                },
+              };
+            }
+          }
           continue;
         }
         if (plan.nextStop) next = updateStop(next, pos.id, plan.nextStop);
@@ -358,7 +375,11 @@ export async function tickBot(
           shown.push(learned);
           if (balanceUnread) continue;
           if (reentryBlocked(next.bot.skipReentry, learned.mint)) {
-            blocked.push(`${learned.symbol}: closed by hand — the next ticket waits a few minutes`);
+            blocked.push(reentryNote(learned.symbol, next.bot.skipReentry?.why));
+            continue;
+          }
+          if (presetFilled || bracketQuiet(next.bot.bracketQuietUntil)) {
+            blocked.push(`${learned.symbol}: stop and target were preset — no new trade after that fill`);
             continue;
           }
           if (opened >= 2 && next.config.oneTicketPerTick !== false) {

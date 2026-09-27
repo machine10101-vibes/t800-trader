@@ -96,6 +96,7 @@ export function openPosition(
     notional,
     initialStop: stop,
     scaled: false,
+    bracketPreset: true,
     signature: stamp?.signature || undefined,
     tokenDecimals: stamp?.tokenDecimals,
     leverage: leverage > 1 ? leverage : undefined,
