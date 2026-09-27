@@ -12,8 +12,8 @@ describe("desk shortcuts", () => {
   it("ignores keys already handled by a focused control", () => {
     assert.equal(isDeskShortcutTarget(null), false);
     assert.equal(isDeskShortcutTarget({} as EventTarget), false);
-    assert.equal(isDeskShortcutTarget(node("button") as EventTarget), true);
-    assert.equal(isDeskShortcutTarget(node("a") as EventTarget), true);
-    assert.equal(isDeskShortcutTarget(node(null) as EventTarget), false);
+    assert.equal(isDeskShortcutTarget(node("button") as unknown as EventTarget), true);
+    assert.equal(isDeskShortcutTarget(node("a") as unknown as EventTarget), true);
+    assert.equal(isDeskShortcutTarget(node(null) as unknown as EventTarget), false);
   });
 });
