@@ -9,7 +9,7 @@ There is **no seed phrase**, **no server wallet**, and **no custody**. The stati
 | Action | LIVE | Notes |
 | --- | --- | --- |
 | Long open | Yes | Jupiter ExactIn: USDC → token (or WSOL) |
-| Long close (stop / target / trail / time) | Yes | Token → USDC, then book updates from confirmed fill |
+| Long close (button, stop, target, trail, time) | Yes | Token → USDC. If the wallet has under 0.006 SOL, Jupiter sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
 | Short open / cover | **No** | Spot Solana has no native short. Shorts stay paper-only. |
 | Perps | **No** | Drift/Jupiter perps are not wired |
 

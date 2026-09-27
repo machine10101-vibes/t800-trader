@@ -11,9 +11,11 @@ import {
   clampSlippageBps,
   decodeSwapTransaction,
   DEFAULT_JUPITER_API,
+  explainUltraCloseError,
   fromAtomic,
   jupiterBaseUrl,
   parseQuote,
+  parseUltraOrder,
   quoteUrl,
   swapRequestBody,
   toAtomic,
@@ -82,6 +84,25 @@ describe("Jupiter builders", () => {
     const b64 = dummySwapTxBase64();
     const tx = decodeSwapTransaction(b64);
     assert.ok(tx.message);
+  });
+
+  it("keeps close priority fees small enough to leave Phantom's SOL buffer", () => {
+    const raw = {
+      inputMint: USDC,
+      outputMint: SOL,
+      inAmount: "1",
+      outAmount: "1",
+      routePlan: [{ percent: 100 }],
+    };
+    const body = swapRequestBody(parseQuote(raw), "11111111111111111111111111111111", { close: true }) as {
+      prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: number } };
+    };
+    assert.ok(body.prioritizationFeeLamports.priorityLevelWithMaxLamports.maxLamports <= 20_000);
+  });
+
+  it("explains a sponsored close that Jupiter refuses", () => {
+    assert.match(explainUltraCloseError({ errorCode: 3, errorMessage: "below gasless minimum" }), /0\.006 SOL/);
+    assert.throws(() => parseUltraOrder({ errorCode: 2, errorMessage: "Need SOL for gas", transaction: null }), /0\.005 SOL/);
   });
 
   it("rejects an empty route", () => {

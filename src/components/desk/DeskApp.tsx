@@ -4,6 +4,7 @@ import { CandleChart, EquityPath, ScatterTape, VolumeBars } from "@/components/d
 import {
   attachWallet,
   configureBot,
+  closeDeskPosition,
   confirmLiveMode,
   controlBot,
   detachWallet,
@@ -227,6 +228,23 @@ export function DeskApp() {
     }
   };
 
+  const closeOne = async (positionId: string) => {
+    if (!wallet) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await closeDeskPosition(positionId);
+      applyDesk(next);
+      if (next.bot.lastError) setError(next.bot.lastError);
+      const balances = await readBalances(wallet.address).catch(() => null);
+      if (balances) setWallet((cur) => (cur ? { ...cur, ...balances, provider: cur.provider } : cur));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Close failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const goPaper = async () => {
     setBusy(true);
     try {
@@ -412,7 +430,7 @@ export function DeskApp() {
           ) : null}
           {tab === "radar" ? <Radar desk={desk} onOpen={setThesis} /> : null}
           {tab === "bot" ? <BotView desk={desk} busy={busy} onControl={control} onOpen={setThesis} /> : null}
-          {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} /> : null}
+          {tab === "book" ? <Book desk={desk} wallet={wallet} winRate={winRate} busy={busy} onClose={(id) => void closeOne(id)} /> : null}
           {tab === "risk" ? (
             <RiskView
               desk={desk}
@@ -745,7 +763,19 @@ function BotView({
   );
 }
 
-function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSession; winRate: number }) {
+function Book({
+  desk,
+  wallet,
+  winRate,
+  busy,
+  onClose,
+}: {
+  desk: DeskPayload;
+  wallet: WalletSession;
+  winRate: number;
+  busy: boolean;
+  onClose: (positionId: string) => void;
+}) {
   const curve = desk.equityCurve.map((p) => p.equity);
   return (
     <div className="space-y-4 boot-fade">
@@ -770,13 +800,14 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
               <th>Notional</th>
               <th>P&L</th>
               <th>Venue</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {desk.positions.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={9}>
-                  Flat. No live position.
+                <td className="px-4 py-6 text-[var(--muted)]" colSpan={10}>
+                  Flat. No open position.
                 </td>
               </tr>
             ) : (
@@ -811,6 +842,15 @@ function Book({ desk, wallet, winRate }: { desk: DeskPayload; wallet: WalletSess
                       ) : (
                         "paper"
                       )}
+                    </td>
+                    <td className="pr-4">
+                      <button
+                        disabled={busy}
+                        onClick={() => onClose(p.id)}
+                        className="border border-[var(--line-2)] px-3 py-1 text-[11px] uppercase tracking-[0.14em]"
+                      >
+                        Close
+                      </button>
                     </td>
                   </tr>
                 );

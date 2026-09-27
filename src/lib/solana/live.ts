@@ -9,13 +9,17 @@ import {
 } from "@/lib/solana/wallet";
 import {
   decodeSwapTransaction,
+  executeUltraOrder,
   fetchQuote,
   fetchSwapTransaction,
+  fetchUltraOrder,
   fromAtomic,
+  SOL_FEE_RESERVE,
   toAtomic,
   type JupiterQuote,
   type SwapBuild,
 } from "./jupiter";
+import { serializeSignedTx, signVersionedTx } from "@/lib/solana/wallet";
 import type { VersionedTransaction } from "@solana/web3.js";
 
 export type LiveLeg = "buy" | "sell";
@@ -45,6 +49,8 @@ export interface LivePreflightInput {
 
 export interface LivePlan {
   leg: LiveLeg;
+  mode: "metis" | "ultra";
+  requestId: string | null;
   mint: string;
   inputMint: string;
   outputMint: string;
@@ -68,10 +74,10 @@ export interface LiveFill {
 
 export function preflightLiveSwap(input: LivePreflightInput): string | null {
   if (input.executionMode !== "live") return "Not in LIVE mode";
-  if (input.killSwitch) return "Kill switch is on";
   if (input.send && !input.sessionArmed) return "Re-confirm LIVE this session before sending swaps";
   if (input.signalSide === "short") return "Spot Solana cannot short without perps — shorts stay paper-only";
-  if (input.sol < input.minSolForFees) {
+  if (input.killSwitch && input.leg === "buy") return "Kill switch is on";
+  if (input.leg === "buy" && input.sol < input.minSolForFees) {
     return `Need at least ${input.minSolForFees} SOL for fees (wallet has ${input.sol.toFixed(4)})`;
   }
   if (input.notionalUsd > input.maxLiveNotionalUsd) {
@@ -89,6 +95,16 @@ export function preflightLiveSwap(input: LivePreflightInput): string | null {
   return null;
 }
 
+export function needsSponsoredClose(solBalance: number): boolean {
+  return solBalance < SOL_FEE_RESERVE;
+}
+
+export function sellQtyAfterFeeReserve(mint: string, qty: number, solBalance: number | undefined): number {
+  if (mint !== SOL_MINT || solBalance === undefined) return qty;
+  const free = Math.max(0, solBalance - SOL_FEE_RESERVE);
+  return Math.min(qty, free);
+}
+
 export async function planLiveSwap(args: {
   owner: string;
   mint: string;
@@ -96,6 +112,7 @@ export async function planLiveSwap(args: {
   usdcAmount?: number;
   tokenQty?: number;
   slippageBps: number;
+  solBalance?: number;
 }): Promise<LivePlan> {
   const mint = args.mint;
   const inputMint = args.leg === "buy" ? USDC_MINT : mint === SOL_MINT ? SOL_MINT : mint;
@@ -104,21 +121,70 @@ export async function planLiveSwap(args: {
     args.leg === "buy" ? Promise.resolve(6) : readMintDecimals(inputMint),
     args.leg === "buy" ? readMintDecimals(outputMint) : Promise.resolve(6),
   ]);
-  const amount =
-    args.leg === "buy" ? toAtomic(args.usdcAmount ?? 0, 6) : toAtomic(args.tokenQty ?? 0, inDecimals);
+  const qty =
+    args.leg === "sell" ? sellQtyAfterFeeReserve(mint, args.tokenQty ?? 0, args.solBalance) : args.tokenQty ?? 0;
+  if (args.leg === "sell" && mint === SOL_MINT && qty <= 0) {
+    throw new Error(
+      "Closing this SOL position would drop the wallet under Phantom's 0.005 SOL fee buffer. Leave 0.006 SOL, or close a token position instead.",
+    );
+  }
+  const amount = args.leg === "buy" ? toAtomic(args.usdcAmount ?? 0, 6) : toAtomic(qty, inDecimals);
+  const sponsor = args.leg === "sell" && args.solBalance !== undefined && needsSponsoredClose(args.solBalance);
+  if (sponsor) {
+    const order = await fetchUltraOrder({
+      inputMint,
+      outputMint,
+      amount,
+      taker: args.owner,
+      slippageBps: args.slippageBps,
+    });
+    const transaction = decodeSwapTransaction(order.transaction);
+    return {
+      leg: args.leg,
+      mode: "ultra",
+      requestId: order.requestId,
+      mint,
+      inputMint,
+      outputMint,
+      quote: {
+        inputMint,
+        outputMint,
+        inAmount: order.inAmount,
+        outAmount: order.outAmount,
+        otherAmountThreshold: order.outAmount,
+        slippageBps: args.slippageBps,
+        priceImpactPct: null,
+        routePlan: [],
+        raw: {},
+      },
+      build: {
+        swapTransaction: order.transaction,
+        lastValidBlockHeight: null,
+        prioritizationFeeLamports: null,
+        simulationError: null,
+      },
+      transaction,
+      inUi: fromAtomic(order.inAmount, inDecimals),
+      outUi: fromAtomic(order.outAmount, outDecimals),
+      inDecimals,
+      outDecimals,
+    };
+  }
   const quote = await fetchQuote({
     inputMint,
     outputMint,
     amount,
     slippageBps: args.slippageBps,
   });
-  const build = await fetchSwapTransaction(quote, args.owner);
+  const build = await fetchSwapTransaction(quote, args.owner, { close: args.leg === "sell" });
   if (build.simulationError) {
     throw new Error(`Jupiter simulation failed: ${build.simulationError}`);
   }
   const transaction = decodeSwapTransaction(build.swapTransaction);
   return {
     leg: args.leg,
+    mode: "metis",
+    requestId: null,
     mint,
     inputMint,
     outputMint,
@@ -138,7 +204,13 @@ export async function executeLivePlan(
   owner: string,
 ): Promise<LiveFill> {
   const before = plan.leg === "buy" ? await readTokenUiAmount(owner, plan.mint) : await readTokenUiAmount(owner, USDC_MINT);
-  const signature = await signAndSendVersionedTx(provider, plan.transaction);
+  const signature =
+    plan.mode === "ultra" && plan.requestId
+      ? await executeUltraOrder(
+          serializeSignedTx(await signVersionedTx(provider, plan.transaction)),
+          plan.requestId,
+        )
+      : await signAndSendVersionedTx(provider, plan.transaction);
   await confirmSignature(signature);
   const after = plan.leg === "buy" ? await readTokenUiAmount(owner, plan.mint) : await readTokenUiAmount(owner, USDC_MINT);
   const outUi = after > before ? after - before : plan.outUi;

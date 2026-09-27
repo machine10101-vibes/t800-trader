@@ -193,6 +193,20 @@ function signatureFromWallet(result: { signature: string } | string): string {
   throw new Error("Wallet signed but did not return a transaction signature");
 }
 
+export async function signVersionedTx(
+  provider: InjectedProvider,
+  transaction: VersionedTransaction,
+): Promise<VersionedTransaction> {
+  if (!provider.signTransaction) {
+    throw new Error("Wallet cannot sign a fee-sponsored close. Use Phantom or Solflare.");
+  }
+  return (await provider.signTransaction(transaction)) as VersionedTransaction;
+}
+
+export function serializeSignedTx(transaction: VersionedTransaction): string {
+  return Buffer.from(transaction.serialize()).toString("base64");
+}
+
 export async function signAndSendVersionedTx(
   provider: InjectedProvider,
   transaction: VersionedTransaction,

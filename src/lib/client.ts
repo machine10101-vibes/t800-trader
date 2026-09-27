@@ -2,7 +2,7 @@ import { buildDesk } from "@/lib/desk";
 import { attachWallet, detachWallet, getActiveWallet, mutateState, normalizeConfig } from "@/lib/store";
 import type { LiveRuntime } from "@/lib/solana/live";
 import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
-import { applyControl, tickBot } from "@/lib/trading/bot";
+import { applyControl, closeOpenPosition, tickBot } from "@/lib/trading/bot";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 
 export { attachWallet, detachWallet, getActiveWallet };
@@ -55,4 +55,9 @@ export async function confirmLiveMode(): Promise<DeskPayload> {
 export async function setPaperMode(): Promise<DeskPayload> {
   disarmLiveSession();
   return configureBot({ executionMode: "paper" });
+}
+
+export async function closeDeskPosition(positionId: string): Promise<DeskPayload> {
+  await closeOpenPosition(positionId, liveRuntime ?? undefined);
+  return buildDesk();
 }

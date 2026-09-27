@@ -3,7 +3,7 @@ import { runResearch } from "@/lib/research/engine";
 import { screenCandidate } from "@/lib/research/scoring";
 import { executeLivePlan, planLiveSwap, preflightLiveSwap, type LiveRuntime } from "@/lib/solana/live";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
-import type { AppState, MarketRegime, Signal } from "@/lib/types";
+import type { AppState, MarketRegime, Signal, Trade } from "@/lib/types";
 import { emptyState, mutateState } from "@/lib/store";
 import { canOpen, dayLossBreached, exitReason, sizePosition } from "./risk";
 import { closePosition, markBook, openPosition, pushEquity } from "./paper";
@@ -25,7 +25,7 @@ function isLive(state: AppState): boolean {
 async function liveClose(
   next: AppState,
   pos: AppState["positions"][number],
-  reason: NonNullable<ReturnType<typeof exitReason>>,
+  reason: Trade["reason"],
   runtime: LiveRuntime,
 ): Promise<AppState> {
   if (pos.execution !== "live" || pos.side === "short") {
@@ -55,6 +55,7 @@ async function liveClose(
     leg: "sell",
     tokenQty: pos.qty,
     slippageBps: next.config.slippageBps,
+    solBalance: runtime.sol,
   });
   if (!runtime.send) {
     next.bot = { ...next.bot, lastError: `Dry-run live sell ${pos.symbol}: would receive ~$${plan.outUi.toFixed(2)} USDC` };
@@ -234,6 +235,27 @@ export async function tickBot(runtime?: LiveRuntime): Promise<AppState> {
         bot: { ...state.bot, lastError: message, lastTickAt: new Date().toISOString() },
       };
     }
+  });
+}
+
+export async function closeOpenPosition(positionId: string, runtime?: LiveRuntime): Promise<AppState> {
+  return mutateState(async (state) => {
+    const pos = state.positions.find((p) => p.id === positionId);
+    if (!pos) return state;
+    if (state.config.executionMode === "live" && pos.execution === "live" && pos.side === "long") {
+      if (!runtime) {
+        return { ...state, bot: { ...state.bot, lastError: "Connect the wallet to close this live position" } };
+      }
+      try {
+        const closed = await liveClose(state, pos, "manual", runtime);
+        if (closed.positions.some((p) => p.id === positionId)) return closed;
+        return { ...closed, bot: { ...closed.bot, lastError: null } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Close failed";
+        return { ...state, bot: { ...state.bot, lastError: message } };
+      }
+    }
+    return closePosition(state, positionId, pos.markPrice, "manual");
   });
 }
 

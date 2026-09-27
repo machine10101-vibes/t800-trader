@@ -8,7 +8,8 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { SOL_MINT, USDC_MINT } from "../market/universe";
-import { planLiveSwap, preflightLiveSwap } from "./live";
+import { needsSponsoredClose, planLiveSwap, preflightLiveSwap, sellQtyAfterFeeReserve } from "./live";
+import { SOL_FEE_RESERVE } from "./jupiter";
 
 function dummySwapTxBase64(): string {
   const payer = Keypair.generate();
@@ -63,6 +64,20 @@ describe("live preflight", () => {
       /No token balance/,
     );
   });
+
+  it("lets a close proceed when SOL is under Phantom's 0.005 fee buffer", () => {
+    assert.equal(
+      preflightLiveSwap({
+        ...base,
+        leg: "sell",
+        tokenQty: 12,
+        sol: 0.001,
+        notionalUsd: 20,
+        killSwitch: true,
+      }),
+      null,
+    );
+  });
 });
 
 describe("live dry-run plan", () => {
@@ -106,8 +121,64 @@ describe("live dry-run plan", () => {
       });
       assert.equal(posted, true);
       assert.equal(plan.leg, "buy");
+      assert.equal(plan.mode, "metis");
       assert.equal(plan.inUi, 10);
       assert.ok(plan.transaction.message);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
+  it("builds a fee-sponsored close when SOL is below 0.006 and does not ask Metis to bill the wallet", async () => {
+    const orig = globalThis.fetch;
+    const b64 = dummySwapTxBase64();
+    const token = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
+    let metis = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = typeof init?.body === "string" ? (JSON.parse(init.body) as { method?: string }).method : "";
+      if (method === "getAccountInfo") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: { value: { data: { parsed: { info: { decimals: 6 } } } } },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.includes("/ultra/v1/order")) {
+        return new Response(
+          JSON.stringify({
+            requestId: "req-1",
+            transaction: b64,
+            gasless: true,
+            inAmount: "1000000",
+            outAmount: "25000000",
+            inputMint: token,
+            outputMint: USDC_MINT,
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.includes("/swap")) metis = true;
+      throw new Error(`unexpected fetch ${url}`);
+    }) as typeof fetch;
+    try {
+      assert.equal(needsSponsoredClose(0.001), true);
+      assert.equal(needsSponsoredClose(0.02), false);
+      assert.equal(sellQtyAfterFeeReserve(SOL_MINT, 1, 0.02), 0.02 - SOL_FEE_RESERVE);
+      const plan = await planLiveSwap({
+        owner: "11111111111111111111111111111111",
+        mint: token,
+        leg: "sell",
+        tokenQty: 1,
+        slippageBps: 100,
+        solBalance: 0.001,
+      });
+      assert.equal(plan.mode, "ultra");
+      assert.equal(plan.requestId, "req-1");
+      assert.equal(metis, false);
     } finally {
       globalThis.fetch = orig;
     }
