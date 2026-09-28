@@ -26,13 +26,13 @@ import {
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { cachedChart, rememberTapeMark, requestBookCandles, requestBookCharts } from "@/lib/market/providers";
-import { bookPools, bookTokens } from "@/lib/market/universe";
+import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
+import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
-import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard } from "@/lib/types";
+import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
@@ -1233,34 +1233,23 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
   );
 }
 
-function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle[]> {
-  const key = tapes.map((tape) => tape.poolAddress).join("|");
-  const pinned = tapes.filter((tape) => tape.symbol === "SOL" || tape.symbol === "ZBCN" || tape.symbol === "CRO").map((tape) => tape.poolAddress).join("|");
-  const tapesRef = useRef(tapes);
-  tapesRef.current = tapes;
+function useDecisionCharts(mints: string[], chain: ChainId): Record<string, Candle[]> {
+  const key = mints.join("|");
   const [bars, setBars] = useState<Record<string, Candle[]>>({});
   useEffect(() => {
     if (!key) return;
-    const pools = key.split("|").filter(Boolean);
-    const pinnedSet = new Set(pinned.split("|").filter(Boolean));
+    const ids = key.split("|").filter(Boolean);
     let live = true;
     const paint = () => {
       if (!live) return;
-      for (const tape of tapesRef.current) {
-        if (tape.poolAddress && tape.price) rememberTapeMark(tape.poolAddress, tape.price);
-      }
-      requestBookCharts(pools, chain);
-      const chartsReady = pools.every((pool) => (cachedChart(pool)?.length ?? 0) > 0);
-      if (chartsReady) {
-        requestBookCandles(pools, chain, pinnedSet);
-      }
+      requestDecisionCharts(ids, chain);
       setBars((cur) => {
         let changed = false;
         const next = { ...cur };
-        for (const pool of pools) {
-          const rows = cachedChart(pool);
-          if (!rows?.length || next[pool] === rows) continue;
-          next[pool] = rows;
+        for (const mint of ids) {
+          const rows = cachedDecisionChart(mint, chain);
+          if (!rows?.length || next[mint] === rows) continue;
+          next[mint] = rows;
           changed = true;
         }
         return changed ? next : cur;
@@ -1272,7 +1261,7 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
       live = false;
       clearInterval(id);
     };
-  }, [chain, key, pinned]);
+  }, [chain, key]);
   return bars;
 }
 
@@ -1333,27 +1322,23 @@ function Overview({
   const [layers, setLayers] = useState<ChartLayers>({ ema9: true, ema21: true, vwap: true });
   const [tapeFilter, setTapeFilter] = useState<"all" | "live" | "up" | "down">("all");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [chartMint, setChartMint] = useState<string | null>(null);
   const [priceTick, setPriceTick] = useState(0);
   const [priceDir, setPriceDir] = useState<"up" | "down" | null>(null);
   const lastPrice = useRef<number | null>(null);
   const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
-  const watchTapes = desk.tapes.slice();
-  const seenMint = new Set(watchTapes.map((tape) => tape.mint));
-  for (const token of bookTokens(chain)) {
-    const pool = token.pool ?? bookPools(chain).find((row) => row.mint === token.mint)?.pool;
-    if (!pool || seenMint.has(token.mint)) continue;
-    seenMint.add(token.mint);
-    watchTapes.push({
-      symbol: token.symbol,
-      mint: token.mint,
-      poolAddress: pool,
-      price: token.priceUsd,
-      change5m: token.change5m,
-      change15m: 0,
-    });
-  }
-  const bars = useWatchTapes(watchTapes, chain);
+  const book = bookTokens(chain);
+  const bars = useDecisionCharts(book.map((token) => token.mint), chain);
+  const openToken = (mint: string) => {
+    onFocus(mint);
+    if (book.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) setChartMint(mint);
+  };
+  useEffect(() => {
+    for (const tape of desk.tapes) {
+      if (tape.poolAddress && tape.price) rememberTapeMark(tape.poolAddress, tape.price);
+    }
+  }, [desk.tapes]);
   const focusPrice = focus?.price ?? null;
   useEffect(() => {
     const prev = lastPrice.current;
@@ -1366,13 +1351,15 @@ function Overview({
   const matchedTape = desk.tapes.find((tape) => tape.mint === focus?.candidate.mint) ?? null;
   const focusTape = matchedTape ?? desk.tapes[0] ?? null;
   const focusName =
-    matchedTape?.symbol ?? bookTokens(chain).find((token) => token.mint === focus?.candidate.mint)?.symbol ?? focusTape?.symbol;
-  const focusPool =
-    matchedTape?.poolAddress ??
-    bookTokens(chain).find((token) => token.mint === focus?.candidate.mint)?.pool ??
-    bookPools(chain).find((row) => row.mint === focus?.candidate.mint)?.pool ??
-    focusTape?.poolAddress;
-  const focusCandles = focusPool ? (bars[focusPool] ?? []) : [];
+    matchedTape?.symbol ?? book.find((token) => token.mint === focus?.candidate.mint)?.symbol ?? focusTape?.symbol;
+  const focusMintKey =
+    book.find((token) => token.mint === focus?.candidate.mint || token.mint.toLowerCase() === focus?.candidate.mint.toLowerCase())?.mint ??
+    focus?.candidate.mint ??
+    null;
+  const focusCandles = focusMintKey ? (bars[focusMintKey] ?? []) : [];
+  const chartToken = chartMint ? book.find((token) => token.mint === chartMint || token.mint.toLowerCase() === chartMint.toLowerCase()) : null;
+  const chartCandles = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? []) : [];
+  const chartEmpty = chain === "solana" ? "Waiting on the Jupiter 4-hour chart" : "Waiting on the 4-hour chart";
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
@@ -1387,6 +1374,38 @@ function Overview({
   const unrealized = swaps ? open.reduce((sum, position) => sum + rowPnl(position), 0) : desk.portfolio.unrealizedPnlUsd;
   return (
     <div className="space-y-3">
+      {chartMint ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4" onClick={() => setChartMint(null)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={chartToken ? `${tapeLabel(chartToken.symbol)} 4-hour chart` : "4-hour chart"}
+            className="neon w-full max-w-4xl p-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-medium">{chartToken ? tapeLabel(chartToken.symbol) : "Chart"}</div>
+                <p className="text-sm text-[var(--muted)]">
+                  {chain === "solana" ? "Jupiter 4-hour chart." : "4-hour chart."} The bot reads these bars before it buys or shorts.
+                  {chartCandles.length ? ` ${chartCandles.length} bars.` : ""}
+                </p>
+              </div>
+              <button type="button" className="btn px-3 py-1" onClick={() => setChartMint(null)}>
+                Close
+              </button>
+            </div>
+            <div className="mb-2 flex gap-1.5">
+              <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+              <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+              <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+            </div>
+            <div className="h-[420px]">
+              <CandleChart candles={chartCandles} layers={layers} emptyLabel={chartEmpty} />
+            </div>
+          </div>
+        </div>
+      ) : null}
       <section className="neon overflow-hidden">
         <div className="grid lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)]">
           <div className="flex flex-col p-3">
@@ -1413,7 +1432,7 @@ function Overview({
                   {desk.research.slice(0, 6).map((r) => (
                     <button
                       key={r.id}
-                      onClick={() => onFocus(r.candidate.mint)}
+                      onClick={() => openToken(r.candidate.mint)}
                       className={`rounded-full px-2 py-0.5 text-[11px] ${
                         focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
                       }`}
@@ -1443,16 +1462,18 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <span>{focusName ? `${tapeLabel(focusName)} 4h` : "4h chart"}</span>
+                <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="uppercase tracking-[0.16em]">
+                  {focusName ? `${tapeLabel(focusName)} 4h · open chart` : "4h chart"}
+                </button>
                 <span className="flex gap-1.5 tracking-normal normal-case">
                   <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
                   <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
                   <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
                 </span>
               </div>
-              <div className="h-[280px]">
-                <CandleChart candles={focusCandles} layers={layers} />
-              </div>
+              <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="block h-[280px] w-full text-left">
+                <CandleChart candles={focusCandles} layers={layers} emptyLabel={chartEmpty} />
+              </button>
             </div>
         </div>
       </section>
@@ -1499,7 +1520,6 @@ function Overview({
             const tape = desk.tapes.find((row) => row.mint === token.mint);
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
-            const pool = tape?.poolAddress ?? token.pool ?? bookPools(chain).find((row) => row.mint === token.mint)?.pool;
             const price =
               tape?.price ??
               token.priceUsd ??
@@ -1512,7 +1532,7 @@ function Overview({
                 key={token.mint}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => onFocus(token.mint)}
+                onClick={() => openToken(token.mint)}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
@@ -1529,8 +1549,8 @@ function Overview({
                   {tape ? <Tone value={tape.change15m} /> : <span className="text-[var(--faint)]">—</span>}
                 </div>
                 <p className={`mb-1 line-clamp-2 px-1 text-xs leading-4 ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
-                <div className={pool ? "h-[112px]" : "flex h-8 items-center px-1 text-[11px] tracking-[0.12em] text-[var(--faint)]"}>
-                  {pool ? <CandleChart candles={bars[pool] ?? []} layers={layers} /> : "Finding the pool"}
+                <div className="h-[112px]">
+                  <CandleChart candles={bars[token.mint] ?? []} layers={layers} emptyLabel={chartEmpty} />
                 </div>
               </button>
             );
@@ -1568,7 +1588,7 @@ function Overview({
           </span>
         </div>
         <div className="h-[150px]">
-          <ScatterTape dots={desk.tapeDots} onPick={onFocus} />
+          <ScatterTape dots={desk.tapeDots} onPick={openToken} />
         </div>
       </section>
 

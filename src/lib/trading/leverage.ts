@@ -36,7 +36,7 @@ export function pickMultiplier(enabled: readonly Multiplier[], confidence: numbe
 }
 
 /**
- * SOL, Zebec, CRO, and every name on Jupiter's popular list take 5x or 10x.
+ * SOL, Zebec, Pump, ZEC, Ray, and CRO take 5x or 10x.
  * SOL is a Jupiter perp. The other names post collateral as a spot bag marked at the multiplier.
  */
 export function multiplierFor(

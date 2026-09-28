@@ -2,7 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { loadJupiterPopular } from "./jupiterPopular";
+import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
@@ -25,7 +25,6 @@ import {
   coreBookMints,
   geckoNetwork,
   isActiveBook,
-  notePopular,
   isQuote,
   isStable,
   SOL_MINT,
@@ -773,6 +772,73 @@ async function readChart(poolAddress: string, chain: ChainId): Promise<Candle[]>
   }
 }
 
+const decisionCache = new Map<string, { at: number; rows: Candle[] }>();
+const decisionMiss = new Map<string, number>();
+const decisionInflight = new Map<string, Promise<Candle[]>>();
+
+function decisionKey(chain: ChainId, mint: string): string {
+  return `${chain}:${mint}`;
+}
+
+/** The 4-hour series the bot reads before it trades. Solana comes from Jupiter. */
+export function cachedDecisionChart(mint: string, chain: ChainId = "solana"): Candle[] | null {
+  const hit = decisionCache.get(decisionKey(chain, mint));
+  return hit?.rows.length ? hit.rows : null;
+}
+
+async function fetchJupiterDecision(mint: string): Promise<Candle[]> {
+  const json = await fetchJson<{ candles?: unknown }>(jupiterChartUrl(mint, Date.now()), {
+    timeoutMs: 8_000,
+    retries: 1,
+  });
+  return parseJupiterCandles(json.candles);
+}
+
+export async function loadDecisionChart(mint: string, chain: ChainId = "solana"): Promise<Candle[]> {
+  const key = decisionKey(chain, mint);
+  const hit = decisionCache.get(key);
+  if (hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
+  const inflight = decisionInflight.get(key);
+  if (inflight) return inflight;
+  const run = readDecisionChart(mint, chain, key, hit?.rows ?? []).finally(() => {
+    if (decisionInflight.get(key) === run) decisionInflight.delete(key);
+  });
+  decisionInflight.set(key, run);
+  return run;
+}
+
+async function readDecisionChart(mint: string, chain: ChainId, key: string, stale: Candle[]): Promise<Candle[]> {
+  const missedAt = decisionMiss.get(key);
+  if (missedAt && Date.now() - missedAt < CANDLE_COOL_MS) return stale;
+  try {
+    const rows =
+      chain === "solana"
+        ? await fetchJupiterDecision(mint)
+        : await (async () => {
+            const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+            return pool ? fetchChartOnce(pool, chain) : [];
+          })();
+    if (rows.length) {
+      decisionCache.set(key, { at: Date.now(), rows });
+      decisionMiss.delete(key);
+      return rows;
+    }
+    decisionMiss.set(key, Date.now());
+    return stale;
+  } catch {
+    decisionMiss.set(key, Date.now());
+    return stale;
+  }
+}
+
+/** Start a Jupiter 4-hour read for every tradable mint. A fresh chart is left alone. */
+export function requestDecisionCharts(mints: string[], chain: ChainId): void {
+  for (const mint of mints) {
+    if (!mint) continue;
+    void loadDecisionChart(mint, chain);
+  }
+}
+
 /** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */
 export function requestBookCharts(pools: string[], chain: ChainId): void {
   const missing: { pool: string; chain: ChainId }[] = [];
@@ -815,10 +881,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
-  if (chain === "solana") {
-    const popular = await loadJupiterPopular().catch(() => null);
-    if (popular) notePopular(popular);
-  }
+  requestDecisionCharts(bookMints(chain), chain);
   const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
   const regimePromise = fetchRegime();
   let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
@@ -839,9 +902,11 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     (candidate) => candidate.mint,
   );
   const pinnedPools = new Set(bookPools(chain).map((row) => row.pool));
-  const chartPools = candleRows.map((candidate) => candidate.poolAddress);
-  requestBookCharts(chartPools, chain);
-  requestBookCandles(chartPools, chain, pinnedPools);
+  requestBookCandles(
+    candleRows.map((candidate) => candidate.poolAddress),
+    chain,
+    pinnedPools,
+  );
   const [regime, crossed] = await Promise.all([
     regimePromise,
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),

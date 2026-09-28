@@ -1,6 +1,6 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { GAS_CRO } from "@/lib/cronos/constants";
-import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadMarket } from "@/lib/market/providers";
+import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
 import { candleChangePct, foldCandles, printClose, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
@@ -320,16 +320,24 @@ export async function tickBot(
           fearGreed: market.regime.fearGreed?.value ?? null,
           solChange: market.regime.sol.change24h,
         };
+        await Promise.all(focus.map((token) => loadDecisionChart(token.mint, chain).catch(() => [])));
         for (const token of focus) {
           if (token.priceAgreement === "split") {
             blocked.push(`${token.symbol}: price feeds disagree`);
             continue;
           }
+          const decision = cachedDecisionChart(token.mint, chain);
           const candles = cachedOhlcv(token.poolAddress);
           const folded = candles ? foldCandles(candles, 5) : [];
+          const tech =
+            decision && decision.length >= 30
+              ? snapshotTechnical(decision)
+              : folded.length >= 20
+                ? snapshotTechnical(folded)
+                : null;
           const found = entrySignals(
             token,
-            folded.length >= 20 ? snapshotTechnical(folded) : null,
+            tech,
             token.researchScore,
             next.config.allowShorts,
             tapeCtx,

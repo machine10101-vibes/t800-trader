@@ -35,10 +35,18 @@ export interface ChartLayers {
 
 const ALL_LAYERS: ChartLayers = { ema9: true, ema21: true, vwap: true };
 
-export function CandleChart({ candles, layers = ALL_LAYERS }: { candles: Candle[]; layers?: ChartLayers }) {
+export function CandleChart({
+  candles,
+  layers = ALL_LAYERS,
+  emptyLabel = "Waiting on the 4-hour chart",
+}: {
+  candles: Candle[];
+  layers?: ChartLayers;
+  emptyLabel?: string;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
-    return <EmptyPlot label="Waiting on the 4-hour chart" waiting />;
+    return <EmptyPlot label={emptyLabel} waiting />;
   }
   const w = 520;
   const h = 168;

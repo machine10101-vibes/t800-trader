@@ -42,21 +42,22 @@ describe("Jupiter popular tokens", () => {
     assert.equal(pump?.change5m, 1.25);
   });
 
-  it("puts a Jupiter popular name on the book at 5x or 10x", () => {
+  it("does not add Jupiter's most-traded list to the book", () => {
     try {
-      notePopular([{ symbol: "PUMP", name: "Pump", mint: PUMP, sector: "Meme" }]);
-      assert.equal(isActiveBook(PUMP), true);
-      assert.equal(isActiveBook(PUMP, "cronos"), false);
+      notePopular([{ symbol: "KMNO", name: "Kamino", mint: "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS", sector: "Lending" }]);
+      assert.equal(isActiveBook("KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS"), false);
       assert.deepEqual(
         headlineFor().map((row) => row.symbol),
-        ["SOL", "ZBCN", "PUMP"],
+        ["SOL", "ZBCN", "PUMP", "ZEC", "RAY"],
       );
+      assert.equal(isActiveBook(PUMP), true);
+      assert.equal(isActiveBook(PUMP, "cronos"), false);
       assert.equal(multiplierFor([5, 10], 60, "reclaim", "PUMP", PUMP), 5);
       assert.equal(multiplierFor([5, 10], 80, "breakout", "PUMP", PUMP), 10);
       assert.equal(multiplierFor([5, 10], 90, "breakout", "JUP", "jup"), 1);
     } finally {
       notePopular([]);
     }
-    assert.equal(isActiveBook(PUMP), false);
+    assert.equal(isActiveBook(PUMP), true);
   });
 });
