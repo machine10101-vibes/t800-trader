@@ -1,8 +1,7 @@
 import type { ChainId } from "@/lib/chain";
-import { sameMint } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { foldCandles, tapeRead } from "@/lib/market/tape";
-import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { isActiveBook, SOL_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
@@ -105,12 +104,8 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
 
   const path =
     c.mint === SOL_MINT
-      ? "A confirmed long is a Jupiter perp at 5x, or 10x when the signal is strong, once the key has $10. Below that it is a spot bid."
-      : c.mint === ZBCN_MINT
-        ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. Jupiter lists no ZBCN perp, so that collateral is a Zebec spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
-        : sameMint(c.mint, WCRO_MINT)
-          ? "A confirmed long is 5x, or 10x when the signal is strong, once the key has $10. This desk has no CRO perp, so that collateral is a CRO spot bag and the ticket is marked at the multiplier. Below $10 it is a spot bid."
-          : "A confirmed long is a spot bid.";
+      ? "A confirmed SOL trade is a Jupiter perp at 5x, or 10x when the signal is strong, from a $5 order. Jupiter's smallest new position is $10, so a $5 order is raised to $10 when the key has it."
+      : "A confirmed trade is a spot buy. The exit is a spot sell.";
   const coreThesis = `${tapeRead(c.symbol, c.flows.m5.priceChangePct, c.flows.m15.priceChangePct, c.flows.h1.priceChangePct)} ${techLine(c)} ${path} Reserves ${usd(c.liquidityUsd)}, 24h volume ${usd(c.volume24hUsd)}.`;
 
   const m15Now = c.flows.m15.priceChangePct;

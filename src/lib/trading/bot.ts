@@ -445,20 +445,21 @@ export async function tickBot(
           );
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
           const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
-          const practiceShort = liveShort && !solPerp;
           if (next.positions.some((pos) => sameMint(pos.mint, learned.mint))) {
             blocked.push(`${learned.symbol}: already in this mint`);
             continue;
           }
           const wantedLev = liveShort && solPerp && wanted <= 1 ? 5 : wanted;
-          const paying = practiceShort
-            ? next.portfolio.cashUsd
-            : wantedLev > 1 && solPerp && priced
-              ? marginCashUsd(priced)
-              : risk.portfolio.cashUsd;
+          const paying = wantedLev > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
-          const leverage = ticket.leverage;
-          const collateralUsd = ticket.collateralUsd;
+          let leverage = ticket.leverage;
+          let collateralUsd = ticket.collateralUsd;
+          if (next.config.walletSwaps && collateralUsd > next.config.maxLiveNotionalUsd + 1e-9) {
+            collateralUsd = next.config.maxLiveNotionalUsd;
+          }
+          if (leverage > 1 && !(collateralUsd + 1e-9 >= PERP_MIN_COLLATERAL_USD)) {
+            leverage = 1;
+          }
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
           if (liveShort && solPerp && (ticket.spotFallback || leverage <= 1)) {
             blocked.push(
@@ -475,17 +476,15 @@ export async function tickBot(
             blocked.push(`${learned.symbol}: missing live mark`);
           } else if (collateralUsd < MIN_TICKET_USD || qty <= 0) {
             blocked.push(`${learned.symbol}: size ${collateralUsd.toFixed(2)} too small`);
-          } else if (next.config.walletSwaps && collateralUsd > next.config.maxLiveNotionalUsd) {
-            blocked.push(`${learned.symbol}: notional exceeds live max $${next.config.maxLiveNotionalUsd}`);
           } else if (pauseOpens) {
             continue;
           } else if (bookTooSmall) {
             continue;
-          } else if (next.config.walletSwaps && !practiceShort && !executor) {
+          } else if (next.config.walletSwaps && !executor) {
             blocked.push(`${learned.symbol}: this page cannot ask the wallet to sign`);
           } else {
             let stamp: Awaited<ReturnType<ChainExecutor>> | undefined;
-            if (next.config.walletSwaps && !practiceShort && executor) {
+            if (next.config.walletSwaps && executor) {
               try {
                 stamp = await executor({
                   kind: "open",
@@ -512,24 +511,18 @@ export async function tickBot(
                 continue;
               }
             }
-            if (next.config.walletSwaps && !practiceShort && !stamp?.signature) {
+            if (next.config.walletSwaps && !stamp?.signature) {
               blocked.push(`${learned.symbol}: swap was not broadcast`);
               continue;
             }
             const before = next.positions.length;
-            const booked = practiceShort
-              ? {
-                  ...learned,
-                  thesis: `${learned.thesis} This short stays in practice — there is no on-chain short market.`,
-                }
-              : learned;
             const fill =
               stamp?.signature
                 ? stamp
                 : leverage > 1
                   ? { signature: "", qty, price: learned.price, tokenDecimals: 9, leverage, collateralUsd }
                   : undefined;
-            next = openPosition(next, booked, stamp?.qty ?? qty, market.regime.stance, fill);
+            next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, fill);
             if (next.positions.length > before) opened += 1;
             else blocked.push(`${learned.symbol}: cash could not fill the ticket`);
           }

@@ -63,8 +63,8 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. A SOL short is a Jupiter perpetual. Other tokens cannot be shorted on-chain.",
     settingsMultiplier:
-      "SOL, Zebec, Pump, ZEC, and Ray can open at 5x or 10x once the trading key can post $10. SOL is a Jupiter perpetual, including shorts. Every other name posts that collateral as a spot bag and the ticket is marked at the multiplier. The cash slider does not turn that off. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. A short that is not SOL stays on the practice book at 5x or 10x and is not sent to the wallet.",
-    settingsFive: "Posts at least $10 and takes five times that exposure on SOL, Zebec, Pump, ZEC, or Ray.",
+      "5x and 10x are SOL only, long or short, from a $5 order. Jupiter will not open a brand-new position under $10, so a $5 order is raised to $10 when the trading key has it. Zebec, Pump, ZEC, and Ray are a spot buy and a spot sell. A stronger SOL signal uses 10x when both are on.",
+    settingsFive: "SOL only. Posts at least $5 and takes five times that exposure.",
     settingsTen:
       "Used when the signal is a breakout or confidence is 66 or higher. Ten times the collateral, so a smaller adverse move liquidates it.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live SOL and USDC mark.",
@@ -94,15 +94,14 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     bookArm:
       "Arm asks the Cronos wallet to sign the funding transfer. That transaction moves a trading balance to a key in this browser, and that key signs each VVS swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover CRO and USDC back.",
     noOpen: "No open swap. A rising CRO long is sent from the trading key.",
-    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. A red 15m tape stays in cash. A flat 15m can still open 5x or 10x.",
+    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. A red 15m tape stays in cash. CRO is a spot buy and a spot sell.",
     explorerName: "Cronoscan",
     settingsWallet:
       "On: The first arm signs one transaction and moves spare CRO and USDC to a browser trading key. That key signs each VVS swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Shorts are not sent on-chain.",
     settingsMultiplier:
-      "CRO can open at 5x or 10x once the trading key has $10. There is no CRO perp on this desk, so that collateral is a CRO spot bag and the ticket is marked at the multiplier. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. Shorts stay off-chain.",
-    settingsFive: "Posts at least $10 and takes five times that exposure on CRO.",
-    settingsTen:
-      "Used for CRO when the signal is a breakout or confidence is 72 or higher. Ten times the collateral, so a smaller adverse move liquidates it.",
+      "CRO is a spot buy and a spot sell. 5x and 10x are SOL only.",
+    settingsFive: "Does not apply to CRO. 5x is a SOL perpetual.",
+    settingsTen: "Does not apply to CRO. 10x is a SOL perpetual.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live CRO and USDC mark.",
   },
 };

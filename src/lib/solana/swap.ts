@@ -2,7 +2,7 @@ import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { dexesForVenues } from "@/lib/market/venues";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
-import { marginFill } from "@/lib/trading/leverage";
+import { PERP_MIN_COLLATERAL_USD } from "@/lib/trading/leverage";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { broadcastTransaction, mintDecimals, readBalances, readMintBalance, type WalletSession } from "./wallet";
@@ -247,7 +247,7 @@ export function executorFor(session: WalletSession): ChainExecutor {
     if (order.side === "short" && solMarket) {
       const { settlePerp } = await import("./perps");
       if (order.kind === "open" && !(leverage > 1)) {
-        const collateral = Math.max(order.collateralUsd ?? order.notionalUsd / 5, 10);
+        const collateral = Math.max(order.collateralUsd ?? order.notionalUsd / 5, PERP_MIN_COLLATERAL_USD);
         return settlePerp(session, { ...order, leverage: 5, collateralUsd: collateral });
       }
       return settlePerp(session, order);
@@ -258,8 +258,7 @@ export function executorFor(session: WalletSession): ChainExecutor {
     }
     if (leverage > 1 && order.kind === "open") {
       const collateral = order.collateralUsd ?? order.notionalUsd / leverage;
-      const spot = await settleSpot(session, { ...order, notionalUsd: collateral, leverage: undefined, collateralUsd: undefined });
-      return marginFill(spot, leverage, collateral);
+      return settleSpot(session, { ...order, side: "long", notionalUsd: collateral, leverage: undefined, collateralUsd: undefined });
     }
     try {
       return await settleSpot(session, order);
@@ -268,7 +267,7 @@ export function executorFor(session: WalletSession): ChainExecutor {
       const message = error instanceof Error ? error.message : "";
       if (!/needs USDC/i.test(message)) throw error;
       const { settlePerp } = await import("./perps");
-      const collateral = Math.max(order.collateralUsd ?? order.notionalUsd, 10);
+      const collateral = Math.max(order.collateralUsd ?? order.notionalUsd, PERP_MIN_COLLATERAL_USD);
       return settlePerp(session, { ...order, leverage: 5, collateralUsd: collateral });
     }
   };

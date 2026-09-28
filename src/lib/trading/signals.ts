@@ -1,3 +1,4 @@
+import { SOL_MINT } from "@/lib/market/universe";
 import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { clamp, id, mean, stdev } from "@/lib/utils";
 
@@ -5,6 +6,10 @@ export interface SignalContext {
   stance: MarketRegime["stance"];
   fearGreed: number | null;
   solChange: number;
+}
+
+function solOnlyShort(token: { symbol: string; mint: string }): boolean {
+  return token.symbol === "SOL" || token.mint === SOL_MINT;
 }
 
 function buyShare(buys: number, sells: number): number {
@@ -244,6 +249,7 @@ export function buildSignals(
   const solNotRipping = solChange < 3.2;
   if (
     allowShorts &&
+    solOnlyShort(token) &&
     stance === "mixed" &&
     solNotRipping &&
     (h30 > 12 || h1 > 19) &&
@@ -339,7 +345,7 @@ export function buildFlowSignals(
     h1 > -6 &&
     h1 < 4 &&
     sellHeavy;
-  if (allowShorts && !defensive && falling) {
+  if (allowShorts && solOnlyShort(token) && !defensive && falling) {
     const stopPct = clamp(1.35, 1.2, 2.6);
     const rr = withMinRR(stopPct, stopPct * 1.8);
     const confidence = clamp(

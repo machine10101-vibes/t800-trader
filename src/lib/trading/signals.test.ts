@@ -366,6 +366,12 @@ describe("indicators", () => {
     const kept = entrySignals(climax, tech, 60, true, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
     assert.equal(kept[0]?.side, "short");
     assert.equal(kept[0]?.reason, "fade");
+    const zebec = buildFlowSignals({ ...token, symbol: "ZBCN", mint: "zbcn" }, 70, true, {
+      stance: "mixed",
+      fearGreed: 50,
+      solChange: -0.4,
+    });
+    assert.equal(zebec.length, 0);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

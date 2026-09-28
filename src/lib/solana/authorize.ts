@@ -7,7 +7,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { USDC_MINT } from "@/lib/market/universe";
-import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
+import { JUPITER_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
@@ -162,7 +162,7 @@ async function accountExists(address: PublicKey): Promise<boolean> {
 /**
  * The trading account can already pay for swaps. A later refresh or arm must not
  * move more SOL or USDC out of the wallet.
- * Solana passes the Jupiter $10 floor so a key that cannot open 5x or 10x is topped up.
+ * Solana passes Jupiter's $10 new-position floor so a $5 order can be raised and still open.
  */
 export function tradingKeyCoversSpend(
   held: { sol: number; usdc: number; equityUsd: number } | null,
@@ -278,7 +278,7 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     if (!held) {
       throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
     }
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, PERP_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
       return {
         signature: "already-authorized",
         botAddress: existing.publicKey.toBase58(),
@@ -299,7 +299,7 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     plan = planAuthorization(sol, usdc);
   } catch (error) {
     const held = await readBalances(botAddress).catch(() => null);
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, PERP_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
       return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
     }
     throw error;

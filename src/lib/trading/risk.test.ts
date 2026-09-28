@@ -170,8 +170,8 @@ describe("risk", () => {
   it("blocks shorts when the tape is defensive", () => {
     const signal = {
       id: "s3",
-      mint: "xyz",
-      symbol: "XYZ",
+      mint: SOL_MINT,
+      symbol: "SOL",
       poolAddress: "z",
       sector: "Meme",
       side: "short",
@@ -648,7 +648,7 @@ describe("walletRiskBook", () => {
     assert.equal(solPerpPostableUsd({ usdc: 12, sol: 0.02, solPriceUsd: 200 }), 12);
     assert.equal(marginCashUsd({ usdc: 11, sol: 0.02, solPriceUsd: 200 }), 11);
     const feeOnly = marginCashUsd({ usdc: 0, sol: 0.09, solPriceUsd: 120 });
-    assert.ok(feeOnly + 1e-9 >= 10, `fee-only SOL should still count as margin cash, got ${feeOnly}`);
+    assert.ok(feeOnly + 1e-9 >= 5, `SOL that clears $5 should still count as margin cash, got ${feeOnly}`);
     assert.ok(Math.abs(marginCashUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 }) - perp) < 1e-6);
     const smallSol = spendableUsd({ usdc: 0, sol: 0.02, solPriceUsd: 190 });
     assert.ok(smallSol >= 3, `0.02 SOL at $190 should still spend about $3, got ${smallSol}`);
@@ -710,7 +710,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("lets a live SOL short and a practice short on another name through the gate", () => {
+  it("lets a SOL short through and keeps every other name a spot buy and spot sell", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -721,15 +721,15 @@ describe("LIVE gates and short trail", () => {
       }),
       null,
     );
-    assert.equal(
+    assert.match(
       canOpen({
         positions: [],
         signal: { ...longSignal, side: "short", symbol: "ZBCN" },
-        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        config: { ...DEFAULT_CONFIG, walletSwaps: false, allowShorts: true },
         portfolio: portfolio(),
         stance: "mixed",
-      }),
-      null,
+      }) ?? "",
+      /spot buy/,
     );
   });
 

@@ -164,13 +164,13 @@ export function SettingsPanel({
         title="Bigger buys"
         hint={
           chain === "cronos"
-            ? "When both are on, a stronger buy uses 10 times the money. Below about $10 it stays a normal buy."
-            : "When both are on, a stronger buy uses 10 times the money. Below about $10 it stays a normal buy. A bigger buy can be wiped out by a smaller price drop."
+            ? "CRO is a normal buy and a normal sell. 5x and 10x are SOL only."
+            : "SOL only. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it. Everything else is a normal buy and a normal sell."
         }
       >
         <Toggle
           label="5 times the money"
-          hint="Puts up about $10 and buys five times that much. A small drop can wipe it out."
+          hint="SOL only. Puts up at least $5 and takes five times that much. A small drop can wipe it out."
           checked={local.multipliers.includes(5)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
@@ -179,7 +179,7 @@ export function SettingsPanel({
         />
         <Toggle
           label="10 times the money"
-          hint="Puts up about $10 and buys ten times that much. An even smaller drop can wipe it out."
+          hint="SOL only. Puts up at least $5 and takes ten times that much. An even smaller drop can wipe it out."
           checked={local.multipliers.includes(10)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);

@@ -1,13 +1,19 @@
-import { isActiveBook, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "@/lib/market/universe";
+import { SOL_MINT } from "@/lib/market/universe";
 import { sameMint } from "@/lib/chain";
 import type { ChainFill, ChainOrder, Position } from "@/lib/types";
 
-/** Jupiter perp multipliers the desk can send. */
+/** Jupiter perp multipliers the desk can send. SOL only. */
 export const MULTIPLIERS = [5, 10] as const;
 export type Multiplier = (typeof MULTIPLIERS)[number];
 
-/** Jupiter rejects a new perp below this collateral. */
-export const PERP_MIN_COLLATERAL_USD = 10;
+/** Smallest SOL 5x or 10x order this desk will post. */
+export const PERP_MIN_COLLATERAL_USD = 5;
+
+/**
+ * Jupiter rejects a brand-new position under $10.
+ * A $5 order is still sent. The perp call raises it to this when the key can pay.
+ */
+export const JUPITER_MIN_COLLATERAL_USD = 10;
 
 /** Left on the trading key for the position account, on top of the network fee. */
 export const PERP_RENT_SOL = 0.015;
@@ -35,10 +41,7 @@ export function pickMultiplier(enabled: readonly Multiplier[], confidence: numbe
   return null;
 }
 
-/**
- * SOL, Zebec, Pump, ZEC, Ray, and CRO take 5x or 10x.
- * SOL is a Jupiter perp. The other names post collateral as a spot bag marked at the multiplier.
- */
+/** 5x and 10x are SOL only. Every other name is a spot buy and a spot sell. */
 export function multiplierFor(
   multipliers: unknown,
   confidence: number,
@@ -46,21 +49,14 @@ export function multiplierFor(
   symbol: string,
   mint: string,
 ): 1 | Multiplier {
-  const levered =
-    isActiveBook(mint, "solana") ||
-    symbol === "SOL" ||
-    symbol === "ZBCN" ||
-    symbol === "CRO" ||
-    mint === SOL_MINT ||
-    mint === ZBCN_MINT ||
-    sameMint(mint, WCRO_MINT);
-  if (!levered) return 1;
+  const sol = symbol === "SOL" || mint === SOL_MINT || sameMint(mint, SOL_MINT);
+  if (!sol) return 1;
   return pickMultiplier(normalizeMultipliers(multipliers), confidence, reason) ?? 1;
 }
 
 /**
- * A Zebec or CRO multiplier buys the collateral as spot, then the book marks the full exposure.
- * Jupiter perps do not list ZBCN or CRO, so this is how that 5x or 10x is held.
+ * Older Zebec and CRO tickets were marked at the multiplier after a spot buy.
+ * New tickets do not use this. A close of one of those rows still sells the real bag.
  */
 export function marginFill(fill: ChainFill, leverage: number, collateralUsd: number): ChainFill {
   const mult = leverage === 10 ? 10 : leverage === 5 ? 5 : 1;
@@ -71,7 +67,7 @@ export function marginFill(fill: ChainFill, leverage: number, collateralUsd: num
 /**
  * Spot tickets stay inside the cash-concentration cap.
  * A 5x or 10x ticket posts collateral from the spendable leg, so that cap cannot
- * turn a key that can post $10 into a spot buy.
+ * turn a key that can post $5 into a spot buy.
  */
 export function collateralRoom(cashUsd: number, cashCap: number, leverage: number): number {
   const cash = Math.max(0, cashUsd);
@@ -81,7 +77,7 @@ export function collateralRoom(cashUsd: number, cashCap: number, leverage: numbe
   return cash * 0.98;
 }
 
-/** Size a ticket, keeping 5x or 10x whenever the paying leg can post $10. */
+/** Size a ticket, keeping 5x or 10x whenever the paying leg can post $5. */
 export function leveragedTicket(
   spotNotional: number,
   cashUsd: number,
@@ -93,7 +89,7 @@ export function leveragedTicket(
 
 /**
  * Collateral posted for a perp, or the spot notional when leverage is 1.
- * A wallet under the Jupiter $10 floor falls back to a spot buy.
+ * A wallet under $5 falls back to a spot buy. Jupiter may still require $10 to open.
  */
 export function collateralFor(
   spotNotional: number,

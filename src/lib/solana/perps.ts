@@ -1,7 +1,7 @@
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { SOL_MINT } from "@/lib/market/universe";
 import type { ChainFill, ChainOrder } from "@/lib/types";
-import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
+import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { tradingKeypair } from "./authorize";
 import { baseUnits } from "./swap";
@@ -9,11 +9,11 @@ import { readBalances, type WalletSession } from "./wallet";
 
 const PERPS_URL = "https://perps-api.jup.ag/v1";
 const MIN_SOL = 0.005;
-/** Extra margin so Jupiter's own mark still clears the $10 floor. */
+/** Extra margin so Jupiter's own mark still clears the collateral floor. */
 const COLLATERAL_CUSHION = 1.25;
 /** Compute-unit price so a 5x or 10x transaction is not left at the back of the queue. */
 const PRIORITY_FEE_MICRO_LAMPORTS = "250000" as const;
-/** Tighter rent haircut used only when the normal reserve would drop a post under $10. */
+/** Tighter rent haircut used only when the normal reserve would drop a post under the collateral floor. */
 const TIGHT_RENT_SOL = 0.008;
 
 export interface PerpIncreasePlan {
@@ -57,7 +57,7 @@ export function planPerpIncrease(
   const leverage = order.leverage === 10 ? 10 : order.leverage === 5 ? 5 : 0;
   if (!leverage) throw new Error("Multiplier must be 5x or 10x.");
   if (order.symbol !== "SOL" && order.mint !== SOL_MINT) {
-    throw new Error(`${order.symbol} has no 5x or 10x market. Zebec stays a spot swap.`);
+    throw new Error(`${order.symbol} is a spot buy and a spot sell. 5x and 10x are SOL only.`);
   }
   const collateral = order.collateralUsd ?? order.notionalUsd / leverage;
   if (!(collateral >= PERP_MIN_COLLATERAL_USD)) {
@@ -83,16 +83,19 @@ export function planPerpIncrease(
   );
 }
 
-/** SOL that can be posted. Rent is kept when it still clears $10; otherwise a tighter reserve, then the fee-only balance. */
+/** SOL that can be posted. Rent is kept when it still clears the floor; otherwise a tighter reserve, then the fee-only balance. */
 function solCollateralUsd(sol: number, price: number, cushioned: number): number {
   if (!(price > 0)) return 0;
   const afterFee = Math.max(0, sol - SOL_FEE_RESERVE) * price;
   const afterRent = Math.max(0, sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * price;
   const afterTight = Math.max(0, sol - SOL_FEE_RESERVE - TIGHT_RENT_SOL) * price;
-  let capUsd = afterRent;
-  if (!(capUsd + 1e-6 >= PERP_MIN_COLLATERAL_USD) && afterTight + 1e-6 >= PERP_MIN_COLLATERAL_USD) capUsd = afterTight;
-  else if (!(capUsd + 1e-6 >= PERP_MIN_COLLATERAL_USD) && afterFee + 1e-6 >= PERP_MIN_COLLATERAL_USD) capUsd = afterFee;
-  return Math.min(cushioned, capUsd);
+  const target = Math.max(PERP_MIN_COLLATERAL_USD, Math.min(cushioned, JUPITER_MIN_COLLATERAL_USD));
+  for (const capUsd of [afterRent, afterTight, afterFee]) {
+    if (capUsd + 1e-6 >= target) return Math.min(cushioned, capUsd);
+  }
+  const aboveFloor = [afterRent, afterTight, afterFee].filter((capUsd) => capUsd + 1e-6 >= PERP_MIN_COLLATERAL_USD);
+  const best = Math.max(afterFee, ...(aboveFloor.length ? aboveFloor : [0]));
+  return Math.min(cushioned, best);
 }
 
 function increasePlan(
@@ -151,6 +154,21 @@ function multiplierBand(value: number): 5 | 10 | 1 | 0 {
   if (value >= 3.5 && value <= 6.5) return 5;
   if (value >= 0.5 && value <= 1.5) return 1;
   return 0;
+}
+
+/**
+ * Jupiter answers "at least $10" when a $5 order is too small for a new position.
+ * Raise to that number. A vague collateral-size error steps up 25%.
+ */
+export function raisedCollateral(message: string, current: number): number | null {
+  const match = /at least \$(\d+(?:\.\d+)?)/i.exec(message);
+  const stated = match ? Number(match[1]) : Number.NaN;
+  if (Number.isFinite(stated) && stated > current + 1e-9) return stated;
+  if (/collateral size/i.test(message)) {
+    const larger = Math.max(current, PERP_MIN_COLLATERAL_USD) * 1.25;
+    return larger > current + 1e-9 ? larger : null;
+  }
+  return null;
 }
 
 function formatMultiplier(value: number): string {
@@ -312,7 +330,7 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
     let opened: { serializedTxBase64?: string | null; positionPubkey?: string | null; quote?: IncreaseQuote } | undefined;
     let booked: 5 | 10 | undefined;
     let lastError: unknown;
-    let bumped = false;
+    let bumps = 0;
     for (const [collateralUsd, includeSize] of attempts) {
       try {
         const next = await openWith(collateralUsd, includeSize);
@@ -328,10 +346,10 @@ export async function settlePerp(session: WalletSession, order: ChainOrder): Pro
       } catch (error) {
         lastError = error;
         const message = error instanceof Error ? error.message : "";
-        const tiny = /collateral size|at least \$10/i.test(message);
-        const larger = (order.collateralUsd ?? PERP_MIN_COLLATERAL_USD) * 1.25;
-        if (tiny && !bumped && larger > (order.collateralUsd ?? 0)) {
-          bumped = true;
+        const asked = collateralUsd ?? order.collateralUsd ?? PERP_MIN_COLLATERAL_USD;
+        const larger = raisedCollateral(message, asked);
+        if (larger && bumps < 2) {
+          bumps += 1;
           attempts.push([larger, true], [larger, false]);
         }
       }

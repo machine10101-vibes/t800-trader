@@ -52,8 +52,8 @@ describe("Jupiter popular tokens", () => {
       );
       assert.equal(isActiveBook(PUMP), true);
       assert.equal(isActiveBook(PUMP, "cronos"), false);
-      assert.equal(multiplierFor([5, 10], 60, "reclaim", "PUMP", PUMP), 5);
-      assert.equal(multiplierFor([5, 10], 80, "breakout", "PUMP", PUMP), 10);
+      assert.equal(multiplierFor([5, 10], 60, "reclaim", "PUMP", PUMP), 1);
+      assert.equal(multiplierFor([5, 10], 80, "breakout", "PUMP", PUMP), 1);
       assert.equal(multiplierFor([5, 10], 90, "breakout", "JUP", "jup"), 1);
     } finally {
       notePopular([]);

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SOL_MINT, ZBCN_MINT } from "../market/universe";
 import type { ChainOrder } from "../types";
-import { fillFromIncrease, perpUsd, planPerpDecrease, planPerpIncrease, quotedMultiplier } from "./perps";
+import { fillFromIncrease, perpUsd, planPerpDecrease, planPerpIncrease, quotedMultiplier, raisedCollateral } from "./perps";
 
 function order(over: Partial<ChainOrder> = {}): ChainOrder {
   return {
@@ -68,7 +68,29 @@ describe("perp planner", () => {
   });
 
   it("sends a SOL short on the same collateral rules and refuses Zebec", () => {
-    assert.throws(() => planPerpIncrease({ ...order({ collateralUsd: 3, notionalUsd: 15 }), usdc: 0, sol: 1, solPriceUsd: 200 }), /\$10/);
+    assert.throws(() => planPerpIncrease({ ...order({ collateralUsd: 3, notionalUsd: 15 }), usdc: 0, sol: 1, solPriceUsd: 200 }), /\$5/);
+    const five = planPerpIncrease({
+      ...order({ leverage: 5, collateralUsd: 5, notionalUsd: 25 }),
+      usdc: 5,
+      sol: 0.02,
+      solPriceUsd: 200,
+    });
+    assert.equal(five.side, "long");
+    assert.equal(five.leverage, "5");
+    assert.equal(five.collateralUsd, 5);
+    assert.equal(five.sizeUsdDelta, "25000000");
+    const ten = planPerpIncrease({
+      ...order({ side: "short", leverage: 10, collateralUsd: 5, notionalUsd: 50 }),
+      usdc: 5,
+      sol: 0.02,
+      solPriceUsd: 200,
+    });
+    assert.equal(ten.side, "short");
+    assert.equal(ten.leverage, "10");
+    assert.equal(ten.inputToken, "USDC");
+    assert.equal(ten.sizeUsdDelta, "50000000");
+    assert.equal(raisedCollateral("Collateral size must be at least $10 for new positions", 5), 10);
+    assert.equal(raisedCollateral("Collateral size must be at least $10 for new positions", 10), 12.5);
     const short = planPerpIncrease({ ...order({ side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 });
     assert.equal(short.side, "short");
     assert.equal(short.asset, "SOL");
@@ -76,15 +98,15 @@ describe("perp planner", () => {
     assert.equal(short.inputToken, "USDC");
     assert.equal(short.sizeUsdDelta, "62500000");
     assert.ok(short.collateralUsd >= 10);
-    const ten = planPerpIncrease({
+    const tenUsd = planPerpIncrease({
       ...order({ side: "short", leverage: 10, collateralUsd: 10, notionalUsd: 100 }),
       usdc: 20,
       sol: 1,
       solPriceUsd: 200,
     });
-    assert.equal(ten.side, "short");
-    assert.equal(ten.leverage, "10");
-    assert.equal(ten.sizeUsdDelta, "125000000");
+    assert.equal(tenUsd.side, "short");
+    assert.equal(tenUsd.leverage, "10");
+    assert.equal(tenUsd.sizeUsdDelta, "125000000");
     const solShort = planPerpIncrease({
       ...order({ side: "short", leverage: 10, collateralUsd: 10, notionalUsd: 100 }),
       usdc: 0,
@@ -97,7 +119,7 @@ describe("perp planner", () => {
     assert.ok(Math.abs(Number(solShort.sizeUsdDelta) / 1e6 - solShort.collateralUsd * 10) < 1e-6);
     assert.throws(
       () => planPerpIncrease({ ...order({ symbol: "ZBCN", mint: ZBCN_MINT, side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 }),
-      /Zebec/,
+      /spot buy/,
     );
   });
 

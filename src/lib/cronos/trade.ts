@@ -1,6 +1,5 @@
 import type { ArmAuth, TradingSnap } from "@/lib/solana/authorize";
 import { planProfitWithdrawal, tradingKeyCoversSpend } from "@/lib/solana/authorize";
-import { marginFill } from "@/lib/trading/leverage";
 import { sellQty } from "@/lib/solana/swap";
 import type { WalletBudget } from "@/lib/trading/risk";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
@@ -181,14 +180,11 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   const account = cronosTradingAccount(session.address);
   if (!account) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
   if (order.side === "short") throw new Error("Wallet swaps are spot buys and sells. Shorts are not sent to the wallet.");
-  const leverage = order.leverage ?? 1;
   if (order.kind === "open") {
-    const collateral = leverage > 1 ? (order.collateralUsd ?? order.notionalUsd / Math.max(leverage, 1)) : order.notionalUsd;
     const balances = await readCronosBalances(account.address);
     const price = order.price || balances.solPriceUsd || 0;
-    const plan = planCronosOpen(collateral, balances.usdc, balances.sol);
-    const fill = await sendVvsSwap(account, plan.swap, price);
-    return leverage > 1 ? marginFill(fill, leverage, collateral) : fill;
+    const plan = planCronosOpen(order.notionalUsd, balances.usdc, balances.sol);
+    return sendVvsSwap(account, plan.swap, price);
   }
 
   const balances = await readCronosBalances(account.address);

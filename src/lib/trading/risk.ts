@@ -1,5 +1,6 @@
+import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
-import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
+import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
 
 /** Smallest marked trading balance the desk will arm and open against. */
 export const MIN_TRADE_USD = 3;
@@ -143,8 +144,8 @@ export function solPerpPostableUsd(budget: WalletBudget): number {
 
 /**
  * Dollars that can open a SOL 5x or 10x. USDC counts in full.
- * SOL keeps the position-account rent when that still clears $10.
- * A fee-only balance that still clears $10 is used when the rent haircut
+ * SOL keeps the position-account rent when that still clears $5.
+ * A fee-only balance that still clears $5 is used when the rent haircut
  * would otherwise turn a margin ticket into a spot buy.
  */
 export function marginCashUsd(budget: WalletBudget): number {
@@ -152,7 +153,12 @@ export function marginCashUsd(budget: WalletBudget): number {
   const usdc = Math.max(0, budget.usdc);
   const afterRent = Math.max(0, budget.sol - SOL_FEE_RESERVE - PERP_RENT_SOL) * px;
   const afterFee = Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
-  const solLeg = afterRent + 1e-9 >= PERP_MIN_COLLATERAL_USD ? afterRent : afterFee;
+  const solLeg =
+    afterRent + 1e-9 >= JUPITER_MIN_COLLATERAL_USD
+      ? afterRent
+      : afterFee + 1e-9 >= PERP_MIN_COLLATERAL_USD
+        ? afterFee
+        : afterRent;
   return Math.max(usdc, solLeg);
 }
 
@@ -216,6 +222,9 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
+  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT) {
+    return "Only SOL can be shorted. This name is a spot buy and a spot sell.";
+  }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
