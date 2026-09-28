@@ -10,6 +10,15 @@ export const CORE_CANDLE_MS = 40_000;
 export const POPULAR_CANDLE_MS = 50_000;
 /** After a 429 or an empty chart, leave that pool alone. */
 export const CANDLE_COOL_MS = 40_000;
+/** Native 4-hour bars. A bar only closes every four hours, so the desk does not poll them like 1-minute candles. */
+export const CHART_CANDLE_MS = 5 * 60_000;
+/** About thirty days of 4-hour bars. GeckoTerminal returns the series already built. */
+export const CHART_BARS = 180;
+
+/** Direct 4-hour candles from the pool (or token) the desk already trades. */
+export function geckoHourlyChartUrl(network: string, address: string, kind: "pools" | "tokens"): string {
+  return `https://api.geckoterminal.com/api/v2/networks/${network}/${kind}/${address}/ohlcv/hour?aggregate=4&limit=${CHART_BARS}&currency=usd`;
+}
 
 export interface MintSnap {
   at: number;

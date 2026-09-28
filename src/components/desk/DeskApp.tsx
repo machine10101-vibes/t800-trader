@@ -26,8 +26,7 @@ import {
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { listLocalBooks } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { CORE_CANDLE_MS, POPULAR_CANDLE_MS } from "@/lib/market/ohlcvPlan";
-import { cachedOhlcv, cachedTapeMarks, candleFetchedAt, rememberTapeMark, requestBookCandles } from "@/lib/market/providers";
+import { cachedChart, rememberTapeMark, requestBookCandles, requestBookCharts } from "@/lib/market/providers";
 import { bookPools, bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -940,7 +939,7 @@ function LiveConfirmModal({
         <h2 className="text-xl font-medium">Enable LIVE Jupiter swaps</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
           PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus
-          SOL fees. Spot shorts stay paper-only. A reload locks LIVE until you type LIVE again.
+          SOL fees. A SOL short is a Jupiter perpetual. Other tokens stay in practice. A reload locks LIVE until you type LIVE again.
         </p>
         <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">
           <input type="checkbox" className="mt-1" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
@@ -1250,19 +1249,17 @@ function useWatchTapes(tapes: TapeCard[], chain: ChainId): Record<string, Candle
       for (const tape of tapesRef.current) {
         if (tape.poolAddress && tape.price) rememberTapeMark(tape.poolAddress, tape.price);
       }
-      const stale = pools.filter((pool) => {
-        const at = candleFetchedAt(pool);
-        const freshMs = pinnedSet.has(pool) ? CORE_CANDLE_MS : POPULAR_CANDLE_MS;
-        return at === null || Date.now() - at >= freshMs;
-      });
-      requestBookCandles(stale, chain, pinnedSet);
+      requestBookCharts(pools, chain);
+      const chartsReady = pools.every((pool) => (cachedChart(pool)?.length ?? 0) > 0);
+      if (chartsReady) {
+        requestBookCandles(pools, chain, pinnedSet);
+      }
       setBars((cur) => {
         let changed = false;
         const next = { ...cur };
         for (const pool of pools) {
-          const fetched = cachedOhlcv(pool);
-          const rows = fetched?.length ? fetched : cachedTapeMarks(pool);
-          if (!rows.length || next[pool] === rows) continue;
+          const rows = cachedChart(pool);
+          if (!rows?.length || next[pool] === rows) continue;
           next[pool] = rows;
           changed = true;
         }
@@ -1446,14 +1443,14 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <span>{focusName ? `${tapeLabel(focusName)} 1m` : "1m tape"}</span>
+                <span>{focusName ? `${tapeLabel(focusName)} 4h` : "4h chart"}</span>
                 <span className="flex gap-1.5 tracking-normal normal-case">
                   <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
                   <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
                   <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
                 </span>
               </div>
-              <div className="h-[168px]">
+              <div className="h-[280px]">
                 <CandleChart candles={focusCandles} layers={layers} />
               </div>
             </div>
@@ -1462,7 +1459,7 @@ function Overview({
 
       <section className="neon p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-          <Label>1-minute tapes</Label>
+          <Label>4-hour charts</Label>
           <span className="text-[11px] text-[var(--faint)]">
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
           </span>

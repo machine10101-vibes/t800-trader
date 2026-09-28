@@ -38,20 +38,20 @@ const ALL_LAYERS: ChartLayers = { ema9: true, ema21: true, vwap: true };
 export function CandleChart({ candles, layers = ALL_LAYERS }: { candles: Candle[]; layers?: ChartLayers }) {
   const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
-    return <EmptyPlot label="Waiting on the 1-minute tape" waiting />;
+    return <EmptyPlot label="Waiting on the 4-hour chart" waiting />;
   }
   const w = 520;
   const h = 168;
   const pad = 10;
-  const slice = candles.slice(-72);
+  const slice = candles.slice(-180);
   const highs = slice.map((c) => c.high);
   const lows = slice.map((c) => c.low);
   const closes = slice.map((c) => c.close);
   const min = Math.min(...lows);
   const max = Math.max(...highs);
   const span = max - min || 1;
-  const bw = Math.max(2.2, (w - pad * 2) / slice.length - 1.4);
   const slot = (w - pad * 2) / slice.length;
+  const bw = Math.max(1, Math.min(7, slot * 0.72));
   const xOf = (i: number) => pad + (i + 0.5) * slot;
   const y = (v: number) => pad + ((max - v) / span) * (h - pad * 2);
   const last = slice[slice.length - 1];

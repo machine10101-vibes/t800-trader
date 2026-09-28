@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
+import { SOL_MINT } from "../market/universe";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
 
@@ -704,16 +705,26 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("keeps live spot shorts paper-only", () => {
+  it("sends a live SOL short and keeps other live shorts in practice", () => {
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...longSignal, side: "short", symbol: "SOL", mint: SOL_MINT },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "mixed",
+      }),
+      null,
+    );
     assert.match(
       canOpen({
         positions: [],
-        signal: { ...longSignal, side: "short" },
+        signal: { ...longSignal, side: "short", symbol: "ZBCN" },
         config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
         portfolio: portfolio(),
-        stance: "risk-on",
+        stance: "mixed",
       }) ?? "",
-      /perps/,
+      /short market/,
     );
   });
 

@@ -243,8 +243,16 @@ async function settleUltraClose(
 export function executorFor(session: WalletSession): ChainExecutor {
   return async (order) => {
     const leverage = order.leverage ?? 1;
-    const solLong = order.symbol === "SOL" || order.mint === SOL_MINT;
-    if (leverage > 1 && solLong) {
+    const solMarket = order.symbol === "SOL" || order.mint === SOL_MINT;
+    if (order.side === "short" && solMarket) {
+      const { settlePerp } = await import("./perps");
+      if (order.kind === "open" && !(leverage > 1)) {
+        const collateral = Math.max(order.collateralUsd ?? order.notionalUsd / 5, 10);
+        return settlePerp(session, { ...order, leverage: 5, collateralUsd: collateral });
+      }
+      return settlePerp(session, order);
+    }
+    if (leverage > 1 && solMarket) {
       const { settlePerp } = await import("./perps");
       return settlePerp(session, order);
     }
@@ -256,7 +264,7 @@ export function executorFor(session: WalletSession): ChainExecutor {
     try {
       return await settleSpot(session, order);
     } catch (error) {
-      if (order.kind !== "open" || !solLong) throw error;
+      if (order.kind !== "open" || !solMarket) throw error;
       const message = error instanceof Error ? error.message : "";
       if (!/needs USDC/i.test(message)) throw error;
       const { settlePerp } = await import("./perps");

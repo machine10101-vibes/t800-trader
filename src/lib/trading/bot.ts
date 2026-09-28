@@ -69,7 +69,8 @@ async function walletExit(
   executor: ChainExecutor | undefined,
   blocked: string[],
 ): Promise<AppState> {
-  if (pos.signature && pos.side === "long") {
+  const onChain = Boolean(pos.signature) && (pos.side === "long" || (pos.side === "short" && (pos.leverage ?? 1) > 1));
+  if (onChain) {
     if (!executor) {
       blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the sell`);
       return state;
@@ -154,7 +155,9 @@ export async function tickBot(
           const saved = (next.config.scaleFractionPct ?? 50) / 100;
           const bank = (pos.leverage ?? 1) >= 5 ? Math.max(saved, 0.6) : saved;
           const fraction = Math.min(0.75, Math.max(0.25, bank));
-          if (next.config.walletSwaps && pos.signature && pos.side === "long") {
+          const onChainScale =
+            Boolean(pos.signature) && (pos.side === "long" || (pos.side === "short" && (pos.leverage ?? 1) > 1));
+          if (next.config.walletSwaps && onChainScale) {
             if (!executor) {
               blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);
             } else {
@@ -432,14 +435,26 @@ export async function tickBot(
             learned.mint,
           );
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
-          const paying = wanted > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
-          const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wanted);
+          const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
+          if (liveShort && !solPerp) {
+            blocked.push(`${learned.symbol}: this token has no short market, so the short stays in practice`);
+            continue;
+          }
+          const wantedLev = liveShort && wanted <= 1 ? 5 : wanted;
+          const paying = wantedLev > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
+          const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
           const leverage = ticket.leverage;
           const collateralUsd = ticket.collateralUsd;
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
+          if (liveShort && (ticket.spotFallback || leverage <= 1)) {
+            blocked.push(
+              `${learned.symbol}: a live short needs $${PERP_MIN_COLLATERAL_USD} of collateral for a Jupiter perp`,
+            );
+            continue;
+          }
           if (ticket.spotFallback) {
             blocked.push(
-              `${learned.symbol}: ${wanted}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
+              `${learned.symbol}: ${wantedLev}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
             );
           }
           if (!token) {
@@ -452,8 +467,6 @@ export async function tickBot(
             continue;
           } else if (bookTooSmall) {
             continue;
-          } else if (next.config.walletSwaps && learned.side === "short") {
-            blocked.push(`${learned.symbol}: shorts are not sent to the wallet`);
           } else if (next.config.walletSwaps && !executor) {
             blocked.push(`${learned.symbol}: this page cannot ask the wallet to sign`);
           } else {

@@ -1,3 +1,4 @@
+import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
 
@@ -216,8 +217,8 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (config.walletSwaps && signal.side === "short") {
-    return "Spot Solana cannot short without perps — shorts stay paper-only";
+  if (config.walletSwaps && signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT) {
+    return "This token has no short market — the short stays in practice";
   }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
@@ -260,7 +261,7 @@ export function canOpen(args: {
 /** Cash value of a ticket. A perp contributes margin plus PnL, not the full exposure. */
 export function positionEquity(position: Position): number {
   const lev = position.leverage ?? 1;
-  if (lev > 1 && position.side === "long") {
+  if (lev > 1) {
     const margin = position.collateralUsd ?? (position.qty * position.entryPrice) / lev;
     return Math.max(0, margin + unrealizedPnl(position).usd);
   }

@@ -312,7 +312,7 @@ export function SettingsPanel({
         <div className="grid gap-3">
           <Toggle
             label="Allow bets that the price will fall"
-            hint="These stay in practice. They turn off when the market looks shaky."
+            hint="SOL shorts are sent as a Jupiter perpetual. Other tokens stay in practice. They turn off when the market looks shaky."
             checked={local.allowShorts}
             onChange={(v) => set({ allowShorts: v })}
           />

@@ -20,7 +20,7 @@ export interface PerpIncreasePlan {
   asset: "SOL";
   inputToken: "SOL" | "USDC";
   inputTokenAmount: string;
-  side: "long";
+  side: "long" | "short";
   leverage: "5" | "10";
   sizeUsdDelta: string;
   maxSlippageBps: "100";
@@ -52,8 +52,8 @@ export function perpUsd(value: string | undefined): number {
 export function planPerpIncrease(
   order: ChainOrder & { usdc: number; sol: number; solPriceUsd: number },
 ): PerpIncreasePlan {
-  if (order.side === "short") throw new Error("Shorts are not sent on-chain.");
   if (order.kind !== "open") throw new Error("Only a new ticket opens a multiplier.");
+  const side: "long" | "short" = order.side === "short" ? "short" : "long";
   const leverage = order.leverage === 10 ? 10 : order.leverage === 5 ? 5 : 0;
   if (!leverage) throw new Error("Multiplier must be 5x or 10x.");
   if (order.symbol !== "SOL" && order.mint !== SOL_MINT) {
@@ -68,14 +68,14 @@ export function planPerpIncrease(
   const usdc = Math.max(0, order.usdc);
   if (usdc + 1e-6 >= cushioned || (usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD && usdc + 1e-6 >= collateral)) {
     const post = usdc + 1e-6 >= cushioned ? cushioned : usdc;
-    return increasePlan("USDC", post, 6, leverage, post);
+    return increasePlan("USDC", post, 6, leverage, post, side);
   }
   const solPost = solCollateralUsd(order.sol, order.solPriceUsd, cushioned);
   if (solPost + 1e-6 >= PERP_MIN_COLLATERAL_USD && order.solPriceUsd > 0) {
-    return increasePlan("SOL", solPost / order.solPriceUsd, 9, leverage, solPost);
+    return increasePlan("SOL", solPost / order.solPriceUsd, 9, leverage, solPost, side);
   }
   if (usdc + 1e-6 >= PERP_MIN_COLLATERAL_USD) {
-    return increasePlan("USDC", usdc, 6, leverage, usdc);
+    return increasePlan("USDC", usdc, 6, leverage, usdc, side);
   }
   if (!(order.solPriceUsd > 0)) throw new Error("USDC does not cover this margin, and the SOL price is missing.");
   throw new Error(
@@ -101,12 +101,13 @@ function increasePlan(
   decimals: number,
   leverage: 5 | 10,
   collateralUsd: number,
+  side: "long" | "short",
 ): PerpIncreasePlan {
   return {
     asset: "SOL",
     inputToken,
     inputTokenAmount: baseUnits(amountUi, decimals),
-    side: "long",
+    side,
     leverage: String(leverage) as "5" | "10",
     sizeUsdDelta: baseUnits(collateralUsd * leverage, 6),
     maxSlippageBps: "100",

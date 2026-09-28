@@ -6,7 +6,16 @@ import { loadJupiterPopular } from "./jupiterPopular";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
-import { CANDLE_COOL_MS, CORE_CANDLE_MS, mintsToFetch, POPULAR_CANDLE_MS, poolsToCandle } from "./ohlcvPlan";
+import {
+  CANDLE_COOL_MS,
+  CHART_BARS,
+  CHART_CANDLE_MS,
+  CORE_CANDLE_MS,
+  geckoHourlyChartUrl,
+  mintsToFetch,
+  POPULAR_CANDLE_MS,
+  poolsToCandle,
+} from "./ohlcvPlan";
 import { pushTapeMark, withCandleTape } from "./tape";
 import {
   bookMints,
@@ -432,6 +441,16 @@ async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId
   return readOhlcv(tokenUrl).catch(() => poolRows);
 }
 
+/** Native 4-hour bars from the pool the desk trades. The token series is only a fallback. */
+async function fetchChartOnce(poolAddress: string, chain: ChainId): Promise<Candle[]> {
+  const network = geckoNetwork(chain);
+  const poolRows = await readOhlcv(geckoHourlyChartUrl(network, poolAddress, "pools"));
+  if (poolRows.length) return poolRows;
+  const mint = poolMint.get(poolAddress);
+  if (!mint) return poolRows;
+  return readOhlcv(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
+}
+
 function staleCandles(poolAddress: string): Candle[] | null {
   const hit = ohlcvCache.get(poolAddress);
   if (hit?.rows.length && Date.now() - hit.at < OHLCV_STALE_MS) return hit.rows;
@@ -707,6 +726,90 @@ async function drainCandles(): Promise<void> {
   }
 }
 
+const chartCache = new Map<string, { at: number; rows: Candle[] }>();
+const chartMiss = new Map<string, number>();
+const chartInflight = new Map<string, Promise<Candle[]>>();
+const chartQueue: { pool: string; chain: ChainId }[] = [];
+let drainingCharts = false;
+
+export function cachedChart(poolAddress: string): Candle[] | null {
+  const hit = chartCache.get(poolAddress);
+  return hit?.rows.length ? hit.rows : null;
+}
+
+export function chartFetchedAt(poolAddress: string): number | null {
+  const hit = chartCache.get(poolAddress);
+  return hit?.rows.length ? hit.at : null;
+}
+
+async function loadChart(poolAddress: string, chain: ChainId): Promise<Candle[]> {
+  const inflight = chartInflight.get(poolAddress);
+  if (inflight) return inflight;
+  const run = readChart(poolAddress, chain).finally(() => {
+    if (chartInflight.get(poolAddress) === run) chartInflight.delete(poolAddress);
+  });
+  chartInflight.set(poolAddress, run);
+  return run;
+}
+
+async function readChart(poolAddress: string, chain: ChainId): Promise<Candle[]> {
+  const hit = chartCache.get(poolAddress);
+  if (hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
+  const missedAt = chartMiss.get(poolAddress);
+  if (missedAt && Date.now() - missedAt < CANDLE_COOL_MS) return hit?.rows ?? [];
+  try {
+    const rows = await enqueueOhlcv(() => fetchChartOnce(poolAddress, chain));
+    const capped = rows.slice(-CHART_BARS);
+    if (capped.length) {
+      chartCache.set(poolAddress, { at: Date.now(), rows: capped });
+      chartMiss.delete(poolAddress);
+      return capped;
+    }
+    chartMiss.set(poolAddress, Date.now());
+    return hit?.rows ?? [];
+  } catch {
+    chartMiss.set(poolAddress, Date.now());
+    return hit?.rows ?? [];
+  }
+}
+
+/** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */
+export function requestBookCharts(pools: string[], chain: ChainId): void {
+  const missing: { pool: string; chain: ChainId }[] = [];
+  const refresh: { pool: string; chain: ChainId }[] = [];
+  for (const pool of pools) {
+    if (!pool || chartQueue.some((job) => job.pool === pool && job.chain === chain)) continue;
+    const at = chartFetchedAt(pool);
+    if (at !== null && Date.now() - at < CHART_CANDLE_MS) continue;
+    const missed = chartMiss.get(pool);
+    if (missed && Date.now() - missed < CANDLE_COOL_MS && !cachedChart(pool)?.length) continue;
+    const job = { pool, chain };
+    if (cachedChart(pool)?.length) refresh.push(job);
+    else missing.push(job);
+  }
+  chartQueue.unshift(...missing);
+  chartQueue.push(...refresh);
+  if (drainingCharts) return;
+  drainingCharts = true;
+  void drainCharts();
+}
+
+async function drainCharts(): Promise<void> {
+  try {
+    while (chartQueue.length) {
+      const job = chartQueue.shift();
+      if (!job) break;
+      const at = chartFetchedAt(job.pool);
+      if (at !== null && Date.now() - at < CHART_CANDLE_MS) continue;
+      await loadChart(job.pool, job.chain);
+      await sleep(250);
+    }
+  } finally {
+    drainingCharts = false;
+    if (chartQueue.length) requestBookCharts([], "solana");
+  }
+}
+
 async function loadMarketOnce(chain: ChainId): Promise<{
   candidates: TokenCandidate[];
   regime: MarketRegime;
@@ -736,11 +839,9 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     (candidate) => candidate.mint,
   );
   const pinnedPools = new Set(bookPools(chain).map((row) => row.pool));
-  requestBookCandles(
-    candleRows.map((candidate) => candidate.poolAddress),
-    chain,
-    pinnedPools,
-  );
+  const chartPools = candleRows.map((candidate) => candidate.poolAddress);
+  requestBookCharts(chartPools, chain);
+  requestBookCandles(chartPools, chain, pinnedPools);
   const [regime, crossed] = await Promise.all([
     regimePromise,
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),

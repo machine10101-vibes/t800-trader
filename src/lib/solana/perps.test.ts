@@ -27,6 +27,7 @@ describe("perp planner", () => {
 
   it("spends SOL collateral for a 5x long and USDC when that covers the margin", () => {
     const sol = planPerpIncrease({ ...order(), usdc: 0, sol: 0.2, solPriceUsd: 200 });
+    assert.equal(sol.side, "long");
     assert.equal(sol.leverage, "5");
     assert.equal(sol.priorityFeeMicroLamports, "250000");
     assert.equal(sol.inputToken, "SOL");
@@ -66,11 +67,16 @@ describe("perp planner", () => {
     assert.ok(feeOnly.collateralUsd + 1e-9 >= 10);
   });
 
-  it("refuses a sub-$10 margin, a short, and Zebec", () => {
+  it("sends a SOL short on the same collateral rules and refuses Zebec", () => {
     assert.throws(() => planPerpIncrease({ ...order({ collateralUsd: 3, notionalUsd: 15 }), usdc: 0, sol: 1, solPriceUsd: 200 }), /\$10/);
-    assert.throws(() => planPerpIncrease({ ...order({ side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 }), /Shorts/);
+    const short = planPerpIncrease({ ...order({ side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 });
+    assert.equal(short.side, "short");
+    assert.equal(short.asset, "SOL");
+    assert.equal(short.leverage, "5");
+    assert.equal(short.inputToken, "USDC");
+    assert.ok(short.collateralUsd >= 10);
     assert.throws(
-      () => planPerpIncrease({ ...order({ symbol: "ZBCN", mint: ZBCN_MINT }), usdc: 20, sol: 1, solPriceUsd: 200 }),
+      () => planPerpIncrease({ ...order({ symbol: "ZBCN", mint: ZBCN_MINT, side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 }),
       /Zebec/,
     );
   });

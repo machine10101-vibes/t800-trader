@@ -305,8 +305,8 @@ export function entrySignals(
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
 ): Signal[] {
   if (tech) {
-    const longs = buildSignals(token, tech, researchScore, allowShorts, ctx).filter((row) => row.side === "long");
-    if (longs.length) return longs;
+    const structured = buildSignals(token, tech, researchScore, allowShorts, ctx);
+    if (structured.length) return structured;
   }
   return buildFlowSignals(token, researchScore, allowShorts, ctx);
 }
@@ -315,7 +315,7 @@ export function entrySignals(
 export function buildFlowSignals(
   token: TokenCandidate,
   researchScore: number | null,
-  _allowShorts: boolean,
+  allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
 ): Signal[] {
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
@@ -330,6 +330,40 @@ export function buildFlowSignals(
   const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
+  const sellHeavy = tape <= 0.55;
+  const falling =
+    token.watchlist &&
+    m15 <= -0.25 &&
+    m15 > -8 &&
+    m5 < 0 &&
+    h1 > -6 &&
+    h1 < 4 &&
+    sellHeavy;
+  if (allowShorts && !defensive && falling) {
+    const stopPct = clamp(1.35, 1.2, 2.6);
+    const rr = withMinRR(stopPct, stopPct * 1.8);
+    const confidence = clamp(
+      60 + Math.min(Math.abs(m15), 6) * 2 + (tape < 0.45 ? 4 : 0) + (researchScore !== null ? (researchScore - 55) * 0.1 : 0),
+      58,
+      88,
+    );
+    const short: Signal = {
+      id: id("sig"),
+      mint: token.mint,
+      symbol: token.symbol,
+      poolAddress: token.poolAddress,
+      sector: token.sector,
+      price,
+      researchScore,
+      createdAt: new Date().toISOString(),
+      side: "short",
+      reason: "fade",
+      confidence,
+      ...rr,
+      thesis: `${token.symbol} 5m and 15m are falling — 15m ${m15.toFixed(2)}%, 1h ${h1.toFixed(2)}%, buy share ${(tape * 100).toFixed(0)}%. Short the drop.`,
+    };
+    return rewardToRisk(short.stopPct, short.targetPct) >= 1.6 ? [short] : [];
+  }
   if (h1 <= -6 || m15 <= -0.25 || m5 <= -1.2 || solDump) return [];
   if (
     token.sector === "Meme" &&

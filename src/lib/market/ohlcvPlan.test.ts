@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CANDLE_COOL_MS,
+  CHART_BARS,
   CORE_POOL_MS,
+  geckoHourlyChartUrl,
   mintsToFetch,
   POOL_MISS_MS,
   poolsToCandle,
@@ -59,5 +61,15 @@ describe("poolsToCandle", () => {
     const fresh = new Map([["paid-pool", now - POPULAR_CANDLE_MS]]);
     const missed = new Map([["xmr-pool", now - CANDLE_COOL_MS]]);
     assert.deepEqual(poolsToCandle(pools, fresh, missed, now, 2), ["sol-pool", "paid-pool"]);
+  });
+});
+
+describe("4-hour chart url", () => {
+  it("asks the venue feed for native 4-hour bars instead of waiting on 1-minute candles", () => {
+    const url = geckoHourlyChartUrl("solana", "POOL", "pools");
+    assert.match(url, /\/networks\/solana\/pools\/POOL\/ohlcv\/hour\?aggregate=4/);
+    assert.match(url, /currency=usd/);
+    assert.match(url, new RegExp(`limit=${CHART_BARS}`));
+    assert.match(geckoHourlyChartUrl("cro", "MINT", "tokens"), /\/tokens\/MINT\/ohlcv\/hour\?aggregate=4/);
   });
 });

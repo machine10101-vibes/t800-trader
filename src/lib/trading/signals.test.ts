@@ -306,6 +306,68 @@ describe("indicators", () => {
     assert.equal(buildFlowSignals(flatRed5, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
   });
 
+  it("shorts a falling watchlist name and keeps a candle short", () => {
+    const flow = (priceChangePct: number, buys = 40, sells = 60) => ({
+      buys,
+      sells,
+      buyers: 12,
+      sellers: 18,
+      volumeUsd: 10_000,
+      priceChangePct,
+    });
+    const token = {
+      symbol: "SOL",
+      mint: "sol",
+      poolAddress: "pool",
+      sector: "L1",
+      watchlist: true,
+      priceUsd: 180,
+      flows: {
+        m5: flow(-0.6),
+        m15: flow(-1.4),
+        m30: flow(-0.8),
+        h1: flow(-1.1),
+        h6: flow(-0.4),
+        h24: flow(0.2),
+      },
+    } as TokenCandidate;
+    assert.equal(buildFlowSignals(token, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).length, 0);
+    assert.equal(buildFlowSignals(token, 70, true, { stance: "defensive", fearGreed: 40, solChange: -0.4 }).length, 0);
+    const found = buildFlowSignals(token, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    assert.equal(found.length, 1);
+    assert.equal(found[0]?.side, "short");
+    assert.equal(found[0]?.reason, "fade");
+    const climax = {
+      ...token,
+      priceUsd: 200,
+      flows: {
+        m5: flow(1, 30, 70),
+        m15: flow(2, 30, 70),
+        m30: flow(14, 30, 70),
+        h1: flow(20, 30, 70),
+        h6: flow(8, 30, 70),
+        h24: flow(12, 30, 70),
+      },
+    } as TokenCandidate;
+    const tech = {
+      rsi14: 82,
+      ema9: 200,
+      ema21: 190,
+      vwap: 170,
+      atrPct: 1.2,
+      volumeZ: 2,
+      lastClose: 200,
+      extensionPct: 6,
+      closeStrength: 0.2,
+      priorHigh: 190,
+      priorLow: 160,
+      barsAboveEma9: 4,
+    } as TechnicalSnapshot;
+    const kept = entrySignals(climax, tech, 60, true, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
+    assert.equal(kept[0]?.side, "short");
+    assert.equal(kept[0]?.reason, "fade");
+  });
+
   it("does not buy a crashing watchlist name from pool flow", () => {
     const flow = (priceChangePct: number) => ({
       buys: 30,

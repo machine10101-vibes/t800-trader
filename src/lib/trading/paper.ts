@@ -22,7 +22,7 @@ export function exitProceeds(
   pnlUsd: number,
 ): number {
   const lev = position.leverage ?? 1;
-  if (lev > 1 && position.side === "long") {
+  if (lev > 1) {
     const margin = position.collateralUsd ?? (position.qty * position.entryPrice) / lev;
     return Math.max(0, margin + pnlUsd);
   }
