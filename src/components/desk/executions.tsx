@@ -1,49 +1,52 @@
 "use client";
 
 import { txUrl, type ChainId } from "@/lib/chain";
-import { executionLine, sizeText, tradeTally } from "@/lib/trading/blotter";
+import { executionLine, logHeadline, sizeText, stillOpenIds } from "@/lib/trading/blotter";
 import type { Trade } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Tone } from "./bits";
 
 export function ExecutionLog({
   trades,
+  positions = [],
   chain,
   empty,
 }: {
   trades: Trade[];
+  positions?: { mint: string }[];
   chain: ChainId;
   empty: string;
 }) {
-  const tally = tradeTally(trades);
-  if (!tally.total) return <p className="text-sm text-[var(--muted)]">{empty}</p>;
+  if (!trades.length) return <p className="text-sm text-[var(--muted)]">{empty}</p>;
+  const openIds = stillOpenIds(trades, positions);
   return (
     <div>
-      <p className="mb-2 text-[11px] text-[var(--faint)]">
-        {tally.total} trades · {tally.closed} closed · {tally.opened} opened
-      </p>
+      <p className="mb-2 text-[11px] text-[var(--faint)]">{logHeadline(trades.length, positions.length)}</p>
       <div className="desk-scroll max-h-80 space-y-2 overflow-y-auto">
         {trades.map((trade) => {
-          const line = executionLine(trade);
+          const line = executionLine(trade, openIds.has(trade.id));
+          const direction = line.side === "short" ? "price down" : "price up";
           return (
             <div key={line.id} className="rounded-xl border border-[var(--line)] px-3 py-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium">
                     {line.verb} {line.symbol}{" "}
-                    <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--faint)]">{line.side}</span>
+                    <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--faint)]">{direction}</span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                    {sizeText(line.qty)} @ {priceFmt(line.price)} · {usd(line.notionalUsd)}
+                    {sizeText(line.qty)} at {priceFmt(line.price)} · {usd(line.notionalUsd)}
                   </div>
                   <div className="mt-0.5 text-xs leading-5 text-[var(--text)]">{line.why}</div>
                   <div className="text-[10px] text-[var(--faint)]">{new Date(line.at).toLocaleString()}</div>
                 </div>
                 <div className="shrink-0 text-right">
-                  {line.pnlUsd === null ? (
+                  {line.verb === "Bought" ? (
                     <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--faint)]">
-                      {line.verb === "Opened" ? "Open" : "—"}
+                      {line.stillOpen ? "Still open" : "Not open"}
                     </span>
+                  ) : line.pnlUsd === null ? (
+                    <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--faint)]">—</span>
                   ) : (
                     <>
                       <Tone value={line.pnlUsd}>{usd(line.pnlUsd)}</Tone>
@@ -66,9 +69,9 @@ export function ExecutionLog({
 }
 
 function txLink(signature: string | undefined, chain: ChainId) {
-  if (!signature) return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Simulated</span>;
+  if (!signature) return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Practice</span>;
   if (signature === "held") {
-    return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Held in the trading key</span>;
+    return <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Held in the trading wallet</span>;
   }
   const short = signature.length > 10 ? `${signature.slice(0, 4)}…${signature.slice(-4)}` : signature;
   return (
