@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, foldCandles, printClose, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, cashExit, foldCandles, keepEntry, printClose, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
@@ -93,6 +93,11 @@ describe("candle tape", () => {
     assert.equal(tapeInCash(0), false);
     assert.equal(tapeInCash(0.09), false);
     assert.equal(tapeInCash(0.1), false);
+    assert.equal(keepEntry("short", -0.4), true);
+    assert.equal(keepEntry("long", -0.4), false);
+    assert.equal(keepEntry("long", 0), true);
+    assert.equal(cashExit("long", -0.4), true);
+    assert.equal(cashExit("short", -0.4), false);
   });
 
   it("names SOL and Zebec on every tick", () => {

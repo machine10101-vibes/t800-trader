@@ -94,6 +94,16 @@ export function tapeInCash(m15: number): boolean {
   return m15 <= -0.25;
 }
 
+/** A red 15m blocks a new long. A short is the trade that red tape is for. */
+export function keepEntry(side: "long" | "short", m15: number): boolean {
+  return side === "short" || !tapeInCash(m15);
+}
+
+/** Cash a long when the 15m turns red. A short stays open through that tape. */
+export function cashExit(side: "long" | "short", m15: number): boolean {
+  return side !== "short" && tapeInCash(m15);
+}
+
 export function tickPass(symbol: string, m15: number): string {
   if (m15 <= -0.25) return `${symbol}: 15m is red (${m15.toFixed(2)}%), staying in cash`;
   if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), waiting on a 5m that can take 5x or 10x`;

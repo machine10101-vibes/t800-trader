@@ -312,7 +312,14 @@ export function entrySignals(
 ): Signal[] {
   if (tech) {
     const structured = buildSignals(token, tech, researchScore, allowShorts, ctx);
-    if (structured.length) return structured;
+    if (structured.length) {
+      // A 4-hour long must not hide the 15m short, or the red-tape filter drops the only signal.
+      if (structured.every((signal) => signal.side === "long")) {
+        const short = buildFlowSignals(token, researchScore, allowShorts, ctx).find((signal) => signal.side === "short");
+        if (short) return [short];
+      }
+      return structured;
+    }
   }
   return buildFlowSignals(token, researchScore, allowShorts, ctx);
 }
@@ -336,10 +343,11 @@ export function buildFlowSignals(
   const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
-  const sellHeavy = tape <= 0.55;
+  // A down 15m can still print about as many buys as sells. A buy spike is not a short.
+  const sellHeavy = tape <= 0.62;
   const falling =
     token.watchlist &&
-    m15 <= -0.25 &&
+    m15 <= -0.15 &&
     m15 > -8 &&
     m5 < 0 &&
     h1 > -6 &&
@@ -402,9 +410,10 @@ export function buildFlowSignals(
   // A green 15m watchlist name is a long. Buy-share still has to be real, not a one-sided print.
   const greenLong =
     token.watchlist && m15 >= 0.1 && m15 < 8 && m5 > -0.2 && h1 > -2 && h1 < 10 && tape >= 0.32;
-  // Flat 15m still takes 5x or 10x when the 5m is green and the print is not one-sided.
+  // Flat 15m still takes 5x or 10x when the 5m is not red and the pool actually printed.
+  const printed = token.flows.m5.buys + token.flows.m5.sells > 0;
   const flatLong =
-    token.watchlist && m15 > -0.25 && m15 < 8 && m5 >= 0.05 && h1 > -3 && h1 < 12 && tape >= 0.32;
+    token.watchlist && printed && m15 > -0.25 && m15 < 8 && m5 > 0 && h1 > -3 && h1 < 12 && tape >= 0.32;
   if (!aligned && !impulse && !rising && !greenLong && !flatLong) return [];
 
   const stopPct = clamp(1.25 + (defensive ? 0.15 : 0), 1.2, 2.6);

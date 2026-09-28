@@ -5,10 +5,15 @@ export const JUPITER_CHART_BARS = 300;
 
 const CHART_URL = "https://datapi.jup.ag/v2/charts";
 
-/** Long-term 4-hour candles for one Solana mint, from Jupiter. */
-export function jupiterChartUrl(mint: string, toMs: number, candles = JUPITER_CHART_BARS): string {
+/** Candles for one Solana mint, from Jupiter. The decision chart is the 4-hour series. */
+export function jupiterChartUrl(
+  mint: string,
+  toMs: number,
+  candles = JUPITER_CHART_BARS,
+  interval = "4_HOUR",
+): string {
   const params = new URLSearchParams({
-    interval: "4_HOUR",
+    interval,
     to: String(toMs),
     candles: String(candles),
     type: "price",

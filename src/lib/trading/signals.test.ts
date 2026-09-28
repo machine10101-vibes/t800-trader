@@ -304,6 +304,25 @@ describe("indicators", () => {
       },
     };
     assert.equal(buildFlowSignals(flatRed5, 70, false, { stance: "mixed", fearGreed: 50, solChange: 0.2 }).length, 0);
+    const quietGreen = {
+      ...flat,
+      flows: {
+        ...flat.flows,
+        m5: flow(0.009, 1167, 907),
+        m15: flow(-0.111, 1167, 907),
+        h1: flow(-0.448, 1167, 907),
+      },
+    };
+    assert.equal(buildFlowSignals(quietGreen, 70, true, { stance: "mixed", fearGreed: 50, solChange: -1.2 }).length, 1);
+    const unprinted = {
+      ...quietGreen,
+      flows: {
+        ...quietGreen.flows,
+        m5: flow(0.009, 0, 0),
+        m15: flow(-0.111, 0, 0),
+      },
+    };
+    assert.equal(buildFlowSignals(unprinted, 70, true, { stance: "mixed", fearGreed: 50, solChange: -1.2 }).length, 0);
   });
 
   it("shorts a falling watchlist name and keeps a candle short", () => {
@@ -372,6 +391,57 @@ describe("indicators", () => {
       solChange: -0.4,
     });
     assert.equal(zebec.length, 0);
+    const mild = {
+      ...token,
+      flows: {
+        m5: flow(-0.11, 52, 48),
+        m15: flow(-0.2, 52, 48),
+        m30: flow(-0.3, 52, 48),
+        h1: flow(-0.5, 52, 48),
+        h6: flow(-0.4, 52, 48),
+        h24: flow(-0.2, 52, 48),
+      },
+    };
+    const mildShort = buildFlowSignals(mild, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    assert.equal(mildShort.length, 1);
+    assert.equal(mildShort[0]?.side, "short");
+    const tooFlat = {
+      ...mild,
+      flows: { ...mild.flows, m15: flow(-0.1, 52, 48) },
+    };
+    assert.equal(buildFlowSignals(tooFlat, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).length, 0);
+    const buySpike = {
+      ...token,
+      flows: {
+        ...token.flows,
+        m5: flow(-0.4, 80, 20),
+        m15: flow(-1.2, 80, 20),
+      },
+    };
+    assert.equal(buildFlowSignals(buySpike, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).length, 0);
+    const techLong = {
+      rsi14: 52,
+      ema9: 100,
+      ema21: 99,
+      vwap: 100,
+      atrPct: 1.2,
+      volumeZ: 0.2,
+      lastClose: 100,
+      extensionPct: 0.4,
+      closeStrength: 0.6,
+      priorHigh: 110,
+      priorLow: 90,
+      barsAboveEma9: 3,
+    } as TechnicalSnapshot;
+    const both = {
+      ...mild,
+      priceUsd: 100,
+      flows: { ...mild.flows, h1: flow(-0.2, 52, 48) },
+    };
+    const structured = buildSignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    assert.equal(structured[0]?.side, "long");
+    const preferred = entrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    assert.equal(preferred[0]?.side, "short");
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

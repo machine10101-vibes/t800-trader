@@ -64,13 +64,16 @@ export const SOL_USDC_POOLS = [
   "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
 ];
 
-/** One deep pool per name the desk trades, so a tick does not list every pool on the mint. */
+/**
+ * One liquid pool per name. The first pool Jupiter lists for Pump, ZEC, and Ray
+ * is a dust pool, and a dust reserve never clears the book screen.
+ */
 export const BOOK_POOLS: { mint: string; pool: string }[] = [
   { mint: SOL_MINT, pool: "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2" },
   { mint: ZBCN_MINT, pool: "FaoZEZFsRS2jJAzg5PXwNjDdA1hDAjDGAkDf4xRfY79w" },
-  { mint: PUMP_MINT, pool: "GLZRp9CSaLeVUf9y3BKfv8b4QnivkL7sY7jTfQk8waQS" },
-  { mint: ZEC_MINT, pool: "BZH1orReudrgfarHGa34W8vCpgRiRSTU7gZN5kSR4SmL" },
-  { mint: RAY_MINT, pool: "AWTtKpyXz71dZaJGLqR2JSGoRY7t86YRui45Ym7rv9NX" },
+  { mint: PUMP_MINT, pool: "2uF4Xh61rDwxnG9woyxsVQP7zuA6kLFpb3NvnRQeoiSd" },
+  { mint: ZEC_MINT, pool: "GTHKH8s82ZR8GTSFZ1dUu6wfdxhy59wpMShxzG5zjiPm" },
+  { mint: RAY_MINT, pool: "2AXXcN6oN9bBT5owwmTH53C7QHUXvhLeu718Kqt8rvY2" },
 ];
 
 export const WATCHLIST: WatchToken[] = [

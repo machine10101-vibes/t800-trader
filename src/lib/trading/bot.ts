@@ -1,7 +1,7 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { GAS_CRO } from "@/lib/cronos/constants";
 import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, foldCandles, printClose, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { candleChangePct, cashExit, foldCandles, keepEntry, printClose, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -182,7 +182,7 @@ export async function tickBot(
         const candles = cachedOhlcv(pos.poolAddress);
         const m15 = live ? live.flows.m15.priceChangePct : candleChangePct(candles ?? [], 15);
         const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
-        const cashTape = m15 !== null && tapeInCash(m15);
+        const cashTape = m15 !== null && cashExit(pos.side, m15);
         if (cashTape) {
           const before = next.positions.length;
           next = await walletExit(next, pos, "fade", executor, blocked);
@@ -342,7 +342,7 @@ export async function tickBot(
             token.researchScore,
             next.config.allowShorts,
             tapeCtx,
-          ).filter(() => !tapeInCash(token.flows.m15.priceChangePct));
+          ).filter((signal) => keepEntry(signal.side, token.flows.m15.priceChangePct));
           signals.push(...found);
           if (!found.length) blocked.push(tickPass(token.symbol, token.flows.m15.priceChangePct));
         }

@@ -3,6 +3,7 @@ import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
+import { applyJupiterTape, loadJupiterTapes } from "./jupiterTape";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
@@ -911,10 +912,14 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     regimePromise,
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
   ]);
-  const candidates = fillActiveBook(
+  let candidates = fillActiveBook(
     crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
     chain,
   );
+  if (chain === "solana") {
+    const tapes = await loadJupiterTapes(candidates.map((candidate) => candidate.mint)).catch(() => new Map());
+    candidates = candidates.map((candidate) => applyJupiterTape(candidate, tapes.get(candidate.mint) ?? null));
+  }
   const stamped = withYields(regime, crossed.yields);
   if (bookComplete(candidates, chain)) markets[chain].cache = { at: Date.now(), candidates, regime: stamped };
   return { candidates, regime: stamped, scanned: candidates.length };
