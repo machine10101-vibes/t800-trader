@@ -37,7 +37,6 @@ import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
-import { tradeTally } from "@/lib/trading/blotter";
 import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
@@ -1380,7 +1379,6 @@ function Overview({
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
-  const tally = tradeTally(fills);
   const open = shownFills(desk.positions, swaps);
   const curve = desk.equityCurve.map((p) => p.equity);
   const marked = trading?.equityUsd || wallet.equityUsd;
@@ -1430,10 +1428,10 @@ function Overview({
               ) : null}
               <div className="mt-3 flex items-end justify-between gap-2">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Trades</div>
-                  <div className="num text-xl">{tally.total}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Open now</div>
+                  <div className="num text-xl">{open.length}</div>
                   <div className="text-[11px] text-[var(--muted)]">
-                    {tally.closed} closed · {tally.opened} opened · hit {winRate.toFixed(0)}%
+                    {fills.length} in the history · hit {winRate.toFixed(0)}%
                   </div>
                 </div>
                 <Spark values={equitySeries} />
@@ -1632,11 +1630,12 @@ function Overview({
           <div className="mt-2">
             <ExecutionLog
               trades={fills}
+              positions={open}
               chain={chain}
               empty={
                 swaps
                   ? copy.noSwaps
-                  : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."
+                  : "No buys yet. Turn the bot on to practice in this browser. Real money is off, so nothing is sent."
               }
             />
           </div>
@@ -1819,7 +1818,6 @@ function BotView({
   const swaps = desk.config.walletSwaps;
   const open = shownFills(desk.positions, swaps);
   const fills = shownFills(desk.trades, swaps);
-  const closedCount = tradeTally(fills).closed;
   return (
     <div className="space-y-4">
       <section className="neon p-4">
@@ -1843,8 +1841,8 @@ function BotView({
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <Stat label="Ticks" value={desk.bot.ticks} sub={desk.bot.lastTickAt ? new Date(desk.bot.lastTickAt).toLocaleTimeString() : "—"} />
           <Stat
-            label="Open / closed"
-            value={`${open.length} / ${closedCount}`}
+            label="Open now"
+            value={open.length}
             sub={desk.bot.lastTickAt ? `Book now · tick ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Book now"}
           />
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
@@ -1952,14 +1950,15 @@ function BotView({
         </div>
         <div className="neon p-5">
           <div className="flex items-center justify-between">
-            <Label>Trades</Label>
-            <span className="text-[11px] text-[var(--faint)]">{fills.length}</span>
+            <Label>History</Label>
+            <span className="text-[11px] text-[var(--faint)]">{open.length} open now</span>
           </div>
           <div className="mt-3">
             <ExecutionLog
               trades={fills}
+              positions={open}
               chain={chain}
-              empty={swaps ? "No signed fill yet. A swap from the trading key lands in this list." : "No trades yet."}
+              empty={swaps ? "No real buys yet. A buy from the trading wallet shows up here." : "No buys yet."}
             />
           </div>
         </div>
@@ -2227,9 +2226,9 @@ function Book({
         </div>
       </div>
       <div className="neon p-4">
-        <Label>Executions</Label>
+        <Label>History</Label>
         <div className="mt-3">
-          <ExecutionLog trades={fills} chain={chain} empty={swaps ? copy.noTickets : "No tickets."} />
+          <ExecutionLog trades={fills} positions={open} chain={chain} empty={swaps ? "No real buys yet." : "No buys yet."} />
         </div>
       </div>
     </div>

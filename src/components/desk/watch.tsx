@@ -190,12 +190,13 @@ export function WatchScreen({
               )}
             </section>
             <section className="neon p-4 sm:p-5">
-              <Label>Trades</Label>
+              <Label>History</Label>
               <div className="mt-3">
                 <ExecutionLog
                   trades={view.trades}
+                  positions={view.positions}
                   chain={chain}
-                  empty="No swaps stored for this address on this browser."
+                  empty="No buys saved for this address on this browser."
                 />
               </div>
             </section>

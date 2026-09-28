@@ -1,8 +1,8 @@
 "use client";
 
-import { CHAIN_COPY, type ChainId } from "@/lib/chain";
+import type { ChainId } from "@/lib/chain";
 import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
-import { VENUE_OPTIONS, venueSummary } from "@/lib/market/venues";
+import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -20,7 +20,6 @@ export function SettingsPanel({
   onSave: (config: Partial<BotConfig>) => void;
   onReset: () => void;
 }) {
-  const copy = CHAIN_COPY[chain];
   const [local, setLocal] = useState(() => normalizeConfig(desk.config));
   const saved = useMemo(() => normalizeConfig(desk.config), [desk.config]);
   const dirty = JSON.stringify(local) !== JSON.stringify(saved);
@@ -36,46 +35,47 @@ export function SettingsPanel({
       <div className="neon p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <h2 className="text-2xl font-medium">Desk policy</h2>
+            <h2 className="text-2xl font-medium">Settings</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              Stop loss and take profit are a percent of the ticket price. They lock on when the ticket opens. A fill
-              sells that ticket and does not start a new one. Everything else is under All options. {copy.settingsReset}
+              Choose how far a buy can fall before it sells, and how far it has to rise before it sells. Those levels are
+              set when the buy happens. A sale does not start a new buy. Everything else is under More settings.
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             <button disabled={busy || !dirty} onClick={() => onSave(local)} className="btn btn-ink w-full sm:w-auto">
-              {dirty ? "Save policy" : "Policy saved"}
+              {dirty ? "Save changes" : "Saved"}
             </button>
             <button
               disabled={busy}
               onClick={() => setLocal(normalizeConfig({ ...DEFAULT_CONFIG, startingEquity: local.startingEquity }))}
               className="btn btn-ghost w-full sm:w-auto"
             >
-              Restore defaults
+              Reset these settings
             </button>
             <button disabled={busy} onClick={onReset} className="btn btn-ghost w-full sm:w-auto">
-              Reset wallet book
+              Clear history
             </button>
           </div>
         </div>
         <p className="mt-4 text-xs leading-5 text-[var(--faint)]">
-          Scan {local.scanSeconds}s · {local.maxPositions} positions · {local.maxRiskPerTradePct.toFixed(1)}% risk · day stop{" "}
-          {local.dailyLossLimitPct}% · confidence {local.minConfidence}
-          {local.allowShorts ? " · shorts on" : " · shorts off"}
-          {local.allowMemes ? " · memes on" : " · memes off"}
-          {local.oneTicketPerTick ? " · two tickets per scan" : " · several tickets per scan"}
+          Checks every {local.scanSeconds}s · up to {local.maxPositions} coins at once · one loss can cost{" "}
+          {local.maxRiskPerTradePct.toFixed(1)}% · stops for the day after a {local.dailyLossLimitPct}% loss · needs a score of{" "}
+          {local.minConfidence}
+          {local.allowShorts ? " · bets against the price are on" : " · bets against the price are off"}
+          {local.allowMemes ? " · meme coins on" : " · meme coins off"}
+          {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
-          {chain === "cronos" ? "VVS Finance" : venueSummary(local.venues)}
-          {local.walletSwaps ? " · LIVE swaps" : " · PAPER fills"}
-          {local.killSwitch ? " · kill switch" : ""}
-          {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n}x`).join(" ")}` : " · spot only"}
+          {chain === "cronos" ? "VVS Finance" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
+          {local.walletSwaps ? " · real money" : " · practice"}
+          {local.killSwitch ? " · emergency stop" : ""}
+          {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : " · no extra size"}
         </p>
       </div>
 
-      <Section title="Ticket" hint="These three are the whole trade. Stop and take profit are percents of the ticket price, locked at entry.">
+      <Section title="Each buy" hint="These three are the main choices. The sell prices are a percent of what the buy cost.">
         <Field
-          label="Stop loss"
-          hint="Percent of the ticket price. A 5% stop on a $100 ticket sells after a $5 loss."
+          label="Sell if it falls"
+          hint="Percent of the buy. A 5% drop on a $100 buy sells after a $5 loss."
           suffix="%"
           min={0.4}
           max={15}
@@ -84,8 +84,8 @@ export function SettingsPanel({
           onChange={(v) => set({ stopLossPct: v })}
         />
         <Field
-          label="Take profit"
-          hint="Percent of the ticket price. A 4% target on a $100 ticket sells after a $4 gain."
+          label="Sell if it rises"
+          hint="Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
           suffix="%"
           min={0.5}
           max={30}
@@ -94,8 +94,8 @@ export function SettingsPanel({
           onChange={(v) => set({ targetProfitPct: v })}
         />
         <Field
-          label="Max ticket"
-          hint="Largest LIVE ticket, in dollars. The default cap is $250. Type 5 and it stays at $5."
+          label="Biggest buy"
+          hint="The most one real buy can spend. The starting limit is $250. Type 5 and it stays at $5."
           kind="number"
           suffix=" USD"
           min={5}
@@ -111,60 +111,66 @@ export function SettingsPanel({
       </Section>
 
       <details className="neon p-5 sm:p-6">
-        <summary className="cursor-pointer text-lg font-medium">All options</summary>
+        <summary className="cursor-pointer text-lg font-medium">More settings</summary>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-          Scan, venues, sizing, and the rest of the policy. Saving still writes every control, including the ones above.
+          How often it checks, where it buys, and how big each buy can be. Save changes writes these too.
         </p>
         <div className="mt-4 space-y-4">
       <Section
-        title="Execution"
-        hint="PAPER is the default. LIVE still needs you to type LIVE in the confirm sheet this session. Arming then asks the wallet to fund a trading key; that key sends Jupiter swaps. A reload locks LIVE again until you re-confirm."
+        title="Real money or practice"
+        hint="Practice is the normal mode. Real money asks you to type the word LIVE once each visit, so a refresh cannot turn it on by accident. Turning the bot on then asks the wallet to set money aside for fees."
       >
         <Toggle
-          label="LIVE Jupiter swaps"
+          label="Use real money"
           hint={
             local.killSwitch
-              ? "Kill switch is on. Turn LIVE back on from the confirm sheet."
-              : copy.settingsWallet
+              ? "The emergency stop is on. Turn real money back on from the confirm box."
+              : chain === "cronos"
+                ? "On sends real buys and sells from a wallet key in this browser. Off only practices, and no money moves."
+                : "On sends real buys and sells from a wallet key in this browser. Off only practices, and no money moves."
           }
           checked={local.walletSwaps}
           onChange={(v) => set({ walletSwaps: v, executionMode: v ? "live" : "paper", killSwitch: v ? false : local.killSwitch })}
         />
         <Field
-          label="Live slippage"
-          hint="Jupiter quote and Ultra close slippage."
+          label="Price wiggle room"
+          hint="How far the price can move while the buy or sell goes through. 80 is about 0.80%."
           value={local.slippageBps}
           min={10}
           max={200}
           step={10}
-          suffix=" bps"
+          suffix={` · ${(local.slippageBps / 100).toFixed(2)}%`}
           onChange={(v) => set({ slippageBps: v })}
         />
         <Field
-          label="Min SOL for fees"
-          hint="LIVE buys wait until the wallet has at least this much SOL."
+          label={chain === "cronos" ? "CRO kept for fees" : "SOL kept for fees"}
+          hint="Real buys wait until the wallet has at least this much left for network fees."
           value={local.minSolForFees}
           min={0.006}
           max={0.08}
           step={0.002}
-          suffix=" SOL"
+          suffix={chain === "cronos" ? " CRO" : " SOL"}
           onChange={(v) => set({ minSolForFees: v })}
         />
         <Toggle
-          label="Kill switch"
-          hint="Stops new LIVE tickets and flips the book to PAPER. Signed tickets can still be closed by hand."
+          label="Emergency stop"
+          hint="Stops new real buys and switches back to practice. You can still sell what you already hold."
           checked={local.killSwitch}
           onChange={(v) => set({ killSwitch: v, ...(v ? { walletSwaps: false, executionMode: "paper" as const } : {}) })}
         />
       </Section>
 
       <Section
-        title="Multiplier"
-        hint={copy.settingsMultiplier}
+        title="Bigger buys"
+        hint={
+          chain === "cronos"
+            ? "When both are on, a stronger buy uses 10 times the money. Below about $10 it stays a normal buy."
+            : "When both are on, a stronger buy uses 10 times the money. Below about $10 it stays a normal buy. A bigger buy can be wiped out by a smaller price drop."
+        }
       >
         <Toggle
-          label="5x"
-          hint={copy.settingsFive}
+          label="5 times the money"
+          hint="Puts up about $10 and buys five times that much. A small drop can wipe it out."
           checked={local.multipliers.includes(5)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
@@ -172,8 +178,8 @@ export function SettingsPanel({
           }}
         />
         <Toggle
-          label="10x"
-          hint={copy.settingsTen}
+          label="10 times the money"
+          hint="Puts up about $10 and buys ten times that much. An even smaller drop can wipe it out."
           checked={local.multipliers.includes(10)}
           onChange={(on) => {
             const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
@@ -184,26 +190,26 @@ export function SettingsPanel({
 
       {chain === "cronos" ? (
         <Section
-          title="Venue"
-          hint="CRO buys and sells are sent to the VVS Finance router. The pool is WCRO/USDC. A buy spends USDC. A sell returns USDC."
+          title="Where it buys"
+          hint="Cronos buys and sells go through VVS Finance. A buy spends USDC. A sell turns the coin back into USDC."
         >
           <Toggle
             label="VVS Finance"
-            hint="On for every Cronos swap. The trading key calls the VVS router, not a wrap."
+            hint="This stays on. Every Cronos buy and sell uses VVS."
             checked
             onChange={() => {}}
           />
         </Section>
       ) : (
         <Section
-          title="Venue"
-          hint="New tickets only open on pools from the platforms you leave on. An open ticket stays until it exits, even if you turn its venue off."
+          title="Where it buys"
+          hint="New buys only use the places you leave on. A buy you already hold stays until it sells, even if you turn that place off."
         >
           {VENUE_OPTIONS.map((venue) => (
             <Toggle
               key={venue.id}
               label={venue.label}
-              hint={venue.hint}
+              hint={plainVenueHint(venue.id, venue.hint)}
               checked={local.venues.includes(venue.id)}
               onChange={(on) => {
                 const venues = on ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
@@ -213,17 +219,17 @@ export function SettingsPanel({
           ))}
           {local.venues.length === 0 ? (
             <p className="text-sm text-[var(--crimson)] md:col-span-2">
-              No venue is on. The next scan will not open a ticket.
+              Nothing is turned on, so the next check will not buy anything.
             </p>
           ) : null}
         </Section>
       )}
 
-      <Section title="Cadence" hint="How often the bot looks, and how many new tickets a single scan may add.">
+      <Section title="How often it checks" hint="How often it looks for a new buy, and how many new buys one check can add.">
         <Field
-          label="Scan every"
-          hint="The armed bot wakes on this interval. An open ticket is checked every 4 seconds so a stop or a winner is not left sitting."
-          suffix="s"
+          label="Check every"
+          hint="While the bot is on, it looks this often. A coin you already hold is checked every 4 seconds so a sale is not left waiting."
+          suffix=" seconds"
           min={4}
           max={60}
           step={1}
@@ -231,9 +237,9 @@ export function SettingsPanel({
           onChange={(v) => set({ scanSeconds: v })}
         />
         <Field
-          label="Cooldown after a stop"
-          hint="Minutes a mint stays dark after a stop, time-out, or risk-off exit. The live book waits at most 8 minutes so 5x and 10x are not parked for the hour. Zero turns the cooldown off."
-          suffix="m"
+          label="Wait after a loss"
+          hint="Minutes to wait before buying that coin again after a loss. Zero means no wait."
+          suffix=" minutes"
           min={0}
           max={180}
           step={5}
@@ -241,23 +247,23 @@ export function SettingsPanel({
           onChange={(v) => set({ cooldownMinutes: v })}
         />
         <Toggle
-          label="Two new tickets per scan"
-          hint="On lets SOL and the second name both open on one scan. A third ticket waits. Off fills until a limit stops it."
+          label="Two new buys per check"
+          hint="On allows two new buys each time it checks. A third waits. Off keeps buying until a limit stops it."
           checked={local.oneTicketPerTick}
           onChange={(v) => set({ oneTicketPerTick: v })}
         />
         <Toggle
-          label="Scratch a long that is not working"
-          hint="If a long is still under +0.25R and both the 5m and 15m flip hard, close it."
+          label="Sell a buy that is going nowhere"
+          hint="If a buy is still barely up and the short-term price turns down hard, sell it."
           checked={local.scratchEnabled}
           onChange={(v) => set({ scratchEnabled: v })}
         />
       </Section>
 
-      <Section title="Universe" hint="Names that fail these screens never reach the signal list.">
+      <Section title="Which coins it looks at" hint="Coins that miss these checks are skipped.">
         <Field
-          label="Min liquidity"
-          hint="Pool reserves below this are ignored. Watchlist names still pass a lower floor."
+          label="Money sitting in the pool"
+          hint="Skip pools with less than this much money in them. Coins already on the watch list can pass with less."
           suffix="k"
           min={20}
           max={1000}
@@ -266,8 +272,8 @@ export function SettingsPanel({
           onChange={(v) => set({ minLiquidityUsd: v * 1000 })}
         />
         <Field
-          label="Min 24h volume"
-          hint="Quiet pools stay off the desk."
+          label="Traded in the last day"
+          hint="Skip coins that almost nobody traded today."
           suffix="k"
           min={10}
           max={1000}
@@ -276,9 +282,9 @@ export function SettingsPanel({
           onChange={(v) => set({ minVolume24hUsd: v * 1000 })}
         />
         <Field
-          label="Min pool age"
-          hint="Hours since the pool was created. Zero allows new pools. Watchlist names skip this check."
-          suffix="h"
+          label="Pool has to be this old"
+          hint="Hours since the pool was created. Zero allows brand new pools."
+          suffix=" hours"
           min={0}
           max={72}
           step={1}
@@ -286,8 +292,8 @@ export function SettingsPanel({
           onChange={(v) => set({ minAgeHours: v })}
         />
         <Field
-          label="Min confidence"
-          hint="Signals under this score are blocked. Memes and unknown sectors need four points more."
+          label="How sure it has to be"
+          hint="Skip a buy when the score is below this. Meme coins need a slightly higher score."
           min={50}
           max={85}
           step={1}
@@ -295,8 +301,8 @@ export function SettingsPanel({
           onChange={(v) => set({ minConfidence: v })}
         />
         <Field
-          label="Defensive breakout score"
-          hint="When the tape is defensive, a breakout needs at least this research score."
+          label="Extra caution in a shaky market"
+          hint="When the market looks shaky, a buy has to score at least this high."
           min={50}
           max={90}
           step={1}
@@ -305,24 +311,24 @@ export function SettingsPanel({
         />
         <div className="grid gap-3">
           <Toggle
-            label="Allow simulated shorts"
-            hint="Shorts still stay off when the tape is defensive."
+            label="Allow bets that the price will fall"
+            hint="These stay in practice. They turn off when the market looks shaky."
             checked={local.allowShorts}
             onChange={(v) => set({ allowShorts: v })}
           />
           <Toggle
-            label="Allow screened memes"
-            hint="Off drops meme names that are not on the watchlist."
+            label="Allow meme coins"
+            hint="Off skips meme coins that are not already on the watch list."
             checked={local.allowMemes}
             onChange={(v) => set({ allowMemes: v })}
           />
         </div>
       </Section>
 
-      <Section title="Limits" hint="How much of the book can be at risk at once.">
+      <Section title="Safety limits" hint="How much can be at risk at the same time.">
         <Field
-          label="Max positions"
-          hint="Open tickets, including ones you entered by hand."
+          label="Most coins at once"
+          hint="Includes buys you made by hand."
           min={1}
           max={8}
           step={1}
@@ -330,8 +336,8 @@ export function SettingsPanel({
           onChange={(v) => set({ maxPositions: v })}
         />
         <Field
-          label="Max per sector"
-          hint="Stops a single sector from filling the book."
+          label="Most from one group"
+          hint="Stops one kind of coin from filling the whole list."
           min={1}
           max={4}
           step={1}
@@ -339,8 +345,8 @@ export function SettingsPanel({
           onChange={(v) => set({ maxPerSector: v })}
         />
         <Field
-          label="Pause after losses"
-          hint="Straight losing closes before new risk pauses. Zero disables the streak pause."
+          label="Pause after this many losses"
+          hint="Losses in a row before new buys pause. Zero means it does not pause."
           min={0}
           max={8}
           step={1}
@@ -348,8 +354,8 @@ export function SettingsPanel({
           onChange={(v) => set({ lossStreakPause: v })}
         />
         <Field
-          label="Daily loss limit"
-          hint="New tickets stop once today's drawdown reaches this percent of the day-start equity."
+          label="Stop for the day after this loss"
+          hint="New buys stop once today's loss reaches this percent of where the day started."
           suffix="%"
           min={2}
           max={15}
@@ -358,8 +364,8 @@ export function SettingsPanel({
           onChange={(v) => set({ dailyLossLimitPct: v })}
         />
         <Field
-          label="Day budget used"
-          hint="Stop adding risk once this share of the daily loss limit is already used."
+          label="How much of today's loss budget to use"
+          hint="Stop new buys once this much of the daily loss limit is already used."
           suffix="%"
           min={50}
           max={100}
@@ -368,17 +374,17 @@ export function SettingsPanel({
           onChange={(v) => set({ dayBudgetPct: v })}
         />
         <Toggle
-          label="Micro books ride two tickets"
-          hint="A book under $50 can hold SOL and the second name at 5x or 10x. A third ticket waits so a small wallet is not split into dust."
+          label="Small wallets hold two coins"
+          hint="Under $50, it can hold two coins. A third waits so a small wallet is not split into tiny pieces."
           checked={local.microOneTicket}
           onChange={(v) => set({ microOneTicket: v })}
         />
       </Section>
 
-      <Section title="Sizing" hint="How large the next ticket is allowed to be.">
+      <Section title="How big each buy is" hint="How much the next buy is allowed to spend.">
         <Field
-          label="Risk per trade"
-          hint="Percent of equity the stop is allowed to lose. Defensive tape and a loss streak still scale this down."
+          label="How much one loss can cost"
+          hint="Percent of your balance one loss is allowed to take. A shaky market and a losing streak make this smaller."
           suffix="%"
           min={0.3}
           max={2.5}
@@ -387,11 +393,11 @@ export function SettingsPanel({
           onChange={(v) => set({ maxRiskPerTradePct: v })}
         />
         <Field
-          label="Cash used per ticket"
+          label="Cash each buy can use"
           hint={
             local.autoCash
-              ? "Automatic sizing is on: books under $50 may use 92% of cash, larger books 35%."
-              : "Share of cash the next ticket may consume."
+              ? "Automatic size is on. Under $50 it may use 92% of the cash. Above that, 35%."
+              : "The share of cash the next buy may use."
           }
           suffix="%"
           min={20}
@@ -402,18 +408,18 @@ export function SettingsPanel({
           onChange={(v) => set({ cashPct: v })}
         />
         <Toggle
-          label="Automatic cash sizing"
-          hint="On uses 92% for a book under $50 and 35% above that. Off obeys the cash slider on every book."
+          label="Pick the size for me"
+          hint="On uses 92% under $50 and 35% above that. Off uses the slider every time."
           checked={local.autoCash}
           onChange={(v) => set({ autoCash: v })}
         />
       </Section>
 
-      <Section title="Management" hint="What the bot does with a ticket after the preset stop and take profit.">
+      <Section title="After a buy is open" hint="What happens after the sell-if-it-falls and sell-if-it-rises prices are set. The numbers are how many times your allowed loss the price has moved in your favor. 1 means the gain matches the loss you were willing to take.">
         <Field
-          label="Breakeven at"
-          hint="Move the stop to a small profit once the trade reaches this R multiple."
-          suffix="R"
+          label="Protect a small gain after"
+          hint="Once the gain reaches this many times your allowed loss, the sell-if-it-falls price moves up to a small gain."
+          suffix="×"
           min={0.3}
           max={2}
           step={0.05}
@@ -421,9 +427,9 @@ export function SettingsPanel({
           onChange={(v) => set({ beR: v })}
         />
         <Field
-          label="Scale out at"
-          hint="Sell part of a winner once it reaches this R multiple."
-          suffix="R"
+          label="Sell part of a winner after"
+          hint="Sell some of a winner once the gain reaches this many times your allowed loss."
+          suffix="×"
           min={0.5}
           max={3}
           step={0.05}
@@ -431,8 +437,8 @@ export function SettingsPanel({
           onChange={(v) => set({ scaleAtR: v })}
         />
         <Field
-          label="Scale size"
-          hint="Percent of the ticket closed on the scale-out."
+          label="How much of the winner to sell"
+          hint="Percent of the buy to sell when it takes that partial profit."
           suffix="%"
           min={25}
           max={75}
@@ -441,9 +447,9 @@ export function SettingsPanel({
           onChange={(v) => set({ scaleFractionPct: v })}
         />
         <Field
-          label="Lock profit at"
-          hint="Once the trade reaches this R, the stop locks the profit R below."
-          suffix="R"
+          label="Lock in profit after"
+          hint="Once the gain reaches this many times your allowed loss, the sell price locks in a gain."
+          suffix="×"
           min={1}
           max={4}
           step={0.1}
@@ -451,9 +457,9 @@ export function SettingsPanel({
           onChange={(v) => set({ lockAtR: v })}
         />
         <Field
-          label="Locked profit"
-          hint="R multiple the stop protects after the lock level."
-          suffix="R"
+          label="How much profit to lock in"
+          hint="The gain that stays protected after the lock, in times your allowed loss."
+          suffix="×"
           min={0.05}
           max={1.5}
           step={0.05}
@@ -461,9 +467,9 @@ export function SettingsPanel({
           onChange={(v) => set({ lockProfitR: v })}
         />
         <Field
-          label="Stale cut"
-          hint="Close a non-meme ticket that is still under +0.15R after this many minutes."
-          suffix="m"
+          label="Sell if nothing happens"
+          hint="Sell a normal coin that is still barely up after this many minutes."
+          suffix=" minutes"
           min={10}
           max={240}
           step={5}
@@ -471,9 +477,9 @@ export function SettingsPanel({
           onChange={(v) => set({ staleMin: v })}
         />
         <Field
-          label="Meme stale cut"
-          hint="Same stale rule for meme tickets."
-          suffix="m"
+          label="Same rule for meme coins"
+          hint="Sell a meme coin that is still barely up after this many minutes."
+          suffix=" minutes"
           min={8}
           max={120}
           step={1}
@@ -481,9 +487,9 @@ export function SettingsPanel({
           onChange={(v) => set({ memeStaleMin: v })}
         />
         <Field
-          label="Time stop"
-          hint="Hard close for a non-meme ticket, even if it is working."
-          suffix="m"
+          label="Sell after this long"
+          hint="Sell a normal coin after this many minutes, even if it is working."
+          suffix=" minutes"
           min={30}
           max={360}
           step={10}
@@ -491,9 +497,9 @@ export function SettingsPanel({
           onChange={(v) => set({ timeCapMin: v })}
         />
         <Field
-          label="Meme time stop"
-          hint="Hard close for a meme ticket."
-          suffix="m"
+          label="Sell meme coins after"
+          hint="Sell a meme coin after this many minutes, even if it is working."
+          suffix=" minutes"
           min={10}
           max={180}
           step={5}
@@ -514,6 +520,18 @@ export function SettingsPanel({
       </div>
     </div>
   );
+}
+
+function plainVenueHint(id: string, fallback: string): string {
+  const hints: Record<string, string> = {
+    raydium: "Buys can use Raydium.",
+    orca: "Buys can use Orca.",
+    meteora: "Buys can use Meteora.",
+    jupiter: "Buys can use Jupiter. The trade still settles on Raydium, Orca, or Meteora.",
+    pump: "Buys can use Pump.fun coins.",
+    other: "Buys can use any other pool, including Phoenix and Lifinity.",
+  };
+  return hints[id] ?? fallback;
 }
 
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
