@@ -1,6 +1,7 @@
 "use client";
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
+import { ExecutionLog } from "@/components/desk/executions";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
@@ -36,6 +37,7 @@ import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis, TapeCard
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
+import { tradeTally } from "@/lib/trading/blotter";
 import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
@@ -1378,6 +1380,7 @@ function Overview({
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
+  const tally = tradeTally(fills);
   const open = shownFills(desk.positions, swaps);
   const curve = desk.equityCurve.map((p) => p.equity);
   const marked = trading?.equityUsd || wallet.equityUsd;
@@ -1428,9 +1431,9 @@ function Overview({
               <div className="mt-3 flex items-end justify-between gap-2">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Trades</div>
-                  <div className="num text-xl">{swaps ? fills.length : desk.portfolio.tradeCount}</div>
+                  <div className="num text-xl">{tally.total}</div>
                   <div className="text-[11px] text-[var(--muted)]">
-                    {swaps ? `${stats.closedTrades} signed` : `${desk.portfolio.winCount}W / ${desk.portfolio.lossCount}L`} · hit {winRate.toFixed(0)}%
+                    {tally.closed} closed · {tally.opened} opened · hit {winRate.toFixed(0)}%
                   </div>
                 </div>
                 <Spark values={equitySeries} />
@@ -1626,34 +1629,26 @@ function Overview({
         </div>
         <div className="neon p-3">
           <Label>Execution log</Label>
-          {fills.length === 0 ? (
-            <div className="space-y-2 text-sm text-[var(--muted)]">
-              <p>
-                {swaps
+          <div className="mt-2">
+            <ExecutionLog
+              trades={fills}
+              chain={chain}
+              empty={
+                swaps
                   ? copy.noSwaps
-                  : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."}
-              </p>
+                  : "No tickets yet. Arm the bot to paper-trade this browser. Wallet swaps are off, so nothing is broadcast."
+              }
+            />
+          </div>
+          {desk.signals.length ? (
+            <div className="mt-3 space-y-1 text-[11px] text-[var(--faint)]">
               {desk.signals.slice(0, 4).map((s) => (
-                <p key={s.id} className="font-mono text-[11px]">
-                  SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
+                <p key={s.id}>
+                  Signal {s.symbol} {s.side} · {s.reason} · conf {s.confidence.toFixed(0)}
                 </p>
               ))}
             </div>
-          ) : (
-            <div className="desk-scroll max-h-56 space-y-2 overflow-y-auto break-words font-mono text-[11px] text-[var(--muted)]">
-              {fills.slice(0, 12).map((t) => (
-                <div key={t.id}>
-                  {new Date(t.at).toLocaleTimeString()} {t.action} {t.symbol} {t.side} {priceFmt(t.price)} {t.reason}
-                  {t.signature ? ` ${t.signature.slice(0, 8)}` : ""}
-                </div>
-              ))}
-              {desk.signals.slice(0, 8).map((s) => (
-                <div key={s.id}>
-                  SIG {s.symbol} {s.side} {s.reason} conf {s.confidence.toFixed(0)}
-                </div>
-              ))}
-            </div>
-          )}
+          ) : null}
           <div className="mt-4 space-y-2">
             {desk.research.slice(0, 4).map((r) => (
               <button
@@ -1823,7 +1818,8 @@ function BotView({
 }) {
   const swaps = desk.config.walletSwaps;
   const open = shownFills(desk.positions, swaps);
-  const closed = shownFills(desk.trades, swaps).filter((trade) => trade.action === "close");
+  const fills = shownFills(desk.trades, swaps);
+  const closedCount = tradeTally(fills).closed;
   return (
     <div className="space-y-4">
       <section className="neon p-4">
@@ -1848,7 +1844,7 @@ function BotView({
           <Stat label="Ticks" value={desk.bot.ticks} sub={desk.bot.lastTickAt ? new Date(desk.bot.lastTickAt).toLocaleTimeString() : "—"} />
           <Stat
             label="Open / closed"
-            value={`${open.length} / ${closed.length}`}
+            value={`${open.length} / ${closedCount}`}
             sub={desk.bot.lastTickAt ? `Book now · tick ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Book now"}
           />
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
@@ -1956,31 +1952,16 @@ function BotView({
         </div>
         <div className="neon p-5">
           <div className="flex items-center justify-between">
-            <Label>Closed tickets</Label>
-            <span className="text-[11px] text-[var(--faint)]">{closed.length}</span>
+            <Label>Trades</Label>
+            <span className="text-[11px] text-[var(--faint)]">{fills.length}</span>
           </div>
-          {closed.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">
-              {swaps ? "No signed close yet. A sell from the trading key lands in this list." : "No closed ticket yet."}
-            </p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {closed.slice(0, 12).map((trade) => (
-                <div key={trade.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
-                  <div>
-                    <div className="font-medium">
-                      {trade.symbol} <span className="text-[11px] text-[var(--faint)]">{trade.reason}</span>
-                    </div>
-                    <div className="text-[11px] text-[var(--muted)]">
-                      {new Date(trade.at).toLocaleTimeString()} · {priceFmt(trade.price)}
-                    </div>
-                    <div className="text-[10px]">{txLink(trade.signature)}</div>
-                  </div>
-                  <Tone value={trade.pnlUsd ?? 0}>{trade.pnlUsd === null ? "—" : usd(trade.pnlUsd)}</Tone>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="mt-3">
+            <ExecutionLog
+              trades={fills}
+              chain={chain}
+              empty={swaps ? "No signed fill yet. A swap from the trading key lands in this list." : "No trades yet."}
+            />
+          </div>
         </div>
       </section>
       <section className="grid gap-4 lg:grid-cols-2">
@@ -2245,68 +2226,10 @@ function Book({
         </table>
         </div>
       </div>
-      <div className="neon">
-        <div className="px-4 pt-4">
-          <Label>Tickets</Label>
-        </div>
-        <div className="space-y-2 px-3 pb-3 md:hidden">
-          {fills.length === 0 ? (
-            <p className="px-1 py-3 text-sm text-[var(--muted)]">{swaps ? copy.noTickets : "No tickets."}</p>
-          ) : (
-            fills.slice(0, 40).map((t) => (
-              <div key={t.id} className="rounded-2xl border border-[var(--line)] p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-medium">
-                      {t.symbol} <span className="text-[11px] text-[var(--faint)]">{t.action} · {t.side}</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-[var(--muted)]">{new Date(t.at).toLocaleTimeString()} · {priceFmt(t.price)}</div>
-                  </div>
-                  <div className="shrink-0">{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</div>
-                </div>
-                <p className="mt-2 break-words text-xs leading-5 text-[var(--muted)]">{t.reason}</p>
-                <div className="mt-2">{txLink(t.signature, chain)}</div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-            <tr>
-              <th className="px-4 py-2">Time</th>
-              <th>Sym</th>
-              <th>Action</th>
-              <th>Side</th>
-              <th>Price</th>
-              <th>P&L</th>
-              <th>Why</th>
-              <th>Wallet</th>
-            </tr>
-          </thead>
-          <tbody>
-            {fills.length === 0 ? (
-              <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={8}>
-                  {swaps ? copy.noTickets : "No tickets."}
-                </td>
-              </tr>
-            ) : (
-              fills.slice(0, 40).map((t) => (
-                <tr key={t.id} className="border-t border-[var(--line)]">
-                  <td className="num px-4 py-3 text-[var(--muted)]">{new Date(t.at).toLocaleTimeString()}</td>
-                  <td>{t.symbol}</td>
-                  <td>{t.action}</td>
-                  <td>{t.side}</td>
-                  <td className="num">{priceFmt(t.price)}</td>
-                  <td>{t.pnlUsd === null ? "—" : <Tone value={t.pnlUsd}>{usd(t.pnlUsd)}</Tone>}</td>
-                  <td className="text-[var(--muted)]">{t.reason}</td>
-                  <td>{txLink(t.signature, chain)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="neon p-4">
+        <Label>Executions</Label>
+        <div className="mt-3">
+          <ExecutionLog trades={fills} chain={chain} empty={swaps ? copy.noTickets : "No tickets."} />
         </div>
       </div>
     </div>

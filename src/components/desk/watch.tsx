@@ -1,6 +1,7 @@
 "use client";
 
-import { CHAIN_COPY, txUrl, type ChainId } from "@/lib/chain";
+import { ExecutionLog } from "@/components/desk/executions";
+import { CHAIN_COPY, type ChainId } from "@/lib/chain";
 import { buildMonitor, type MonitorView } from "@/lib/monitor";
 import { bookStorageKey, peekBook } from "@/lib/store";
 import { readBalances } from "@/lib/solana/wallet";
@@ -190,67 +191,13 @@ export function WatchScreen({
             </section>
             <section className="neon p-4 sm:p-5">
               <Label>Trades</Label>
-              {view.trades.length === 0 ? (
-                <p className="mt-2 text-sm text-[var(--muted)]">No signed swaps stored for this address on this browser.</p>
-              ) : (
-                <>
-                <div className="mt-3 space-y-2 md:hidden">
-                  {view.trades.slice(0, 20).map((trade) => (
-                    <div key={trade.id} className="rounded-2xl border border-[var(--line)] p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-medium">
-                            {trade.symbol} <span className="text-[11px] text-[var(--faint)]">{trade.action}</span>
-                          </div>
-                          <div className="mt-1 text-[11px] text-[var(--muted)]">{new Date(trade.at).toLocaleString()}</div>
-                        </div>
-                        <div className="shrink-0">{trade.pnlUsd === null ? "—" : <Tone value={trade.pnlUsd}>{usd(trade.pnlUsd)}</Tone>}</div>
-                      </div>
-                      <p className="mt-2 break-words text-xs leading-5 text-[var(--muted)]">{trade.reason}</p>
-                      {trade.signature ? (
-                        <a className="num mt-2 inline-block text-[11px] text-[var(--mint)]" href={txUrl(chain, trade.signature)} target="_blank" rel="noreferrer">
-                          {CHAIN_COPY[chain].explorerName}
-                        </a>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                <div className="hidden overflow-x-auto md:block">
-                <table className="mt-3 w-full min-w-[640px] text-left text-sm">
-                  <thead className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                    <tr>
-                      <th className="py-2">When</th>
-                      <th>Action</th>
-                      <th>Symbol</th>
-                      <th>Reason</th>
-                      <th>P&L</th>
-                      <th>Wallet</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.trades.slice(0, 20).map((trade) => (
-                      <tr key={trade.id} className="border-t border-[var(--line)]">
-                        <td className="py-3 text-[var(--muted)]">{new Date(trade.at).toLocaleString()}</td>
-                        <td>{trade.action}</td>
-                        <td className="font-medium">{trade.symbol}</td>
-                        <td className="text-[var(--muted)]">{trade.reason}</td>
-                        <td>
-                          {trade.signature ? (
-                            <a className="num text-[var(--mint)]" href={txUrl(chain, trade.signature)} target="_blank" rel="noreferrer">
-                              tx
-                            </a>
-                          ) : (
-                            <span className="text-[var(--faint)]">Simulated</span>
-                          )}
-                        </td>
-                        <td>{trade.pnlUsd === null ? "—" : <Tone value={trade.pnlUsd}>{usd(trade.pnlUsd)}</Tone>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-                </>
-              )}
+              <div className="mt-3">
+                <ExecutionLog
+                  trades={view.trades}
+                  chain={chain}
+                  empty="No swaps stored for this address on this browser."
+                />
+              </div>
             </section>
           </>
         )}
