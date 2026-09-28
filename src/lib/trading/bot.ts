@@ -32,7 +32,7 @@ import {
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
 import { entrySignals, snapshotTechnical } from "./signals";
-import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition } from "./leverage";
+import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
@@ -69,8 +69,7 @@ async function walletExit(
   executor: ChainExecutor | undefined,
   blocked: string[],
 ): Promise<AppState> {
-  const onChain = Boolean(pos.signature) && (pos.side === "long" || (pos.side === "short" && (pos.leverage ?? 1) > 1));
-  if (onChain) {
+  if (signedOnChain(pos)) {
     if (!executor) {
       blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the sell`);
       return state;
@@ -85,7 +84,10 @@ async function walletExit(
       return state;
     }
   }
-  if (state.config.walletSwaps && !pos.signature) return state;
+  if (state.config.walletSwaps && !pos.signature) {
+    if (pos.side === "short") return closePosition(state, pos.id, pos.markPrice, reason);
+    return state;
+  }
   return closePosition(state, pos.id, pos.markPrice, reason);
 }
 
@@ -155,8 +157,7 @@ export async function tickBot(
           const saved = (next.config.scaleFractionPct ?? 50) / 100;
           const bank = (pos.leverage ?? 1) >= 5 ? Math.max(saved, 0.6) : saved;
           const fraction = Math.min(0.75, Math.max(0.25, bank));
-          const onChainScale =
-            Boolean(pos.signature) && (pos.side === "long" || (pos.side === "short" && (pos.leverage ?? 1) > 1));
+          const onChainScale = signedOnChain(pos);
           if (next.config.walletSwaps && onChainScale) {
             if (!executor) {
               blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);
@@ -168,7 +169,7 @@ export async function tickBot(
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
               }
             }
-          } else if (!next.config.walletSwaps) {
+          } else if (!next.config.walletSwaps || (pos.side === "short" && !pos.signature)) {
             next = scaleOut(next, pos.id, fraction);
           }
         }
@@ -444,23 +445,28 @@ export async function tickBot(
           );
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
           const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
-          if (liveShort && !solPerp) {
-            blocked.push(`${learned.symbol}: this token has no short market, so the short stays in practice`);
+          const practiceShort = liveShort && !solPerp;
+          if (next.positions.some((pos) => sameMint(pos.mint, learned.mint))) {
+            blocked.push(`${learned.symbol}: already in this mint`);
             continue;
           }
-          const wantedLev = liveShort && wanted <= 1 ? 5 : wanted;
-          const paying = wantedLev > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
+          const wantedLev = liveShort && solPerp && wanted <= 1 ? 5 : wanted;
+          const paying = practiceShort
+            ? next.portfolio.cashUsd
+            : wantedLev > 1 && solPerp && priced
+              ? marginCashUsd(priced)
+              : risk.portfolio.cashUsd;
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
           const leverage = ticket.leverage;
           const collateralUsd = ticket.collateralUsd;
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
-          if (liveShort && (ticket.spotFallback || leverage <= 1)) {
+          if (liveShort && solPerp && (ticket.spotFallback || leverage <= 1)) {
             blocked.push(
               `${learned.symbol}: a live short needs $${PERP_MIN_COLLATERAL_USD} of collateral for a Jupiter perp`,
             );
             continue;
           }
-          if (ticket.spotFallback) {
+          if (ticket.spotFallback && learned.side !== "short") {
             blocked.push(
               `${learned.symbol}: ${wantedLev}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
             );
@@ -475,11 +481,11 @@ export async function tickBot(
             continue;
           } else if (bookTooSmall) {
             continue;
-          } else if (next.config.walletSwaps && !executor) {
+          } else if (next.config.walletSwaps && !practiceShort && !executor) {
             blocked.push(`${learned.symbol}: this page cannot ask the wallet to sign`);
           } else {
             let stamp: Awaited<ReturnType<ChainExecutor>> | undefined;
-            if (next.config.walletSwaps && executor) {
+            if (next.config.walletSwaps && !practiceShort && executor) {
               try {
                 stamp = await executor({
                   kind: "open",
@@ -506,18 +512,24 @@ export async function tickBot(
                 continue;
               }
             }
-            if (next.config.walletSwaps && !stamp?.signature) {
+            if (next.config.walletSwaps && !practiceShort && !stamp?.signature) {
               blocked.push(`${learned.symbol}: swap was not broadcast`);
               continue;
             }
             const before = next.positions.length;
+            const booked = practiceShort
+              ? {
+                  ...learned,
+                  thesis: `${learned.thesis} This short stays in practice — there is no on-chain short market.`,
+                }
+              : learned;
             const fill =
               stamp?.signature
                 ? stamp
                 : leverage > 1
                   ? { signature: "", qty, price: learned.price, tokenDecimals: 9, leverage, collateralUsd }
                   : undefined;
-            next = openPosition(next, learned, stamp?.qty ?? qty, market.regime.stance, fill);
+            next = openPosition(next, booked, stamp?.qty ?? qty, market.regime.stance, fill);
             if (next.positions.length > before) opened += 1;
             else blocked.push(`${learned.symbol}: cash could not fill the ticket`);
           }

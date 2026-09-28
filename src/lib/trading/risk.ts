@@ -1,4 +1,3 @@
-import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
 
@@ -217,9 +216,6 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (config.walletSwaps && signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT) {
-    return "This token has no short market — the short stays in practice";
-  }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
@@ -352,11 +348,12 @@ export function rollSession(portfolio: Portfolio, now = new Date()): Portfolio {
 }
 
 export function shouldScratch(position: Position, m5: number, m15: number): boolean {
-  if (position.side !== "long") return false;
   const r = rMultiple(position);
-  if ((position.leverage ?? 1) >= 5 && r < 0.35 && m5 <= -0.8) return true;
+  const hurried = (position.leverage ?? 1) >= 5;
+  const against = position.side === "short" ? 1 : -1;
+  if (hurried && r < 0.35 && m5 * against >= 0.8) return true;
   if (r >= 0.25) return false;
-  return m15 <= -1.2 && m5 <= -0.6;
+  return m15 * against >= 1.2 && m5 * against >= 0.6;
 }
 
 export function shouldFlattenMeme(position: Position, stance: MarketRegime["stance"]): boolean {

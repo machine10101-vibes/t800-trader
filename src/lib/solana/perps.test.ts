@@ -74,7 +74,27 @@ describe("perp planner", () => {
     assert.equal(short.asset, "SOL");
     assert.equal(short.leverage, "5");
     assert.equal(short.inputToken, "USDC");
+    assert.equal(short.sizeUsdDelta, "62500000");
     assert.ok(short.collateralUsd >= 10);
+    const ten = planPerpIncrease({
+      ...order({ side: "short", leverage: 10, collateralUsd: 10, notionalUsd: 100 }),
+      usdc: 20,
+      sol: 1,
+      solPriceUsd: 200,
+    });
+    assert.equal(ten.side, "short");
+    assert.equal(ten.leverage, "10");
+    assert.equal(ten.sizeUsdDelta, "125000000");
+    const solShort = planPerpIncrease({
+      ...order({ side: "short", leverage: 10, collateralUsd: 10, notionalUsd: 100 }),
+      usdc: 0,
+      sol: 0.2,
+      solPriceUsd: 200,
+    });
+    assert.equal(solShort.side, "short");
+    assert.equal(solShort.leverage, "10");
+    assert.equal(solShort.inputToken, "SOL");
+    assert.ok(Math.abs(Number(solShort.sizeUsdDelta) / 1e6 - solShort.collateralUsd * 10) < 1e-6);
     assert.throws(
       () => planPerpIncrease({ ...order({ symbol: "ZBCN", mint: ZBCN_MINT, side: "short" }), usdc: 20, sol: 1, solPriceUsd: 200 }),
       /Zebec/,
@@ -117,11 +137,11 @@ describe("perp planner", () => {
     assert.equal(quotedMultiplier({}, 10), 10);
     assert.throws(
       () => quotedMultiplier({ leverage: "1", collateralUsdDelta: "10000000", sizeUsdDelta: "10000000" }, 5),
-      /quoted this long at 1x/,
+      /quoted this ticket at 1x/,
     );
     assert.throws(
       () => fillFromIncrease({ averagePriceUsd: "200000000", collateralUsdDelta: "10000000", sizeUsdDelta: "10000000", leverage: "1" }, "pos", "sig"),
-      /quoted this long at 1x/,
+      /quoted this ticket at 1x/,
     );
   });
 });

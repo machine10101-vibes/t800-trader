@@ -109,19 +109,35 @@ export function collateralFor(
   return { leverage, collateralUsd, spotFallback: false };
 }
 
+/** A wallet signature that still has something to sell or decrease. A practice short has no signature. */
+export function signedOnChain(pos: Pick<Position, "signature" | "side" | "leverage">): boolean {
+  if (!pos.signature) return false;
+  if (pos.side === "short") return (pos.leverage ?? 1) > 1;
+  return pos.side === "long";
+}
+
+/**
+ * Close or scale what the venue actually holds.
+ * A SOL 5x or 10x, long or short, decreases the perp by the marked exposure.
+ * A spot bag was bought with the collateral only, so the sell is that bag, not the marked exposure.
+ */
 export function orderForPosition(pos: Position, kind: "close" | "scale", venues?: string[], fraction = 1): ChainOrder {
+  const lev = pos.leverage && pos.leverage > 1 ? pos.leverage : 1;
+  const perp = lev > 1 && (pos.symbol === "SOL" || pos.mint === SOL_MINT);
   const slice = kind === "scale" ? fraction : 1;
+  const bookQty = pos.qty * slice;
+  const qty = perp ? bookQty : bookQty / lev;
   return {
     kind,
     side: pos.side,
     mint: pos.mint,
     symbol: pos.symbol,
-    notionalUsd: pos.qty * slice * pos.markPrice,
-    qty: pos.qty * slice,
+    notionalUsd: qty * pos.markPrice,
+    qty,
     price: pos.markPrice,
     tokenDecimals: pos.tokenDecimals,
     venues,
-    leverage: pos.leverage && pos.leverage > 1 ? pos.leverage : undefined,
+    leverage: lev > 1 ? lev : undefined,
     collateralUsd: pos.collateralUsd,
     positionPubkey: pos.positionPubkey,
   };

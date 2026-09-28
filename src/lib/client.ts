@@ -13,7 +13,7 @@ import {
 } from "@/lib/solana/authorize";
 import { makerDesk } from "@/lib/solana/limit";
 import { executorFor } from "@/lib/solana/swap";
-import { orderForPosition } from "@/lib/trading/leverage";
+import { orderForPosition, signedOnChain } from "@/lib/trading/leverage";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { CronosSession } from "@/lib/cronos/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
@@ -39,11 +39,11 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
 async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const state = await loadState(chain);
-    const pos = state.positions.find((p) => p.signature && p.side === "long");
+    const pos = state.positions.find((p) => signedOnChain(p));
     if (!pos) return;
     await mutateState(async (current) => {
       const still = current.positions.find((p) => p.id === pos.id);
-      if (!still?.signature || still.side !== "long") return current;
+      if (!still || !signedOnChain(still)) return current;
       try {
         const fill = await executor(orderForPosition(still, "close", current.config.venues));
         return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
@@ -153,7 +153,7 @@ export async function controlBot(
   let reclaimed: string | null = null;
   let principalAfter: number | null = null;
   if ((action === "stop" || action === "flatten" || action === "reset") && session) {
-    const open = (await loadState(chain)).positions.some((p) => p.signature && p.side === "long");
+    const open = (await loadState(chain)).positions.some((p) => signedOnChain(p));
     if (liveKit) {
       const { cronosBudgetAddress } = await import("@/lib/cronos/trade");
       const address = cronosBudgetAddress(session.address);
@@ -185,7 +185,7 @@ export async function controlBot(
   }
 
   await mutateState((state) => {
-    const unsold = state.config.walletSwaps && state.positions.some((p) => p.signature && p.side === "long");
+    const unsold = state.config.walletSwaps && state.positions.some((p) => signedOnChain(p));
     if ((action === "flatten" || action === "reset") && unsold) return state;
     const next = applyControl(state, action);
     if (reclaimed && (action === "stop" || action === "flatten")) {
@@ -254,7 +254,7 @@ export async function withdrawTradingProfit(session: DeskSession, chain: ChainId
     await baselineTradingPrincipal(held?.equityUsd ?? 0, chain);
     throw new Error("No trading profit to send yet. The bot keeps the balance it is still using.");
   }
-  const open = state.positions.some((p) => p.signature && p.side === "long");
+  const open = state.positions.some((p) => signedOnChain(p));
   const sent =
     chain === "cronos"
       ? await import("@/lib/cronos/trade").then((mod) => mod.sendCronosProfit(session.address, principal, open ? 0.5 : 0.3))
@@ -281,7 +281,7 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
   const saved = await mutateState(async (state) => {
     const pos = state.positions.find((p) => p.id === positionId);
     if (!pos) return state;
-    if (pos.signature && pos.side === "long") {
+    if (signedOnChain(pos)) {
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
         const fill = await executor(orderForPosition(pos, "close", state.config.venues));

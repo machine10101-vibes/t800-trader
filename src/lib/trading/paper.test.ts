@@ -88,6 +88,67 @@ describe("paper", () => {
     assert.ok(Math.abs(closed.portfolio.cashUsd - 21) < 1e-6);
   });
 
+  it("posts margin for a 5x and a 10x short and returns only that slice on a scale-out", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 20 });
+    const five = openPosition(state, signal({ side: "short", price: 100 }), 0.5, "risk-on", {
+      signature: "sig",
+      qty: 0.5,
+      price: 100,
+      tokenDecimals: 9,
+      leverage: 5,
+      collateralUsd: 10,
+      positionPubkey: "pos",
+    });
+    const pos = five.positions[0]!;
+    assert.equal(pos.side, "short");
+    assert.equal(pos.leverage, 5);
+    assert.equal(pos.stopPrice, 102);
+    assert.equal(pos.targetPrice, 96);
+    const won = markBook(five, new Map([[pos.mint, 90]]));
+    assert.ok(Math.abs(won.portfolio.equityUsd - 25) < 1e-6);
+    const scaled = scaleOut(won, pos.id, 0.5, "sig-scale", 90);
+    assert.ok(Math.abs(scaled.portfolio.cashUsd - 17.5) < 1e-6);
+    assert.equal(scaled.positions[0]?.qty, 0.25);
+    assert.ok(Math.abs((scaled.positions[0]?.collateralUsd ?? 0) - 5) < 1e-6);
+    assert.ok(Math.abs(scaled.portfolio.equityUsd - 25) < 1e-6);
+
+    const ten = openPosition(state, signal({ side: "short", price: 100 }), 1, "risk-on", {
+      signature: "sig10",
+      qty: 1,
+      price: 100,
+      tokenDecimals: 9,
+      leverage: 10,
+      collateralUsd: 10,
+      positionPubkey: "pos10",
+    });
+    const short = ten.positions[0]!;
+    const lost = markBook(ten, new Map([[short.mint, 101]]));
+    assert.ok(Math.abs(lost.portfolio.equityUsd - 19) < 1e-6);
+    const flat = closePosition(lost, short.id, 110, "stop", "sig-stop");
+    assert.equal(flat.positions.length, 0);
+    assert.ok(Math.abs(flat.portfolio.cashUsd - 10) < 1e-6);
+    assert.ok((flat.trades[0]?.pnlUsd ?? 0) < 0);
+  });
+
+  it("posts margin for a 10x long and books the leveraged gain", () => {
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 20 });
+    const opened = openPosition(state, signal({ price: 100 }), 1, "risk-on", {
+      signature: "sig",
+      qty: 1,
+      price: 100,
+      tokenDecimals: 9,
+      leverage: 10,
+      collateralUsd: 10,
+      positionPubkey: "pos",
+    });
+    const pos = opened.positions[0]!;
+    assert.equal(pos.leverage, 10);
+    const marked = markBook(opened, new Map([[pos.mint, 101]]));
+    assert.ok(Math.abs(marked.portfolio.equityUsd - 21) < 1e-6);
+    const closed = closePosition(marked, pos.id, 101, "target", "sig2");
+    assert.ok(Math.abs(closed.portfolio.cashUsd - 21) < 1e-6);
+  });
+
   it("refreshes equity on a manual close and counts a scale-out", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ price: 100 }), 1);

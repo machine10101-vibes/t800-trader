@@ -63,7 +63,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. A SOL short is a Jupiter perpetual. Other tokens cannot be shorted on-chain.",
     settingsMultiplier:
-      "SOL, Zebec, Pump, ZEC, and Ray can open at 5x or 10x once the trading key can post $10. SOL is a Jupiter perpetual, including shorts. Every other name posts that collateral as a spot bag and the ticket is marked at the multiplier. The cash slider does not turn that off. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. A short that is not SOL stays in practice.",
+      "SOL, Zebec, Pump, ZEC, and Ray can open at 5x or 10x once the trading key can post $10. SOL is a Jupiter perpetual, including shorts. Every other name posts that collateral as a spot bag and the ticket is marked at the multiplier. The cash slider does not turn that off. Below $10 the same signal stays a spot buy. A stronger signal uses 10x when both are on. A short that is not SOL stays on the practice book at 5x or 10x and is not sent to the wallet.",
     settingsFive: "Posts at least $10 and takes five times that exposure on SOL, Zebec, Pump, ZEC, or Ray.",
     settingsTen:
       "Used when the signal is a breakout or confidence is 66 or higher. Ten times the collateral, so a smaller adverse move liquidates it.",

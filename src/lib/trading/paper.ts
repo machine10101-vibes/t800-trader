@@ -263,7 +263,7 @@ export function scaleOut(
   const lev = pos.leverage ?? 1;
   const fullMargin = lev > 1 ? (pos.collateralUsd ?? (pos.qty * pos.entryPrice) / lev) : 0;
   const proceeds =
-    lev > 1 && pos.side === "long" ? Math.max(0, fullMargin * fraction + pnl.usd) : exitProceeds({ ...pos, qty }, price, pnl.usd);
+    lev > 1 ? Math.max(0, fullMargin * fraction + pnl.usd) : exitProceeds({ ...pos, qty }, price, pnl.usd);
   const remain = pos.qty - qty;
   const trade: Trade = {
     id: id("tr"),

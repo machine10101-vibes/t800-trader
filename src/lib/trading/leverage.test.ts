@@ -1,7 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SOL_MINT, WCRO_MINT, ZBCN_MINT } from "../market/universe";
-import { collateralFor, collateralRoom, leveragedTicket, marginFill, multiplierFor, normalizeMultipliers, pickMultiplier } from "./leverage";
+import type { Position } from "../types";
+import { collateralFor, collateralRoom, leveragedTicket, marginFill, multiplierFor, normalizeMultipliers, orderForPosition, pickMultiplier, signedOnChain } from "./leverage";
 
 describe("multipliers", () => {
   it("keeps 5x and 10x and drops anything else", () => {
@@ -63,4 +64,59 @@ describe("multipliers", () => {
     assert.equal(spot.leverage, 1);
     assert.equal(spot.spotFallback, true);
   });
+
+  it("closes a SOL 5x or 10x by the marked exposure and a spot bag by the collateral", () => {
+    const solLong = orderForPosition(ticket({ mint: SOL_MINT, symbol: "SOL", qty: 0.5, markPrice: 200, leverage: 5, side: "long" }), "close");
+    assert.equal(solLong.qty, 0.5);
+    assert.equal(solLong.notionalUsd, 100);
+    assert.equal(solLong.leverage, 5);
+    assert.equal(solLong.side, "long");
+    const solShort = orderForPosition(
+      ticket({ mint: SOL_MINT, symbol: "SOL", qty: 1, markPrice: 200, leverage: 10, side: "short", positionPubkey: "pos" }),
+      "scale",
+      undefined,
+      0.5,
+    );
+    assert.equal(solShort.side, "short");
+    assert.equal(solShort.qty, 0.5);
+    assert.equal(solShort.notionalUsd, 100);
+    assert.equal(solShort.leverage, 10);
+    assert.equal(solShort.positionPubkey, "pos");
+    const bag = orderForPosition(ticket({ qty: 5000, markPrice: 0.002, leverage: 5 }), "close");
+    assert.equal(bag.qty, 1000);
+    assert.ok(Math.abs(bag.notionalUsd - 2) < 1e-9);
+    const scaledBag = orderForPosition(ticket({ qty: 10000, markPrice: 0.002, leverage: 10 }), "scale", undefined, 0.5);
+    assert.equal(scaledBag.qty, 500);
+    assert.equal(signedOnChain(ticket({ signature: "sig", side: "short", leverage: 10 })), true);
+    assert.equal(signedOnChain(ticket({ signature: "sig", side: "short", leverage: 1 })), false);
+    assert.equal(signedOnChain(ticket({ signature: "sig", side: "long" })), true);
+    assert.equal(signedOnChain(ticket({ signature: "", side: "short", leverage: 10 })), false);
+  });
 });
+
+function ticket(over: Partial<Position> = {}): Position {
+  return {
+    id: "p",
+    mint: ZBCN_MINT,
+    symbol: "ZBCN",
+    poolAddress: "pool",
+    sector: "Payments",
+    side: "long",
+    qty: 1,
+    entryPrice: 1,
+    markPrice: 1,
+    stopPrice: 0.98,
+    targetPrice: 1.04,
+    openedAt: new Date().toISOString(),
+    lastUpdate: new Date().toISOString(),
+    reason: "reclaim",
+    researchScore: 70,
+    highWater: 1,
+    lowWater: 1,
+    notional: 1,
+    initialStop: 0.98,
+    scaled: false,
+    signature: "sig",
+    ...over,
+  };
+}

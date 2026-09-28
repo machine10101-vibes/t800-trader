@@ -426,6 +426,11 @@ describe("risk", () => {
     assert.ok((levered.nextStop ?? 0) > 98);
     assert.equal(shouldScratch({ ...base, leverage: 5, markPrice: 100, highWater: 100 }, -0.9, 0.4), true);
     assert.equal(shouldScratch(base, -0.9, 0.4), false);
+    const short = { ...base, side: "short" as const, highWater: 100, lowWater: 100 };
+    assert.equal(shouldScratch({ ...short, leverage: 10, markPrice: 100 }, 0.9, -0.4), true);
+    assert.equal(shouldScratch({ ...short, leverage: 5, markPrice: 100 }, 0.9, -0.4), true);
+    assert.equal(shouldScratch(short, 0.9, -0.4), false);
+    assert.equal(shouldScratch({ ...short, leverage: 10, markPrice: 98, highWater: 98 }, 0.9, 1.4), false);
   });
 
   it("rolls yesterday's loss cap so a new session can trade", () => {
@@ -705,7 +710,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("sends a live SOL short and keeps other live shorts in practice", () => {
+  it("lets a live SOL short and a practice short on another name through the gate", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -716,15 +721,15 @@ describe("LIVE gates and short trail", () => {
       }),
       null,
     );
-    assert.match(
+    assert.equal(
       canOpen({
         positions: [],
         signal: { ...longSignal, side: "short", symbol: "ZBCN" },
         config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
         portfolio: portfolio(),
         stance: "mixed",
-      }) ?? "",
-      /short market/,
+      }),
+      null,
     );
   });
 

@@ -173,7 +173,7 @@ export function quotedMultiplier(quote: IncreaseQuote, requested: 5 | 10): 5 | 1
   if (stated === 1 || ratio === 1) {
     const shown = stated === 1 && Number.isFinite(statedRaw) ? statedRaw : implied;
     throw new Error(
-      `Jupiter quoted this long at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
+      `Jupiter quoted this ticket at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
     );
   }
   if (ratio === 5 || ratio === 10) return ratio;
@@ -183,7 +183,7 @@ export function quotedMultiplier(quote: IncreaseQuote, requested: 5 | 10): 5 | 1
   if (statedMissing && sizeMissing) return requested;
   const shown = Number.isFinite(implied) ? implied : statedRaw;
   throw new Error(
-    `Jupiter quoted this long at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
+    `Jupiter quoted this ticket at ${formatMultiplier(shown)}x, so the ${requested}x ticket was not sent.`,
   );
 }
 
