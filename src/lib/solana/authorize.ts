@@ -341,7 +341,12 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
     tx.add(transferChecked(source, usdcMint, associatedToken(bot.publicKey, usdcMint), owner, usdcUnits, 6));
   }
   const before = await readBalances(botAddress).catch(() => null);
-  const signature = await walletSignature(session, tx);
+  const signature = await Promise.race([
+    walletSignature(session, tx),
+    new Promise<string>((_, reject) => {
+      setTimeout(() => reject(new Error("The wallet did not open a signature. Arm again and approve it in Phantom.")), 45_000);
+    }),
+  ]);
   await confirmSignature(signature);
   const after = await readBalances(botAddress).catch(() => null);
   const equityUsd = after?.equityUsd ?? 0;

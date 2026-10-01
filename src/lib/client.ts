@@ -91,7 +91,7 @@ async function cronosLive(session: DeskSession | null | undefined) {
 
 export async function confirmLiveMode(chain: ChainId = "solana"): Promise<DeskPayload> {
   armLiveSession();
-  await mutateState((state) => ({
+  const state = await mutateState((state) => ({
     ...state,
     config: normalizeConfig({
       ...state.config,
@@ -101,7 +101,7 @@ export async function confirmLiveMode(chain: ChainId = "solana"): Promise<DeskPa
     }),
     bot: { ...state.bot, lastNote: "LIVE armed this session — each new ticket still needs the trading key" },
   }), chain);
-  return buildDesk(false, chain);
+  return shellDesk(state);
 }
 
 export async function setPaperMode(chain: ChainId = "solana"): Promise<DeskPayload> {

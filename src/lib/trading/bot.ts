@@ -97,10 +97,29 @@ export async function tickBot(
   maker?: MakerDesk | null,
   chain: ChainId = "solana",
 ): Promise<AppState> {
+  // Read the tape before taking the book lock. Arm has to be able to flip
+  // the bot on while a tick is still waiting on Jupiter and Gecko.
+  let market: Awaited<ReturnType<typeof loadMarket>>;
+  try {
+    market = await loadMarket(false, chain);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Tick failed";
+    return mutateState((state) => ({
+      ...state,
+      bot: {
+        ...state.bot,
+        lastError: message,
+        lastTickAt: new Date().toISOString(),
+        lastNote: message,
+        lastOpened: state.bot.lastOpened ?? 0,
+        lastClosed: state.bot.lastClosed ?? 0,
+        blocked: state.bot.blocked ?? [],
+      },
+    }), chain);
+  }
   return mutateState(async (state) => {
     let next = state;
     try {
-      const market = await loadMarket(false, chain);
       const byMint = new Map(market.candidates.map((c) => [c.mint, c]));
       const prices = await marksForPositions(state.positions, market.candidates, chain);
 

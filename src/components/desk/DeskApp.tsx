@@ -35,6 +35,7 @@ import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeS
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isLiveSessionArmed } from "@/lib/solana/live-session";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
 import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
@@ -122,6 +123,7 @@ function ChainDesk({
   const [watchError, setWatchError] = useState<string | null>(null);
   const [knownBooks, setKnownBooks] = useState<string[]>([]);
   const [liveConfirm, setLiveConfirm] = useState(false);
+  const [armAfterLive, setArmAfterLive] = useState(false);
   const [pendingLiveConfig, setPendingLiveConfig] = useState<Partial<BotConfig> | null>(null);
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
@@ -148,9 +150,9 @@ function ChainDesk({
     window.history.replaceState(null, "", url);
   }, []);
 
-  const applyDesk = useCallback((next: DeskPayload) => {
+  const applyDesk = useCallback((next: DeskPayload, opts?: { keepError?: boolean }) => {
     setDesk(next);
-    setError(null);
+    if (!opts?.keepError) setError(null);
     setUpdatedAt(next.generatedAt);
     setThesis((cur) => (cur ? next.research.find((r) => r.id === cur.id) ?? cur : null));
     setFocusMint((cur) => {
@@ -355,7 +357,9 @@ function ChainDesk({
       inflight = true;
       try {
         const next = await controlBot("tick", current, chain);
-        if (!cancel) applyDesk(next);
+        // An arm click sets busy while this tick is still in flight. Applying the
+        // older book here would put the button back on "Arm bot".
+        if (!cancel && !busyRef.current) applyDesk(next, { keepError: true });
         return true;
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
@@ -450,20 +454,43 @@ function ChainDesk({
       setError(copy.needWallet);
       return;
     }
-    if (action === "start" && chain === "solana" && desk?.config.walletSwaps && !desk.liveSessionArmed) {
+    if (action === "start" && chain === "solana" && desk?.config.walletSwaps && !isLiveSessionArmed()) {
+      setArmAfterLive(true);
       setLiveConfirm(true);
       return;
     }
     busyRef.current = true;
     setBusy(true);
+    setError(null);
+    if (action === "start") {
+      setDesk((cur) =>
+        cur
+          ? {
+              ...cur,
+              liveSessionArmed: isLiveSessionArmed() || cur.liveSessionArmed,
+              bot: {
+                ...cur.bot,
+                running: true,
+                lastError: null,
+                lastNote:
+                  cur.config.walletSwaps || isLiveSessionArmed()
+                    ? "Armed — approve the wallet if it asks."
+                    : "Armed — first tick incoming",
+              },
+            }
+          : cur,
+      );
+    }
     try {
       if (action === "start" || action === "reset") {
         const session = await refreshDesk(chain, wallet);
         setWallet(session);
-        if (action === "start" && session.equityUsd < MIN_TRADE_USD) {
+        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD) {
           const funded = await tradingSnapshot(session.address, chain);
           if (!funded || funded.equityUsd < MIN_TRADE_USD) {
-            setError(`Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`);
+            const message = `Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`;
+            setError(message);
+            setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: message } } : cur));
             return;
           }
         }
@@ -483,7 +510,11 @@ function ChainDesk({
       applyDesk(await controlBot(action, wallet, chain));
       setTrading(await tradingSnapshot(wallet.address, chain).catch(() => null));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Control failed");
+      const message = e instanceof Error ? e.message : "Control failed";
+      setError(message);
+      if (action === "start") {
+        setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: message } } : cur));
+      }
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -515,7 +546,8 @@ function ChainDesk({
 
   const saveConfig = async (config: Partial<BotConfig>) => {
     if (!wallet) return;
-    if (chain === "solana" && config.walletSwaps && !desk?.liveSessionArmed) {
+    if (chain === "solana" && config.walletSwaps && !isLiveSessionArmed()) {
+      setArmAfterLive(false);
       setPendingLiveConfig(config);
       setLiveConfirm(true);
       return;
@@ -545,6 +577,7 @@ function ChainDesk({
   };
 
   const requestLive = () => {
+    setArmAfterLive(false);
     setPendingLiveConfig(null);
     setLiveConfirm(true);
   };
@@ -553,12 +586,23 @@ function ChainDesk({
     if (!wallet) return;
     setBusy(true);
     try {
-      applyDesk(await confirmLiveMode(chain));
+      const unlocked = await confirmLiveMode(chain);
+      applyDesk(
+        desk
+          ? { ...desk, config: unlocked.config, bot: unlocked.bot, liveSessionArmed: true }
+          : unlocked,
+        { keepError: true },
+      );
       if (pendingLiveConfig) {
         applyDesk(await configureBot({ ...pendingLiveConfig, walletSwaps: true, executionMode: "live", killSwitch: false }, chain));
       }
+      const startBot = armAfterLive;
+      setArmAfterLive(false);
       setPendingLiveConfig(null);
       setLiveConfirm(false);
+      setBusy(false);
+      if (startBot) await control("start");
+      return;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not arm LIVE");
     } finally {
@@ -785,6 +829,7 @@ function ChainDesk({
           >
             {desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
+          {error ? <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--crimson)]">{error}</p> : null}
           {chain === "solana" ? (
             <button
               disabled={busy || !desk}
@@ -903,6 +948,7 @@ function ChainDesk({
           busy={busy}
           onCancel={() => {
             setLiveConfirm(false);
+            setArmAfterLive(false);
             setPendingLiveConfig(null);
           }}
           onConfirm={() => void finishLiveConfirm()}
@@ -932,7 +978,7 @@ function LiveConfirmModal({
 }) {
   const [typed, setTyped] = useState("");
   const [acked, setAcked] = useState(false);
-  const ready = typed.trim() === "LIVE" && acked;
+  const ready = typed.trim().toUpperCase() === "LIVE" && acked;
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
       <div className="neon w-full max-w-lg p-6">
