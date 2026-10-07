@@ -1191,8 +1191,12 @@ function Header({
               Watch
             </button>
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
-            <Pill tone={desk?.config.walletSwaps ? (desk.liveSessionArmed ? "mint" : "magenta") : "default"}>
-              {desk?.config.walletSwaps ? (desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
+            <Pill
+              tone={
+                desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "mint" : "magenta") : "default"
+              }
+            >
+              {desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
             </Pill>
             <Pill tone={armed ? "mint" : "default"}>
               <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
