@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal } from "./home";
+import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
 import { solanaDefaults } from "./store";
 import type { Portfolio, Position, Trade } from "./types";
 
@@ -113,6 +113,7 @@ describe("home", () => {
     assert.equal(quiet.limits.length, 0);
     assert.equal(quiet.walls.length, 0);
     assert.match(quiet.summary, /waiting for a 4-hour setup/);
+    assert.deepEqual(visibleActivity(quiet), []);
 
     const held = botActivity({
       running: true,
@@ -143,6 +144,10 @@ describe("home", () => {
       ["PUMP: 4-hour chart has not loaded"],
     );
     assert.match(held.summary, /stuck/);
+    assert.deepEqual(
+      visibleActivity(held).map((group) => group.kind),
+      ["wall"],
+    );
 
     const stuck = botActivity({
       running: true,
@@ -177,5 +182,28 @@ describe("home", () => {
     assert.equal(off.limits.length, 0);
     assert.equal(off.walls.length, 0);
     assert.match(off.summary, /bot is off so it will not sell/);
+    assert.deepEqual(
+      visibleActivity(off).map((group) => group.kind),
+      ["target"],
+    );
+
+    const limited = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 4,
+      blocked: ["SOL: the gain does not beat the fee to open and the fee to close yet"],
+      scanSeconds: 5,
+      positions: [ticket()],
+      trades: losses,
+      portfolio: book({ equityUsd: 180, dayPnlUsd: -20 }),
+      config,
+      nowMs: now,
+    });
+    assert.deepEqual(
+      visibleActivity(limited).map((group) => group.kind),
+      ["limit", "target"],
+    );
   });
 });

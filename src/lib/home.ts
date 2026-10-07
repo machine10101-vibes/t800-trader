@@ -230,6 +230,25 @@ export function botActivity(input: {
   return { summary, targets, limits, walls };
 }
 
+export interface VisibleActivity {
+  kind: ActivityKind;
+  title: string;
+  items: ActivityItem[];
+}
+
+/**
+ * The section shows the status that is happening now.
+ * A stuck check is that status. Otherwise a live limit and a trade waiting on its goal can both show.
+ * An empty list is not a status.
+ */
+export function visibleActivity(activity: BotActivity): VisibleActivity[] {
+  if (activity.walls.length) return [{ kind: "wall", title: "Hit a wall", items: activity.walls }];
+  const shown: VisibleActivity[] = [];
+  if (activity.limits.length) shown.push({ kind: "limit", title: "Stopped by a limit", items: activity.limits });
+  if (activity.targets.length) shown.push({ kind: "target", title: "Waiting for a goal", items: activity.targets });
+  return shown;
+}
+
 export function homeResults(trades: Pick<Trade, "action" | "pnlUsd">[]): HomeResults {
   const closes = trades.filter((t) => t.action === "close" && t.pnlUsd !== null);
   const pnls = closes.map((t) => t.pnlUsd ?? 0);
