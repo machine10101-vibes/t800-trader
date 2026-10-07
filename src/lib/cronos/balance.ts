@@ -4,6 +4,13 @@ const BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32_GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
 /** Native reads from a public node and from the wallet. The larger one is the balance. */
+export function formatCro(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 CRO";
+  if (n >= 1000) return `${n.toFixed(1)} CRO`;
+  if (n >= 0.001) return `${n.toFixed(3)} CRO`;
+  return `${n.toFixed(6)} CRO`;
+}
+
 export function mergeNativeBalance(reads: Array<number | null | undefined>): number {
   let best = 0;
   for (const read of reads) {
@@ -116,8 +123,6 @@ export function preferFundedAccount<T extends { sol: number; wcro?: number; usdc
 ): string {
   if (!rows.length) throw new Error("Wallet connected but did not return an account.");
   const score = (bal: T) => bal.sol + (bal.wcro ?? 0) + bal.usdc;
-  const selected = rows[0]!;
-  if (score(selected.bal) > 0 || rows.length === 1) return selected.account;
   return rows.reduce((best, row) => (score(row.bal) > score(best.bal) ? row : best)).account;
 }
 

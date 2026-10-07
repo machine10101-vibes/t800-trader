@@ -31,7 +31,7 @@ import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
-import { croHoldings } from "@/lib/cronos/balance";
+import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
@@ -918,8 +918,8 @@ function ChainDesk({
               : cronosHeld
                 ? cronosHeld.cro > 0 || wallet.usdc > 0
                   ? cronosHeld.onPos
-                    ? `${cronosHeld.cro.toFixed(3)} CRO is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
-                    : `${cronosHeld.cro.toFixed(3)} CRO · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                    ? `${formatCro(cronosHeld.cro)} is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
+                    : `${formatCro(cronosHeld.cro)} · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
                   : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos EVM and choose the account that holds the CRO."
                 : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
                     desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
@@ -1178,7 +1178,7 @@ function Header({
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const equity = holdings ? `${holdings.cro.toFixed(3)} CRO` : usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const equity = holdings ? formatCro(holdings.cro) : usd(trading ? trading.equityUsd : wallet.equityUsd);
   const equityNote = holdings
     ? holdings.onPos
       ? "Cronos POS. Send it to Cronos EVM to trade."
@@ -2276,7 +2276,7 @@ function Book({
         <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
           label={trading ? "Trading balance" : "Wallet mark"}
-          value={trading ? usd(trading.equityUsd) : walletCro ? `${walletCro.cro.toFixed(3)} CRO` : usd(wallet.equityUsd)}
+          value={trading ? usd(trading.equityUsd) : walletCro ? formatCro(walletCro.cro) : usd(wallet.equityUsd)}
           sub={
             trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`

@@ -6,6 +6,7 @@ import {
   collectPosAccounts,
   croHoldings,
   croPosToEvm,
+  formatCro,
   mergeNativeBalance,
   orderCronosAccounts,
   parseRpcQuantity,
@@ -48,11 +49,14 @@ describe("Cronos balance", () => {
       { account: FUNDED, bal: { sol: 0, wcro: 8, usdc: 0 } },
     ]);
     assert.equal(picked, FUNDED);
-    const selected = preferFundedAccount([
-      { account: FUNDED, bal: { sol: 3, wcro: 0, usdc: 0 } },
-      { account: EMPTY, bal: { sol: 0, wcro: 0, usdc: 9 } },
+    assert.equal(formatCro(0), "0 CRO");
+    assert.equal(formatCro(15), "15.000 CRO");
+    assert.equal(formatCro(0.0001), "0.000100 CRO");
+    const dustFirst = preferFundedAccount([
+      { account: EMPTY, bal: { sol: 0.0001, wcro: 0, usdc: 0 } },
+      { account: FUNDED, bal: { sol: 40, wcro: 0, usdc: 0 } },
     ]);
-    assert.equal(selected, FUNDED);
+    assert.equal(dustFirst, FUNDED);
   });
 
   it("pulls every 0x and cro1 address out of the Onchain account payload", () => {
