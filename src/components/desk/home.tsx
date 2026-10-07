@@ -1,6 +1,6 @@
 "use client";
 
-import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, type ActivityItem } from "@/lib/home";
+import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
@@ -56,6 +56,7 @@ export function Home({
     portfolio: desk.portfolio,
     config: desk.config,
   });
+  const statusNow = visibleActivity(activity);
   const results = homeResults(trades);
   const today = desk.portfolio.dayPnlUsd;
   const recent = trades.filter((t) => t.action === "close").slice(0, 5);
@@ -125,21 +126,13 @@ export function Home({
       <section className="neon p-5 sm:p-6" aria-label="What the bot is doing">
         <h3 className="text-lg font-medium">What the bot is doing</h3>
         <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{activity.summary}</p>
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          <ActivityList
-            title="Waiting for a goal"
-            tone="mint"
-            items={activity.targets}
-            empty="No trade is waiting on a profit goal."
-          />
-          <ActivityList
-            title="Stopped by a limit"
-            tone="amber"
-            items={activity.limits}
-            empty="No limit is stopping new trades."
-          />
-          <ActivityList title="Hit a wall" tone="crimson" items={activity.walls} empty="Nothing is stuck." />
-        </div>
+        {statusNow.length ? (
+          <div className={`mt-4 grid gap-3 ${statusNow.length > 1 ? "lg:grid-cols-2" : ""}`}>
+            {statusNow.map((group) => (
+              <ActivityList key={group.kind} title={group.title} tone={group.kind === "target" ? "mint" : group.kind === "limit" ? "amber" : "crimson"} items={group.items} />
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="neon p-5 sm:p-6">
@@ -248,12 +241,10 @@ function ActivityList({
   title,
   tone,
   items,
-  empty,
 }: {
   title: string;
   tone: "mint" | "amber" | "crimson";
   items: ActivityItem[];
-  empty: string;
 }) {
   const dot = tone === "mint" ? "bg-[var(--mint)]" : tone === "amber" ? "bg-[var(--amber)]" : "bg-[var(--crimson)]";
   const titleColor = tone === "mint" ? "text-[var(--mint)]" : tone === "amber" ? "text-[var(--amber)]" : "text-[var(--crimson)]";
@@ -263,15 +254,11 @@ function ActivityList({
         <span className={`h-2 w-2 rounded-full ${dot}`} />
         <h4 className={`text-sm font-medium ${titleColor}`}>{title}</h4>
       </div>
-      {items.length ? (
-        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
-          {items.map((item) => (
-            <li key={item.text}>{item.text}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-3 text-sm leading-6 text-[var(--faint)]">{empty}</p>
-      )}
+      <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
+        {items.map((item) => (
+          <li key={item.text}>{item.text}</li>
+        ))}
+      </ul>
     </div>
   );
 }
