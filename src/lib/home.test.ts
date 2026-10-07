@@ -182,6 +182,23 @@ describe("home", () => {
     });
     assert.equal(afterReload.walls.length, 0);
 
+    const minuteAfterReload = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 5 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      pageStartedAt: now - 60_000,
+    });
+    assert.equal(minuteAfterReload.walls.length, 0);
+
     const off = botActivity({
       running: false,
       killSwitch: false,
