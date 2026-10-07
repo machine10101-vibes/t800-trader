@@ -218,11 +218,13 @@ async function main() {
       const m15 = live.flows.m15.priceChangePct;
       const m5 = live.flows.m5.priceChangePct;
       if (next.config.scratchEnabled === false) continue;
+      const scratch = risk.shouldScratch(pos, m5, m15);
+      if (risk.favorableMovePct(pos) > 0 && !risk.profitClearsFees(pos) && (cashExit(pos.side, m15) || scratch)) continue;
       if (cashExit(pos.side, m15)) {
         next = paper.closePosition(next, pos.id, pos.markPrice, "fade");
         continue;
       }
-      if (risk.shouldScratch(pos, m5, m15)) {
+      if (scratch) {
         next = paper.closePosition(next, pos.id, pos.markPrice, "time");
       }
     }

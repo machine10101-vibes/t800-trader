@@ -15,6 +15,7 @@ import {
   consecutiveLosses,
   dayLossBreached,
   dayLossUsedPct,
+  favorableMovePct,
   managePosition,
   MIN_TICKET_USD,
   MIN_TRADE_USD,
@@ -22,6 +23,7 @@ import {
   payableUsd,
   walletMarkUsd,
   presetBracket,
+  profitClearsFees,
   rollSession,
   shouldFlattenMeme,
   shouldScratch,
@@ -152,6 +154,7 @@ export async function tickBot(
 
       if (next.bot.running) for (const pos of [...next.positions]) {
         const plan = managePosition(pos, Date.now(), next.config);
+        if (plan.feeHold) blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
         if (plan.exit) {
           const before = next.positions.length;
           next = await walletExit(next, pos, plan.exit, executor, blocked);
@@ -203,6 +206,11 @@ export async function tickBot(
         const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
         if (chain === "solana" && next.config.scratchEnabled === false) continue;
         const cashTape = m15 !== null && cashExit(pos.side, m15);
+        const scratch = m5 !== null && m15 !== null && shouldScratch(pos, m5, m15);
+        if (chain === "solana" && favorableMovePct(pos) > 0 && !profitClearsFees(pos) && (cashTape || scratch)) {
+          blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
+          continue;
+        }
         if (cashTape) {
           const before = next.positions.length;
           next = await walletExit(next, pos, "fade", executor, blocked);
@@ -210,7 +218,7 @@ export async function tickBot(
           continue;
         }
         if (next.config.scratchEnabled === false) continue;
-        if (m5 === null || m15 === null || !shouldScratch(pos, m5, m15)) continue;
+        if (!scratch) continue;
         const before = next.positions.length;
         next = await walletExit(next, pos, "time", executor, blocked);
         if (next.positions.length < before) closed += 1;

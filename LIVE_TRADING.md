@@ -56,6 +56,7 @@ Rebuild after changing `NEXT_PUBLIC_*` (`npm run build` or `npm run dev`).
 
 - You can lose the USDC you swap plus SOL fees, and leveraged tickets can lose faster.
 - The minute-bar replay in the README found no configuration that was profitable after fees in both test windows. The Solana defaults lose the least, but they still lose. 5x and 10x lost more in every run.
+- A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser.
 - Jupiter lite-api is rate-limited (~0.5 rps keyless). A burst of ticks can 429.
 - Public RPC can drop or delay confirmations. The desk reports the signature even if refresh is slow.
 - Paper fills are mid + a small slip + the venue fee. Live impact, MEV, and priority fees are worse.

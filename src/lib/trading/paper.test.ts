@@ -33,6 +33,8 @@ describe("paper", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100 }), 1);
     assert.ok(Math.abs(opened.positions[0].entryPrice - 100 * (1 + 28 / 10_000)) < 1e-9);
+    const thin = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100, targetPct: 0.5 }), 1);
+    assert.ok((thin.positions[0]?.targetProfitPct ?? 0) > 0.5);
   });
 
   it("shrinks a ticket so a $6 book still gets a fill", () => {

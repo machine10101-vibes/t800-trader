@@ -34,14 +34,14 @@ Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). 
 
 ## Solana strategy and replay results
 
-Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
+A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
 
 `scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
 
 | Setup, $200 book | 89-day tuning window | 30-day holdout |
 | --- | --- | --- |
 | Previous defaults (15m flow entries, fade exit, 5x/10x) | −98.5% | −84.6% |
-| Current Solana defaults | −2.1%, max drawdown 4.4% | −0.6%, max drawdown 2.6% |
+| Current Solana defaults | −0.9%, max drawdown 3.2% | −1.3%, max drawdown 3.2% |
 
 No configuration tested was profitable after fees in both windows. The current defaults lose the least and draw down the least. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
 

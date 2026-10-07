@@ -92,7 +92,11 @@ export function SettingsPanel({
         />
         <Field
           label="Sell if it rises"
-          hint="Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
+          hint={
+            chain === "solana"
+              ? "Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
+              : "Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
+          }
           suffix="%"
           min={0.5}
           max={30}

@@ -1,22 +1,13 @@
 import { sameMint } from "@/lib/chain";
-import { SOL_MINT } from "@/lib/market/universe";
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
+import { PAPER_SLIP_BPS, targetAboveFees, venueFeeBps } from "./fees";
 import { rememberClose } from "./learn";
 import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl } from "./risk";
 
-const SLIP_BPS = 8;
+export { venueFeeBps } from "./fees";
 
-/**
- * Venue cost a paper fill pays on top of the slip, so PAPER results read like LIVE.
- * Jupiter perps charge about 6 bps of size per side. SOL/USDC routes are a few bps.
- * Smaller Solana names route through 0.25% pools. Cronos rows are left as they were.
- */
-export function venueFeeBps(mint: string, symbol: string, leverage = 1): number {
-  if (mint.startsWith("0x")) return 0;
-  if (symbol === "SOL" || sameMint(mint, SOL_MINT)) return leverage > 1 ? 7 : 3;
-  return 20;
-}
+const SLIP_BPS = PAPER_SLIP_BPS;
 
 export function fillPrice(
   signalPrice: number,
@@ -88,10 +79,11 @@ export function openPosition(
   qty = filledQty;
   const notional = exposure;
 
+  const targetPct = targetAboveFees(signal.mint, signal.symbol, leverage, signal.targetPct);
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
   const target =
-    signal.side === "long" ? price * (1 + signal.targetPct / 100) : price * (1 - signal.targetPct / 100);
+    signal.side === "long" ? price * (1 + targetPct / 100) : price * (1 - targetPct / 100);
 
   const position: Position = {
     id: id("pos"),
@@ -118,7 +110,7 @@ export function openPosition(
     scaled: false,
     bracketPreset: true,
     stopLossPct: signal.stopPct,
-    targetProfitPct: signal.targetPct,
+    targetProfitPct: targetPct,
     signature: stamp?.signature || undefined,
     tokenDecimals: stamp?.tokenDecimals,
     leverage: leverage > 1 ? leverage : undefined,

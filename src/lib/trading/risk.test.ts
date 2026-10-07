@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, profitClearsFees, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
 import { SOL_MINT } from "../market/universe";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
@@ -892,5 +892,44 @@ describe("settings stop and target", () => {
     assert.equal(stamped.stopPct, 1.5);
     assert.equal(stamped.targetPct, 3.5);
     assert.equal(signal.stopPct, 1.25);
+  });
+
+  it("will not sell a Solana winner for less than the open and close fees", () => {
+    const openedAt = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+    const small = held({
+      symbol: "PUMP",
+      mint: "pump",
+      sector: "Meme",
+      entryPrice: 100,
+      markPrice: 100.2,
+      highWater: 100.2,
+      targetPrice: 100.3,
+      targetProfitPct: 0.3,
+      stopLossPct: 4,
+      stopPrice: 96,
+      initialStop: 96,
+      openedAt,
+      bracketPreset: true,
+    });
+    assert.equal(profitClearsFees(small), false);
+    const heldOpen = managePosition(small);
+    assert.equal(heldOpen.exit, undefined);
+    assert.equal(heldOpen.feeHold, true);
+    const cleared = { ...small, markPrice: 102, highWater: 102, targetPrice: 101, targetProfitPct: 1 };
+    assert.equal(profitClearsFees(cleared), true);
+    assert.equal(managePosition(cleared).exit, "target");
+    const raised = presetBracket(small, { targetProfitPct: 0.4 });
+    assert.ok((raised.targetProfitPct ?? 0) > 0.4);
+    const cro = held({
+      mint: "0xabc",
+      symbol: "CRO",
+      markPrice: 100.05,
+      highWater: 100.05,
+      openedAt,
+      targetProfitPct: 4,
+      targetPrice: 104,
+      bracketPreset: true,
+    });
+    assert.equal(managePosition(cro).exit, "time");
   });
 });
