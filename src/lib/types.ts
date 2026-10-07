@@ -84,6 +84,8 @@ export interface TechnicalSnapshot {
   priorHigh: number | null;
   priorLow: number | null;
   barsAboveEma9: number;
+  /** Closes under EMA9, counted the same way as barsAboveEma9. Shorts use it. */
+  barsBelowEma9?: number;
 }
 
 export interface ScoredCandidate extends TokenCandidate {
@@ -283,6 +285,8 @@ export interface BotConfig {
    * After that, an explicit off stays off.
    */
   liveTradesRev: number;
+  /** Solana books under rev 1 take the replay-tested exits and spot-only sizing once. */
+  strategyRev?: number;
   /** PAPER is the default. LIVE still needs a session confirm before swaps leave the browser. */
   executionMode: ExecutionMode;
   /** Jupiter quote slippage for LIVE preflight and Ultra closes. */

@@ -1,5 +1,6 @@
 import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
+import { feeHurdlePct, targetAboveFees } from "./fees";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
 
 /** Smallest marked trading balance the desk will arm and open against. */
@@ -74,6 +75,17 @@ export function dayLossUsedPct(portfolio: Portfolio, config: BotConfig): number 
   if (portfolio.dayStartEquity <= 0) return 0;
   const used = ((portfolio.dayStartEquity - portfolio.equityUsd) / portfolio.dayStartEquity) * 100;
   return Math.max(0, used / Math.max(config.dailyLossLimitPct, 0.1));
+}
+
+/** How long a losing streak pauses new tickets. Only a win resets the streak, so the pause has to expire on its own. */
+export const LOSS_STREAK_PAUSE_MS = 60 * 60_000;
+
+/** True while the last losing close of a streak is recent enough to hold new tickets. */
+export function lossStreakPaused(trades: Trade[], cap: number, nowMs = Date.now()): boolean {
+  if (!(cap > 0) || consecutiveLosses(trades) < cap) return false;
+  const last = trades.find((t) => t.action === "close" && t.pnlUsd !== null);
+  const at = last ? Date.parse(last.at) : NaN;
+  return Number.isFinite(at) && nowMs - at < LOSS_STREAK_PAUSE_MS;
 }
 
 export function consecutiveLosses(trades: Trade[]): number {
@@ -219,21 +231,26 @@ export function canOpen(args: {
   stance?: MarketRegime["stance"];
   /** Wallet swaps size from the spendable leg, which can sit under the marked $3 balance. */
   minCashUsd?: number;
+  /** Solana shorts the same setups in a falling tape. Cronos keeps the old block. */
+  defensiveShorts?: boolean;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT) {
-    return "Only SOL can be shorted. This name is a spot buy and a spot sell.";
+  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT && config.walletSwaps) {
+    return "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
   }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
+  if (config.maxPositions > 0 && positions.length >= config.maxPositions) {
+    return `Holding ${config.maxPositions} coins, the most allowed at once`;
+  }
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
   if (portfolio.cashUsd < minCash) return "Insufficient cash";
-  if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
+  if (stance === "defensive" && signal.side === "short" && !args.defensiveShorts) return "No shorts in a defensive tape";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
     return `Breakouts need a ${breakoutScore}+ score when defensive`;
@@ -242,19 +259,20 @@ export function canOpen(args: {
   const sameSector = positions.filter((p) => (p.sector ?? "Unknown") === sector).length;
   const sectorCap = Math.max(1, policyNum(config.maxPerSector, POLICY.maxPerSector));
   if (sameSector >= sectorCap) return `Sector cap of ${sectorCap} reached for ${sector}`;
+  if (sector === "Meme" && stance === "defensive") return "Memes are flattened in a defensive tape, so none are opened";
   if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
     return "Meme cluster capped off risk-on";
   }
   const lastStop = trades.find(
     (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
   );
-  const cooldownMin = Math.min(8, Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)));
+  const cooldownMin = Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes));
   const cooldownMs = cooldownMin * 60_000;
   if (cooldownMs > 0 && lastStop && Date.now() - Date.parse(lastStop.at) < cooldownMs) {
     return "Cooldown after a stop/time-out on this mint";
   }
   const streakCap = policyNum(config.lossStreakPause, POLICY.lossStreakPause);
-  if (streakCap > 0 && consecutiveLosses(trades) >= streakCap) return `Cooling after ${streakCap} straight losses`;
+  if (lossStreakPaused(trades, streakCap)) return `Cooling for an hour after ${streakCap} straight losses`;
   const budget = policyNum(config.dayBudgetPct, POLICY.dayBudgetPct) / 100;
   if (dayLossUsedPct(portfolio, config) >= budget) return "Protect remaining day budget";
   const floor = policyNum(config.minConfidence, POLICY.minConfidence);
@@ -419,23 +437,46 @@ export function alignBracket(position: Position, config?: Partial<BotConfig>): P
   };
 }
 
-/** First scan locks the settings bracket. After that the prices stay on the ticket. */
+/** First scan locks the settings bracket. After that the prices stay, except a target that cannot clear both fees. */
 export function presetBracket(position: Position, config?: Partial<BotConfig>): Position {
-  if (position.bracketPreset) return position;
+  const hurdle = feeHurdlePct(position.mint, position.symbol, position.leverage ?? 1);
+  if (position.bracketPreset) {
+    if (!(hurdle > 0) || (position.targetProfitPct ?? 0) > hurdle) return position;
+    return {
+      ...position,
+      targetProfitPct: hurdle,
+      targetPrice: priceFromEntry(position.entryPrice, position.side, hurdle, "target"),
+    };
+  }
   const stopLossPct = policyNum(config?.stopLossPct, POLICY.stopLossPct);
-  const targetProfitPct = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
-  return { ...alignBracket(position, config), bracketPreset: true, stopLossPct, targetProfitPct };
+  const targetProfitPct = targetAboveFees(
+    position.mint,
+    position.symbol,
+    position.leverage ?? 1,
+    policyNum(config?.targetProfitPct, POLICY.targetProfitPct),
+  );
+  return { ...alignBracket(position, { ...config, targetProfitPct }), bracketPreset: true, stopLossPct, targetProfitPct };
+}
+
+/** True when a sale at this mark would net more than the open fee and the close fee together. */
+export function profitClearsFees(
+  position: Pick<Position, "mint" | "symbol" | "leverage" | "side" | "entryPrice" | "markPrice">,
+): boolean {
+  const hurdle = feeHurdlePct(position.mint, position.symbol, position.leverage ?? 1);
+  if (!(hurdle > 0)) return true;
+  return favorableMovePct(position) > hurdle;
 }
 
 /** New tickets use the settings stop and target, not the signal's built-in percents. */
-export function withUserBracket<T extends { stopPct: number; targetPct: number }>(
+export function withUserBracket<T extends { stopPct: number; targetPct: number; mint?: string; symbol?: string }>(
   signal: T,
   config?: Partial<BotConfig>,
 ): T {
+  const configured = policyNum(config?.targetProfitPct, POLICY.targetProfitPct);
   return {
     ...signal,
     stopPct: policyNum(config?.stopLossPct, POLICY.stopLossPct),
-    targetPct: policyNum(config?.targetProfitPct, POLICY.targetProfitPct),
+    targetPct: targetAboveFees(signal.mint ?? "", signal.symbol ?? "", 1, configured),
   };
 }
 
@@ -443,9 +484,13 @@ export function managePosition(
   position: Position,
   nowMs = Date.now(),
   config?: Partial<BotConfig>,
-): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean } {
+): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean; feeHold?: boolean } {
   const pnlPct = unrealizedPnl(position).pct;
-  if (typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) return { exit: "target" };
+  const clears = profitClearsFees(position);
+  if (typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) {
+    if (pnlPct <= 0 || clears) return { exit: "target" };
+    return { feeHold: true };
+  }
   if (typeof position.stopLossPct === "number" && pnlPct <= -position.stopLossPct + 1e-6) return { exit: "stop" };
   const meme = (position.sector ?? "Unknown") === "Meme";
   const timeCap = meme
@@ -458,10 +503,13 @@ export function managePosition(
   const hurriedCap = timeCap * (speed < 1 ? Math.max(speed, 0.5) : 1);
   const hurriedStale = staleMin * speed;
   const hard = exitReason(position, nowMs, hurriedCap);
-  if (hard && hard !== "time") return { exit: hard };
+  if (hard === "stop" || hard === "risk-off") return { exit: hard };
   const r = rMultiple(position);
   const ageMin = positionAgeMin(position, nowMs);
-  if (ageMin >= hurriedStale && r < 0.15) return { exit: "time" };
+  const stale = ageMin >= hurriedStale && r < 0.15;
+  const soft = hard === "target" || hard === "trail" || hard === "time" || stale;
+  if (soft && pnlPct > 0 && !clears) return { feeHold: true };
+  if (stale) return { exit: "time" };
   if (hard) return { exit: hard };
 
   const beR = policyNum(config?.beR, POLICY.beR) * speed;
@@ -470,8 +518,13 @@ export function managePosition(
   const lockProfit = policyNum(config?.lockProfitR, POLICY.lockProfitR);
   const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
   const lockR = r >= lockAt ? lockProfit : 0.05;
-  const be = position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
-  if (r >= beR) {
+  let be = position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
+  const hurdle = feeHurdlePct(position.mint, position.symbol, position.leverage ?? 1);
+  if (hurdle > 0 && clears) {
+    const floor = priceFromEntry(position.entryPrice, position.side, hurdle, "target");
+    be = position.side === "long" ? Math.max(be, floor) : Math.min(be, floor);
+  }
+  if (r >= beR && (hurdle === 0 || clears)) {
     const tighter = position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);
     if (position.side === "long" ? tighter > position.stopPrice : tighter < position.stopPrice) {
       if (r >= scaleAt && !position.scaled) return { nextStop: tighter, scale: true };
@@ -479,6 +532,6 @@ export function managePosition(
     }
   }
 
-  if (r >= scaleAt && !position.scaled) return { scale: true };
+  if (r >= scaleAt && !position.scaled && (hurdle === 0 || clears)) return { scale: true };
   return {};
 }

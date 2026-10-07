@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_CONFIG, emptyState } from "../store";
 import type { Signal } from "../types";
-import { closePosition, markBook, marksForOpen, openPosition, scaleOut } from "./paper";
+import { closePosition, markBook, marksForOpen, openPosition, scaleOut, venueFeeBps } from "./paper";
 
 function signal(over: Partial<Signal> = {}): Signal {
   return {
@@ -25,6 +25,18 @@ function signal(over: Partial<Signal> = {}): Signal {
 }
 
 describe("paper", () => {
+  it("prices the Solana venue fee into practice fills", () => {
+    assert.equal(venueFeeBps("mint", "SOL"), 3);
+    assert.equal(venueFeeBps("mint", "SOL", 5), 7);
+    assert.equal(venueFeeBps("pumpMint", "PUMP"), 20);
+    assert.equal(venueFeeBps("0xabc", "CRO"), 0);
+    const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
+    const opened = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100 }), 1);
+    assert.ok(Math.abs(opened.positions[0].entryPrice - 100 * (1 + 28 / 10_000)) < 1e-9);
+    const thin = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100, targetPct: 0.5 }), 1);
+    assert.ok((thin.positions[0]?.targetProfitPct ?? 0) > 0.5);
+  });
+
   it("shrinks a ticket so a $6 book still gets a fill", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 6 });
     const next = openPosition(state, signal({ price: 100 }), 1);

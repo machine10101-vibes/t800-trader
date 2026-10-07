@@ -3,7 +3,7 @@
 import type { ChainId } from "@/lib/chain";
 import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
-import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
+import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -47,7 +47,14 @@ export function SettingsPanel({
             </button>
             <button
               disabled={busy}
-              onClick={() => setLocal(normalizeConfig({ ...DEFAULT_CONFIG, startingEquity: local.startingEquity }))}
+              onClick={() =>
+                setLocal(
+                  normalizeConfig({
+                    ...(chain === "solana" ? solanaDefaults() : DEFAULT_CONFIG),
+                    startingEquity: local.startingEquity,
+                  }),
+                )
+              }
               className="btn btn-ghost w-full sm:w-auto"
             >
               Reset these settings
@@ -85,7 +92,11 @@ export function SettingsPanel({
         />
         <Field
           label="Sell if it rises"
-          hint="Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
+          hint={
+            chain === "solana"
+              ? "Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
+              : "Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
+          }
           suffix="%"
           min={0.5}
           max={30}
@@ -165,7 +176,7 @@ export function SettingsPanel({
         hint={
           chain === "cronos"
             ? "CRO is a normal buy and a normal sell. 5x and 10x are SOL only."
-            : "SOL only. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it. Everything else is a normal buy and a normal sell."
+            : "SOL only, and off by default. In 120-day replays, 5x and 10x lost more than plain buys every time. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it."
         }
       >
         <Toggle
@@ -254,7 +265,11 @@ export function SettingsPanel({
         />
         <Toggle
           label="Sell a buy that is going nowhere"
-          hint="If a buy is still barely up and the short-term price turns down hard, sell it."
+          hint={
+            chain === "solana"
+              ? "Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
+              : "If a buy is still barely up and the short-term price turns down hard, sell it."
+          }
           checked={local.scratchEnabled}
           onChange={(v) => set({ scratchEnabled: v })}
         />
@@ -312,7 +327,11 @@ export function SettingsPanel({
         <div className="grid gap-3">
           <Toggle
             label="Allow bets that the price will fall"
-            hint="SOL shorts are sent as a Jupiter perpetual. Other tokens stay in practice. They turn off when the market looks shaky."
+            hint={
+              chain === "solana"
+                ? "Practice bets against SOL, Zebec, Pump, ZEC, and Ray with the same 4-hour setups it uses to buy. A real-money short is SOL only, as a Jupiter perpetual."
+                : "SOL shorts are sent as a Jupiter perpetual. Other tokens stay in practice. They turn off when the market looks shaky."
+            }
             checked={local.allowShorts}
             onChange={(v) => set({ allowShorts: v })}
           />

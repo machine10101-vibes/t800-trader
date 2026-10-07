@@ -1,13 +1,21 @@
 import { sameMint } from "@/lib/chain";
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
+import { PAPER_SLIP_BPS, targetAboveFees, venueFeeBps } from "./fees";
 import { rememberClose } from "./learn";
 import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl } from "./risk";
 
-const SLIP_BPS = 8;
+export { venueFeeBps } from "./fees";
 
-export function fillPrice(signalPrice: number, side: "long" | "short", action: "open" | "close"): number {
-  const slip = signalPrice * (SLIP_BPS / 10_000);
+const SLIP_BPS = PAPER_SLIP_BPS;
+
+export function fillPrice(
+  signalPrice: number,
+  side: "long" | "short",
+  action: "open" | "close",
+  feeBps = 0,
+): number {
+  const slip = signalPrice * ((SLIP_BPS + feeBps) / 10_000);
   if (action === "open") return side === "long" ? signalPrice + slip : signalPrice - slip;
   return side === "long" ? signalPrice - slip : signalPrice + slip;
 }
@@ -53,9 +61,12 @@ export function openPosition(
   stamp?: ChainFill,
 ): AppState {
   const signed = Boolean(stamp?.signature);
-  const price = signed && stamp ? stamp.price : fillPrice(signal.price, signal.side, "open");
-  const room = state.portfolio.cashUsd * 0.98;
   const leverage = stamp?.leverage && stamp.leverage > 1 ? stamp.leverage : 1;
+  const price =
+    signed && stamp
+      ? stamp.price
+      : fillPrice(signal.price, signal.side, "open", venueFeeBps(signal.mint, signal.symbol, leverage));
+  const room = state.portfolio.cashUsd * 0.98;
   let filledQty = signed && stamp ? stamp.qty : qty;
   let exposure = filledQty * price;
   let collateral = leverage > 1 ? (stamp?.collateralUsd ?? exposure / leverage) : exposure;
@@ -68,10 +79,11 @@ export function openPosition(
   qty = filledQty;
   const notional = exposure;
 
+  const targetPct = targetAboveFees(signal.mint, signal.symbol, leverage, signal.targetPct);
   const stop =
     signal.side === "long" ? price * (1 - signal.stopPct / 100) : price * (1 + signal.stopPct / 100);
   const target =
-    signal.side === "long" ? price * (1 + signal.targetPct / 100) : price * (1 - signal.targetPct / 100);
+    signal.side === "long" ? price * (1 + targetPct / 100) : price * (1 - targetPct / 100);
 
   const position: Position = {
     id: id("pos"),
@@ -98,7 +110,7 @@ export function openPosition(
     scaled: false,
     bracketPreset: true,
     stopLossPct: signal.stopPct,
-    targetProfitPct: signal.targetPct,
+    targetProfitPct: targetPct,
     signature: stamp?.signature || undefined,
     tokenDecimals: stamp?.tokenDecimals,
     leverage: leverage > 1 ? leverage : undefined,
@@ -143,7 +155,9 @@ export function closePosition(
 ): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
-  const price = signature ? priceHint : fillPrice(priceHint, pos.side, "close");
+  const price = signature
+    ? priceHint
+    : fillPrice(priceHint, pos.side, "close", venueFeeBps(pos.mint, pos.symbol, pos.leverage));
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
   const proceeds = exitProceeds(pos, price, pnl.usd);
@@ -257,7 +271,9 @@ export function scaleOut(
   if (!pos || pos.scaled || fraction <= 0 || fraction >= 1) return state;
   const qty = pos.qty * fraction;
   if (qty <= 0) return state;
-  const price = fillPriceOverride ?? (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close"));
+  const price =
+    fillPriceOverride ??
+    (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close", venueFeeBps(pos.mint, pos.symbol, pos.leverage)));
   const marked = markPosition({ ...pos, markPrice: price, qty }, price);
   const pnl = unrealizedPnl(marked);
   const lev = pos.leverage ?? 1;

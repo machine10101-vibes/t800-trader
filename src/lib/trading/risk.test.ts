@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, profitClearsFees, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
 import { SOL_MINT } from "../market/universe";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
@@ -192,6 +192,36 @@ describe("risk", () => {
       stance: "defensive",
     });
     assert.equal(reason, "No shorts in a defensive tape");
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...signal, sector: "L1" },
+        config: DEFAULT_CONFIG,
+        portfolio: portfolio(),
+        stance: "defensive",
+        defensiveShorts: true,
+      }),
+      null,
+    );
+  });
+
+  it("lets practice short a coin other than SOL, and keeps a live short on SOL", () => {
+    const signal = {
+      mint: "ray",
+      symbol: "RAY",
+      sector: "DEX",
+      side: "short",
+      reason: "breakout",
+      confidence: 80,
+    } as Signal;
+    assert.equal(
+      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
+      null,
+    );
+    assert.equal(
+      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
+      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
+    );
   });
 
   it("blocks a fourth attempt after three straight losses", () => {
@@ -222,7 +252,25 @@ describe("risk", () => {
         { action: "close", pnlUsd: -3, mint: "c", at: new Date().toISOString() } as never,
       ],
     });
-    assert.equal(reason, "Cooling after 3 straight losses");
+    assert.equal(reason, "Cooling for an hour after 3 straight losses");
+  });
+
+  it("lets the streak pause lapse after an hour so a win can reset it", () => {
+    const old = new Date(Date.now() - 61 * 60_000).toISOString();
+    const losses = [-10, -8, -3].map((pnlUsd, i) => ({ action: "close", pnlUsd, mint: `m${i}`, at: old }) as never);
+    assert.equal(lossStreakPaused(losses, 3), false);
+    assert.equal(lossStreakPaused(losses, 3, Date.parse(old) + 30 * 60_000), true);
+  });
+
+  it("holds no more coins than the most-at-once setting", () => {
+    const held = [{ mint: "a", sector: "L1" }, { mint: "b", sector: "DeFi" }] as never[];
+    const reason = canOpen({
+      positions: held,
+      signal: { mint: "zzz", symbol: "ZZZ", sector: "AI", side: "long", reason: "breakout", confidence: 90 } as never,
+      config: { ...DEFAULT_CONFIG, maxPositions: 2, microOneTicket: false },
+      portfolio: portfolio(),
+    });
+    assert.equal(reason, "Holding 2 coins, the most allowed at once");
   });
 
   it("sizes down after a two-loss streak", () => {
@@ -710,7 +758,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("lets a SOL short through and keeps every other name a spot buy and spot sell", () => {
+  it("lets a live SOL short through and a practice short of any book name", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -721,15 +769,25 @@ describe("LIVE gates and short trail", () => {
       }),
       null,
     );
-    assert.match(
+    assert.equal(
       canOpen({
         positions: [],
         signal: { ...longSignal, side: "short", symbol: "ZBCN" },
         config: { ...DEFAULT_CONFIG, walletSwaps: false, allowShorts: true },
         portfolio: portfolio(),
         stance: "mixed",
-      }) ?? "",
-      /spot buy/,
+      }),
+      null,
+    );
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...longSignal, side: "short", symbol: "ZBCN" },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "mixed",
+      }),
+      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
     );
   });
 
@@ -874,5 +932,44 @@ describe("settings stop and target", () => {
     assert.equal(stamped.stopPct, 1.5);
     assert.equal(stamped.targetPct, 3.5);
     assert.equal(signal.stopPct, 1.25);
+  });
+
+  it("will not sell a Solana winner for less than the open and close fees", () => {
+    const openedAt = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+    const small = held({
+      symbol: "PUMP",
+      mint: "pump",
+      sector: "Meme",
+      entryPrice: 100,
+      markPrice: 100.2,
+      highWater: 100.2,
+      targetPrice: 100.3,
+      targetProfitPct: 0.3,
+      stopLossPct: 4,
+      stopPrice: 96,
+      initialStop: 96,
+      openedAt,
+      bracketPreset: true,
+    });
+    assert.equal(profitClearsFees(small), false);
+    const heldOpen = managePosition(small);
+    assert.equal(heldOpen.exit, undefined);
+    assert.equal(heldOpen.feeHold, true);
+    const cleared = { ...small, markPrice: 102, highWater: 102, targetPrice: 101, targetProfitPct: 1 };
+    assert.equal(profitClearsFees(cleared), true);
+    assert.equal(managePosition(cleared).exit, "target");
+    const raised = presetBracket(small, { targetProfitPct: 0.4 });
+    assert.ok((raised.targetProfitPct ?? 0) > 0.4);
+    const cro = held({
+      mint: "0xabc",
+      symbol: "CRO",
+      markPrice: 100.05,
+      highWater: 100.05,
+      openedAt,
+      targetProfitPct: 4,
+      targetPrice: 104,
+      bracketPreset: true,
+    });
+    assert.equal(managePosition(cro).exit, "time");
   });
 });

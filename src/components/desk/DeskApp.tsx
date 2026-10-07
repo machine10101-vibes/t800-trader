@@ -2,6 +2,7 @@
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
 import { ExecutionLog } from "@/components/desk/executions";
+import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
@@ -40,7 +41,7 @@ import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
 import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
-type Tab = "overview" | "radar" | "bot" | "book" | "risk";
+type Tab = "home" | "overview" | "radar" | "bot" | "book" | "risk";
 
 const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "overview", label: "Overview", kicker: "01" },
@@ -49,6 +50,19 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "book", label: "Book", kicker: "04" },
   { id: "risk", label: "Options", kicker: "05" },
 ];
+
+const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
+  { id: "home", label: "Home", kicker: "01" },
+  { id: "overview", label: "Charts", kicker: "02" },
+  { id: "radar", label: "Coins", kicker: "03" },
+  { id: "bot", label: "Bot log", kicker: "04" },
+  { id: "book", label: "History", kicker: "05" },
+  { id: "risk", label: "Settings", kicker: "06" },
+];
+
+function navFor(chain: ChainId) {
+  return chain === "solana" ? SOLANA_NAV : NAV;
+}
 
 export function DeskApp() {
   const [view, setView] = useState<ChainId>("solana");
@@ -97,7 +111,7 @@ function ChainDesk({
   onSwitch: (next: ChainId) => void;
 }) {
   const copy = CHAIN_COPY[chain];
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(chain === "solana" ? "home" : "overview");
   const [wallet, setWallet] = useState<DeskSession | null>(null);
   const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -129,6 +143,7 @@ function ChainDesk({
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const busyRef = useRef(false);
+  const controlGen = useRef(0);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
@@ -355,11 +370,12 @@ function ChainDesk({
       const current = walletRef.current;
       if (!current || cancel || inflight || busyRef.current) return false;
       inflight = true;
+      const gen = controlGen.current;
       try {
         const next = await controlBot("tick", current, chain);
-        // An arm click sets busy while this tick is still in flight. Applying the
-        // older book here would put the button back on "Arm bot".
-        if (!cancel && !busyRef.current) applyDesk(next, { keepError: true });
+        // A start or stop click while this tick was in flight wins. Applying the
+        // older book here would flip the button back.
+        if (!cancel && !busyRef.current && gen === controlGen.current) applyDesk(next, { keepError: true });
         return true;
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
@@ -405,8 +421,8 @@ function ChainDesk({
         return;
       }
       if (isDeskShortcutTarget(e.target)) return;
-      if (e.key >= "1" && e.key <= "5") {
-        const next = NAV[Number(e.key) - 1];
+      if (e.key >= "1" && e.key <= String(navFor(chain).length)) {
+        const next = navFor(chain)[Number(e.key) - 1];
         if (next) {
           setTab(next.id);
           setThesis(null);
@@ -460,8 +476,12 @@ function ChainDesk({
       return;
     }
     busyRef.current = true;
+    controlGen.current += 1;
     setBusy(true);
     setError(null);
+    if (action === "stop" || action === "kill") {
+      setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: "Stopping…" } } : cur));
+    }
     if (action === "start") {
       setDesk((cur) =>
         cur
@@ -691,7 +711,9 @@ function ChainDesk({
             <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
           </div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
-          <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
+          <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">
+            {chain === "solana" ? "Connect a wallet to start trading" : "Connect a wallet to arm the desk"}
+          </h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
           {chain === "solana" && phone && !walletHint ? (
@@ -716,9 +738,19 @@ function ChainDesk({
                     : copy.connectFallback}
           </button>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
-            <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
-            <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
-            <GateChip label="Live swaps" hint={copy.swapHint} />
+            {chain === "solana" ? (
+              <>
+                <GateChip label="Real prices" hint="CoinGecko · GeckoTerminal · Jupiter" />
+                <GateChip label="Practice first" hint="No money moves until you choose" />
+                <GateChip label="You keep control" hint="No seed phrase, ever" />
+              </>
+            ) : (
+              <>
+                <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
+                <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
+                <GateChip label="Live swaps" hint={copy.swapHint} />
+              </>
+            )}
           </div>
           <form
             className="mt-6 border-t border-[var(--line)] pt-5"
@@ -777,6 +809,8 @@ function ChainDesk({
     );
   }
 
+  const homeOnPhone = chain === "solana" && tab === "home";
+
   return (
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
         <Header
@@ -800,7 +834,7 @@ function ChainDesk({
       <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[200px_1fr]">
         <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
           <div className="flex flex-wrap gap-1 lg:block">
-          {NAV.map((item) => (
+          {navFor(chain).map((item) => (
             <button
               key={item.id}
               aria-label={item.label}
@@ -825,18 +859,18 @@ function ChainDesk({
             onClick={() => void control(desk?.bot.running ? "stop" : "start")}
             className={`btn mt-3 w-full ${
               desk?.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"
-            }`}
+            } ${homeOnPhone ? "max-lg:hidden" : ""}`}
           >
-            {desk?.bot.running ? "Disarm bot" : "Arm bot"}
+            {chain === "solana" ? (desk?.bot.running ? "Stop bot" : "Start bot") : desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
           {error ? <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--crimson)]">{error}</p> : null}
-          {chain === "solana" ? (
+          {chain === "solana" && (desk?.config.walletSwaps || desk?.config.killSwitch) ? (
             <button
               disabled={busy || !desk}
               onClick={() => void control("kill")}
               className="btn mt-2 w-full bg-[var(--danger-soft)] text-[var(--crimson)]"
             >
-              Kill LIVE
+              Emergency stop
             </button>
           ) : null}
           {desk?.config.walletSwaps ? (
@@ -850,8 +884,12 @@ function ChainDesk({
                 : "Send profits"}
             </button>
           ) : null}
-          {desk?.bot.lastNote ? <p className="mt-3 line-clamp-2 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
-          <p className="mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)]">
+          {desk?.bot.lastNote ? (
+            <p className={`mt-3 line-clamp-2 px-2 text-[11px] leading-5 text-[var(--magenta)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
+              {desk.bot.lastNote}
+            </p>
+          ) : null}
+          <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
@@ -874,6 +912,20 @@ function ChainDesk({
             <BootSkeleton address={wallet.address} />
           ) : (
             <div key={tab} className="tab-in">
+              {tab === "home" ? (
+                <Home
+                  desk={desk}
+                  balanceUsd={desk.config.walletSwaps ? trading?.equityUsd || wallet.equityUsd : desk.portfolio.equityUsd}
+                  busy={busy}
+                  closingId={closingId}
+                  closeError={closeError}
+                  onStartStop={() => void control(desk.bot.running ? "stop" : "start")}
+                  onMode={(real) => (real ? requestLive() : void saveConfig({ walletSwaps: false, executionMode: "paper" }))}
+                  onClose={(id) => void closePos(id)}
+                  onOpenPosition={setDetailId}
+                  onMore={() => setTab("risk")}
+                />
+              ) : null}
               {tab === "overview" ? (
                 <Overview
                   desk={desk}
@@ -927,7 +979,9 @@ function ChainDesk({
           )}
           {desk ? (
             <div className="cmd hidden sm:block">
-              1–5 tabs · Space arm · R refresh · F flatten · Esc thesis
+              {chain === "solana"
+                ? "1–6 pages · Space start or stop · R refresh · F sell everything · Esc close"
+                : "1–5 tabs · Space arm · R refresh · F flatten · Esc thesis"}
             </div>
           ) : null}
         </main>

@@ -81,8 +81,40 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     maxLiveNotionalUsd: clampNum(src.maxLiveNotionalUsd, DEFAULT_CONFIG.maxLiveNotionalUsd, 5, 10_000),
     minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
     killSwitch: asBool(src.killSwitch, false),
+    strategyRev: clampNum(input?.strategyRev, 0, 0, 99, true),
     ...liveSwapChoice(input, src),
   };
+}
+
+/**
+ * Replayed over 120 days of SOL/PUMP/ZEC/RAY minute bars with fees, the 15m flow
+ * entries, the fade exit and 5x/10x each lost money. The 4-hour setups with a wide
+ * stop, a 2:1 target and room to work came closest to flat, so Solana books start there.
+ */
+export const SOLANA_STRATEGY = {
+  stopLossPct: 4,
+  targetProfitPct: 8,
+  staleMin: 240,
+  timeCapMin: 360,
+  memeStaleMin: 120,
+  memeTimeCapMin: 180,
+  scratchEnabled: false,
+  multipliers: [] as number[],
+  strategyRev: 1,
+} satisfies Partial<BotConfig>;
+
+export function solanaDefaults(): BotConfig {
+  return normalizeConfig({ ...DEFAULT_CONFIG, ...SOLANA_STRATEGY });
+}
+
+/** One-time move of a saved Solana book onto the tested strategy. Later edits stick. */
+export function withSolanaStrategy(config: BotConfig): BotConfig {
+  if ((config.strategyRev ?? 0) >= SOLANA_STRATEGY.strategyRev) return config;
+  return normalizeConfig({ ...config, ...SOLANA_STRATEGY });
+}
+
+function chainConfig(chain: ChainId, config: Partial<BotConfig>): Partial<BotConfig> {
+  return chain === "solana" ? withSolanaStrategy(normalizeConfig(config)) : config;
 }
 
 /**
@@ -218,10 +250,13 @@ function readRaw(key: string): AppState | null {
 }
 
 function readBrowserState(chain: ChainId, wallet: string): AppState | null {
-  const current = readRaw(bookStorageKey(chain, wallet));
-  if (current) return current;
-  if (chain === "solana") return readRaw(legacyStorageKey(wallet));
-  return null;
+  const found = readRaw(bookStorageKey(chain, wallet)) ?? (chain === "solana" ? readRaw(legacyStorageKey(wallet)) : null);
+  if (!found || chain !== "solana") return found;
+  return { ...found, config: withSolanaStrategy(found.config) };
+}
+
+function blankBook(chain: ChainId, startingEquity = 0): AppState {
+  return emptyState(chainConfig(chain, { ...DEFAULT_CONFIG, startingEquity }));
 }
 
 function writeBrowserState(chain: ChainId, wallet: string, next: AppState): void {
@@ -258,7 +293,7 @@ export function freshBook(state: AppState, liveEquityUsd: number): AppState {
 export async function adoptLiveEquity(liveEquityUsd: number, chain: ChainId = "solana"): Promise<AppState> {
   const slot = slotFor(chain);
   if (!slot.wallet) throw new Error(walletError(chain));
-  const current = slot.memory ?? readBrowserState(chain, slot.wallet) ?? emptyState();
+  const current = slot.memory ?? readBrowserState(chain, slot.wallet) ?? blankBook(chain);
   const next = freshBook(current, liveEquityUsd);
   slot.memory = next;
   writeBrowserState(chain, slot.wallet, next);
@@ -282,7 +317,7 @@ export async function attachWallet(address: string, liveEquityUsd: number, chain
     writeBrowserState(chain, address, slot.memory);
     return slot.memory;
   }
-  slot.memory = emptyState({ ...DEFAULT_CONFIG, startingEquity: Math.max(0, liveEquityUsd) });
+  slot.memory = blankBook(chain, Math.max(0, liveEquityUsd));
   writeBrowserState(chain, address, slot.memory);
   return slot.memory;
 }
@@ -297,7 +332,7 @@ export async function loadState(chain: ChainId = "solana"): Promise<AppState> {
   const slot = slotFor(chain);
   if (!slot.wallet) throw new Error(walletError(chain));
   if (slot.memory) return slot.memory;
-  slot.memory = readBrowserState(chain, slot.wallet) ?? emptyState();
+  slot.memory = readBrowserState(chain, slot.wallet) ?? blankBook(chain);
   return slot.memory;
 }
 

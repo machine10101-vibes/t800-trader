@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical } from "./signals";
+import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical, solanaEntrySignals } from "./signals";
 import { canOpen, cashConcentration, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
@@ -442,6 +442,76 @@ describe("indicators", () => {
     assert.equal(structured[0]?.side, "long");
     const preferred = entrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     assert.equal(preferred[0]?.side, "short");
+    const solana = solanaEntrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    const shape = (rows: typeof structured) => rows.map((s) => `${s.side}:${s.reason}:${s.confidence}`);
+    assert.deepEqual(shape(solana), shape(structured));
+    assert.deepEqual(solanaEntrySignals(both, null, 70, true), []);
+    const down = {
+      rsi14: 40,
+      ema9: 90,
+      ema21: 100,
+      vwap: 110,
+      atrPct: 1.4,
+      volumeZ: 1.4,
+      lastClose: 88,
+      extensionPct: -1,
+      closeStrength: 0.2,
+      priorHigh: 100,
+      priorLow: 90,
+      barsAboveEma9: 0,
+      barsBelowEma9: 3,
+    } as TechnicalSnapshot;
+    const falling = {
+      ...both,
+      symbol: "RAY",
+      mint: "ray",
+      flows: {
+        ...both.flows,
+        m15: flow(-0.8, 30, 70),
+        m30: flow(-1, 30, 70),
+        h1: flow(-1.2, 30, 70),
+      },
+    };
+    const rayShort = solanaEntrySignals(falling, down, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    assert.equal(rayShort[0]?.side, "short");
+    assert.equal(rayShort[0]?.reason, "breakout");
+    assert.equal(solanaEntrySignals(falling, down, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).some((s) => s.side === "short"), false);
+    const dip = {
+      ...down,
+      rsi14: 48,
+      ema9: 102,
+      ema21: 100,
+      vwap: 80,
+      volumeZ: 0.2,
+      lastClose: 101,
+      extensionPct: 0.2,
+      closeStrength: 0.4,
+      priorHigh: 110,
+      priorLow: 90,
+      barsAboveEma9: 0,
+      barsBelowEma9: 0,
+    } as TechnicalSnapshot;
+    const dipped = { ...falling, watchlist: true, priceUsd: 101 };
+    assert.equal(solanaEntrySignals(dipped, dip, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 }).some((s) => s.side === "short"), false);
+    const grind = {
+      ...dip,
+      ema9: 96,
+      ema21: 100,
+      volumeZ: 1.2,
+      lastClose: 97,
+      priorHigh: 110,
+      barsBelowEma9: 3,
+    } as TechnicalSnapshot;
+    const grinding = { ...dipped, priceUsd: 97 };
+    const cont = solanaEntrySignals(grinding, grind, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
+    assert.equal(cont[0]?.side, "short");
+    assert.equal(cont[0]?.reason, "reclaim");
+    const hot = { ...grind, rsi14: 82, ema9: 110, ema21: 100, barsBelowEma9: 0, barsAboveEma9: 3, lastClose: 108, priorLow: 90 } as TechnicalSnapshot;
+    const ripped = solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, hot, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
+    assert.equal(ripped[0]?.side, "short");
+    assert.equal(ripped[0]?.reason, "reclaim");
+    const warm = { ...hot, rsi14: 70 } as TechnicalSnapshot;
+    assert.equal(solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, warm, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 }).some((s) => s.side === "short"), false);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {
