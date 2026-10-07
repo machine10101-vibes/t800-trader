@@ -1,6 +1,7 @@
 import type { ChainId } from "@/lib/chain";
 import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
+import { resumeLiveSession } from "@/lib/solana/live-session";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
 import { normalizeMultipliers } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
@@ -169,6 +170,37 @@ export function getActiveWallet(chain: ChainId = "solana"): string | null {
   return slotFor(chain).wallet;
 }
 
+function lastWalletKey(chain: ChainId): string {
+  return `t800-trader-last-wallet:${chain}`;
+}
+
+export function readLastWallet(chain: ChainId): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(lastWalletKey(chain));
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastWallet(chain: ChainId, address: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(lastWalletKey(chain), address);
+  } catch {
+    // The in-memory slot still holds the book.
+  }
+}
+
+export function clearLastWallet(chain: ChainId): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(lastWalletKey(chain));
+  } catch {
+    // The next connect writes a new address.
+  }
+}
+
 export function bookStorageKey(chain: ChainId, wallet: string): string {
   return `t800-trader-state:${chain}:${wallet}`;
 }
@@ -279,17 +311,29 @@ export function isIdleEmptyBook(state: AppState): boolean {
   );
 }
 
+function keepRunningBot(previous: AppState, next: AppState): AppState {
+  if (!previous.bot.running) return next;
+  return { ...next, bot: { ...previous.bot, lastError: next.bot.lastError } };
+}
+
+function dropStaleLiveLock(state: AppState): AppState {
+  const blocked = (state.bot.blocked ?? []).filter((line) => !/re-confirm live/i.test(line));
+  const lastError = state.bot.lastError && /re-confirm live/i.test(state.bot.lastError) ? null : state.bot.lastError;
+  if (blocked.length === (state.bot.blocked ?? []).length && lastError === state.bot.lastError) return state;
+  return { ...state, bot: { ...state.bot, blocked, lastError } };
+}
+
 export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppState {
   if (!isIdleEmptyBook(state)) return state;
   if (liveEquityUsd < MIN_TRADE_USD) return state;
-  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+  return keepRunningBot(state, emptyState({ ...state.config, startingEquity: liveEquityUsd }));
 }
 
 /** Flat book only. A sub-$3 live read leaves an already funded book alone. */
 export function freshBook(state: AppState, liveEquityUsd: number): AppState {
   if (state.positions.length > 0 || state.trades.length > 0) return state;
   if (liveEquityUsd < MIN_TRADE_USD) return state;
-  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+  return keepRunningBot(state, emptyState({ ...state.config, startingEquity: liveEquityUsd }));
 }
 
 export async function adoptLiveEquity(liveEquityUsd: number, chain: ChainId = "solana"): Promise<AppState> {
@@ -310,24 +354,40 @@ export async function attachWallet(address: string, liveEquityUsd: number, chain
       slot.memory = next;
       writeBrowserState(chain, address, slot.memory);
     }
-    return slot.memory;
-  }
-  slot.wallet = address;
-  const loaded = readBrowserState(chain, address);
-  if (loaded) {
-    slot.memory = seedFromLiveEquity(loaded, liveEquityUsd);
+  } else {
+    slot.wallet = address;
+    const loaded = readBrowserState(chain, address);
+    slot.memory = loaded
+      ? seedFromLiveEquity(loaded, liveEquityUsd)
+      : blankBook(chain, Math.max(0, liveEquityUsd));
     writeBrowserState(chain, address, slot.memory);
-    return slot.memory;
   }
-  slot.memory = blankBook(chain, Math.max(0, liveEquityUsd));
-  writeBrowserState(chain, address, slot.memory);
+  writeLastWallet(chain, address);
+  if (slot.memory.bot.running && slot.memory.config.walletSwaps) resumeLiveSession();
+  if (slot.memory.bot.running) {
+    const cleaned = dropStaleLiveLock(slot.memory);
+    if (cleaned !== slot.memory) {
+      slot.memory = cleaned;
+      writeBrowserState(chain, address, slot.memory);
+    }
+  }
   return slot.memory;
+}
+
+/** Open the last saved book so a refresh can keep ticking before the wallet returns. */
+export async function resumeSavedBook(chain: ChainId = "solana"): Promise<AppState | null> {
+  const last = readLastWallet(chain);
+  if (!last) return null;
+  const saved = peekBook(last, chain);
+  if (!saved) return null;
+  return attachWallet(last, Math.max(0, saved.portfolio.equityUsd), chain);
 }
 
 export function detachWallet(chain: ChainId = "solana"): void {
   const slot = slotFor(chain);
   slot.wallet = null;
   slot.memory = null;
+  clearLastWallet(chain);
 }
 
 export async function loadState(chain: ChainId = "solana"): Promise<AppState> {

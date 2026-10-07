@@ -2,14 +2,18 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_CONFIG,
+  bookStorageKey,
   emptyState,
   freshBook,
   isIdleEmptyBook,
   normalizeConfig,
+  readLastWallet,
+  resumeSavedBook,
   seedFromLiveEquity,
   SOLANA_STRATEGY,
   solanaDefaults,
   withSolanaStrategy,
+  writeLastWallet,
 } from "./store";
 
 describe("store", () => {
@@ -24,6 +28,51 @@ describe("store", () => {
     assert.equal(funded.portfolio.cashUsd, 6);
     assert.equal(funded.portfolio.equityUsd, 6);
     assert.equal(funded.config.startingEquity, 6);
+  });
+
+  it("reopens the last wallet book after a refresh and drops the LIVE lock wall", async () => {
+    const store = new Map<string, string>();
+    (globalThis as { window?: { localStorage: Storage } }).window = {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => store.clear(),
+        key: () => null,
+        length: 0,
+      },
+    };
+    writeLastWallet("cronos", "0xabc");
+    assert.equal(readLastWallet("cronos"), "0xabc");
+    const armed = emptyState({ ...DEFAULT_CONFIG, startingEquity: 20, walletSwaps: true, executionMode: "live" });
+    armed.bot.running = true;
+    armed.bot.blocked = ["Re-confirm LIVE this session before sending swaps"];
+    store.set(bookStorageKey("solana", "So1Refresh"), JSON.stringify(armed));
+    writeLastWallet("solana", "So1Refresh");
+    const book = await resumeSavedBook("solana");
+    assert.equal(book?.bot.running, true);
+    assert.equal((book?.bot.blocked ?? []).some((line) => /re-confirm live/i.test(line)), false);
+  });
+
+  it("keeps an armed bot running when an empty book is reseeded after a refresh", () => {
+    const idle = emptyState({ ...DEFAULT_CONFIG, startingEquity: 0 });
+    idle.bot.running = true;
+    idle.bot.startedAt = "2026-01-01T00:00:00.000Z";
+    idle.bot.lastNote = "Armed — first tick incoming";
+    const funded = seedFromLiveEquity(idle, 6);
+    assert.equal(funded.bot.running, true);
+    assert.equal(funded.bot.startedAt, "2026-01-01T00:00:00.000Z");
+    assert.equal(funded.portfolio.equityUsd, 6);
+
+    const flat = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
+    flat.bot.running = true;
+    const adopted = freshBook(flat, 12);
+    assert.equal(adopted.bot.running, true);
+    assert.equal(adopted.portfolio.equityUsd, 12);
   });
 
   it("does not overwrite a book that already traded", () => {

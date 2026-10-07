@@ -23,7 +23,7 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 5. Arm the bot. The wallet signs once to fund the trading key. That key sends each Jupiter swap.
 6. After confirm, the ticket stores the signature (Solscan link) and the book refreshes balances.
 
-Reload locks LIVE again. The preference may still say LIVE, but this session will not send until you re-confirm. **Kill LIVE** immediately sets PAPER, stops the bot, and disarms the session. Signed tickets can still be closed by hand.
+A refresh keeps LIVE on if the bot was still armed. Closing the tab and coming back later asks you to type LIVE again. **Kill LIVE** immediately sets PAPER, stops the bot, and disarms the session. Signed tickets can still be closed by hand.
 
 ## Env (all optional, all public)
 

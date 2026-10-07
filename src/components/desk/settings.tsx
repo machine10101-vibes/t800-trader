@@ -125,7 +125,7 @@ export function SettingsPanel({
         <div className="mt-4 space-y-4">
       <Section
         title="Real money or practice"
-        hint="Practice is the normal mode. Real money asks you to type the word LIVE once each visit, so a refresh cannot turn it on by accident. Turning the bot on then asks the wallet to set money aside for fees."
+        hint="Practice is the normal mode. Real money asks you to type the word LIVE once when you turn it on. A refresh keeps the bot running. Turning the bot on then asks the wallet to set money aside for fees."
       >
         <Toggle
           label="Use real money"

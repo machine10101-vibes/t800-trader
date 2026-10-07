@@ -122,3 +122,25 @@ export function tapeLabel(symbol: string): string {
   if (symbol === "ZBCN") return "Zebec";
   return symbol;
 }
+
+const DESK_CHAIN_KEY = "t800-trader-desk-chain";
+
+export function readDeskChain(): ChainId {
+  if (typeof window === "undefined") return "solana";
+  try {
+    const raw = window.localStorage.getItem(DESK_CHAIN_KEY);
+    if (raw === "cronos" || raw === "solana") return raw;
+  } catch {
+    // Private mode still opens Solana first.
+  }
+  return "solana";
+}
+
+export function writeDeskChain(chain: ChainId): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(DESK_CHAIN_KEY, chain);
+  } catch {
+    // The in-memory desk still switches.
+  }
+}

@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ACTIVE_BOOK, BOOK_POOLS, WCRO_MINT, WATCHLIST, bookPools, bookTokens } from "./market/universe";
+import { readDeskChain, writeDeskChain } from "./chain";
+import { readLastWallet, writeLastWallet } from "./store";
 import { armButton, shellDesk, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
 import type { TokenCandidate } from "./types";
@@ -9,6 +11,33 @@ describe("armButton", () => {
   it("disarms when the book is already running", () => {
     assert.deepEqual(armButton(true), { action: "stop", label: "Disarm the bot" });
     assert.deepEqual(armButton(false), { action: "start", label: "Arm the bot" });
+  });
+});
+
+describe("desk chain", () => {
+  it("opens the same chain after a refresh", () => {
+    const store = new Map<string, string>();
+    (globalThis as { window?: { localStorage: Storage } }).window = {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => store.clear(),
+        key: () => null,
+        length: 0,
+      },
+    };
+    assert.equal(readDeskChain(), "solana");
+    writeDeskChain("cronos");
+    assert.equal(readDeskChain(), "cronos");
+    writeLastWallet("cronos", "0xabc");
+    writeLastWallet("solana", "So1");
+    assert.equal(readLastWallet("cronos"), "0xabc");
+    assert.equal(readLastWallet("solana"), "So1");
   });
 });
 

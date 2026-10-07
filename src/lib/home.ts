@@ -158,6 +158,8 @@ export function botActivity(input: {
   portfolio: Portfolio;
   config: BotConfig;
   nowMs?: number;
+  /** Page load time. A tick from before the refresh is not a stuck wall. */
+  pageStartedAt?: number;
 }): BotActivity {
   const now = input.nowMs ?? Date.now();
   const targets: ActivityItem[] = [];
@@ -212,7 +214,12 @@ export function botActivity(input: {
   if (input.running && input.ticks > 0 && input.lastTickAt) {
     const at = Date.parse(input.lastTickAt);
     const staleAfter = Math.max(input.scanSeconds * 8_000, 90_000);
-    if (Number.isFinite(at) && now - at > staleAfter) {
+    const reloading =
+      input.pageStartedAt != null &&
+      Number.isFinite(at) &&
+      at < input.pageStartedAt &&
+      now - input.pageStartedAt < staleAfter;
+    if (!reloading && Number.isFinite(at) && now - at > staleAfter) {
       const secs = Math.round((now - at) / 1000);
       const age = secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs}s`;
       add(walls, "wall", `The last check was ${age} ago. The bot looks stuck.`);

@@ -5,7 +5,7 @@ import { ExecutionLog } from "@/components/desk/executions";
 import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
+import { CHAIN_COPY, readDeskChain, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
 import {
   adoptLiveEquity,
   armButton,
@@ -25,13 +25,14 @@ import {
   withdrawTradingProfit,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
-import { listLocalBooks } from "@/lib/store";
+import { getActiveWallet, listLocalBooks, readLastWallet, resumeSavedBook } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
 import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { croHoldings, formatCro } from "@/lib/cronos/balance";
+import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
@@ -65,15 +66,36 @@ function navFor(chain: ChainId) {
   return chain === "solana" ? SOLANA_NAV : NAV;
 }
 
+function previewDeskSession(chain: ChainId, address: string, equityUsd: number): DeskSession {
+  const base = { address, sol: 0, usdc: 0, solPriceUsd: null as number | null, equityUsd };
+  if (chain === "cronos") {
+    return { ...base, wcro: 0, posCro: 0, provider: { request: async () => [] } };
+  }
+  return {
+    ...base,
+    provider: {
+      connect: async () => ({ publicKey: { toBase58: () => address } }),
+    },
+  };
+}
+
 export function DeskApp() {
   const [view, setView] = useState<ChainId>("solana");
+  const [chainReady, setChainReady] = useState(false);
   const [running, setRunning] = useState<Record<ChainId, boolean>>({ solana: false, cronos: false });
   const markRunning = useCallback((chain: ChainId, next: boolean) => {
     setRunning((cur) => (cur[chain] === next ? cur : { ...cur, [chain]: next }));
   }, []);
   useEffect(() => {
+    setView(readDeskChain());
+    setChainReady(true);
+  }, []);
+  useEffect(() => {
+    if (!chainReady) return;
     document.documentElement.dataset.desk = view;
-  }, [view]);
+    writeDeskChain(view);
+  }, [chainReady, view]);
+  if (!chainReady) return null;
   return (
     <>
       <div hidden={view !== "solana"}>
@@ -137,6 +159,7 @@ function ChainDesk({
   const [watchDraft, setWatchDraft] = useState("");
   const [watchError, setWatchError] = useState<string | null>(null);
   const [knownBooks, setKnownBooks] = useState<string[]>([]);
+  const [savedAddress, setSavedAddress] = useState<string | null>(null);
   const [liveConfirm, setLiveConfirm] = useState(false);
   const [armAfterLive, setArmAfterLive] = useState(false);
   const [pendingLiveConfig, setPendingLiveConfig] = useState<Partial<BotConfig> | null>(null);
@@ -195,6 +218,7 @@ function ChainDesk({
       const session = await connectDesk(chain, trusted);
       const book = await attachWallet(session.address, session.equityUsd, chain);
       applyDesk(shellDesk(book));
+      setSavedAddress(session.address);
       setWallet(session);
       setBooting(false);
       try {
@@ -225,6 +249,7 @@ function ChainDesk({
     await disconnectDesk(chain, wallet);
     detachWallet(chain);
     setWallet(null);
+    setSavedAddress(null);
     setTrading(null);
     setDesk(null);
     setThesis(null);
@@ -246,7 +271,20 @@ function ChainDesk({
   }, [chain, connect]);
 
   useEffect(() => {
-    if (chain !== "solana") return;
+    const last = readLastWallet(chain);
+    setSavedAddress(last);
+    if (!last) return;
+    let cancelled = false;
+    void resumeSavedBook(chain).then((book) => {
+      if (cancelled || !book) return;
+      applyDesk(shellDesk(book));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDesk, chain]);
+
+  useEffect(() => {
     const resume = () => {
       if (walletRef.current) return;
       if (document.visibilityState === "hidden") return;
@@ -258,14 +296,14 @@ function ChainDesk({
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("pageshow", resume);
     };
-  }, [chain, connect]);
+  }, [connect]);
 
   useEffect(() => {
-    if (chain !== "solana") return;
     let cancelled = false;
     const id = window.setInterval(() => {
       if (cancelled || walletRef.current) return;
-      if (!injectedSolanaAddress()) return;
+      const ready = chain === "cronos" ? cronosWalletInstalled() : Boolean(injectedSolanaAddress());
+      if (!ready) return;
       cancelled = true;
       window.clearInterval(id);
       void connect(true);
@@ -284,6 +322,7 @@ function ChainDesk({
       onDisconnect: () => {
         detachWallet(chain);
         setWallet(null);
+        setSavedAddress(null);
         setTrading(null);
         setDesk(null);
       },
@@ -297,6 +336,7 @@ function ChainDesk({
           const session = await refreshDesk(chain, { ...wallet, address });
           const book = await attachWallet(session.address, session.equityUsd, chain);
           applyDesk(shellDesk(book));
+          setSavedAddress(session.address);
           setWallet(session);
           setBooting(false);
         })();
@@ -363,7 +403,7 @@ function ChainDesk({
   positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
-    if (!walletRef.current) return;
+    if (!walletRef.current && !getActiveWallet(chain)) return;
     let cancel = false;
     let inflight = false;
     let timer = 0;
@@ -405,7 +445,7 @@ function ChainDesk({
       cancel = true;
       window.clearTimeout(timer);
     };
-  }, [applyDesk, chain, wallet?.address]);
+  }, [applyDesk, chain, desk?.bot.running, wallet?.address]);
 
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;
@@ -704,6 +744,9 @@ function ChainDesk({
   }, [chain, cronosMark, desk, refresh, wallet]);
   const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : peerArmed;
   const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : peerArmed;
+  const shownWallet =
+    wallet ??
+    (savedAddress && desk ? previewDeskSession(chain, savedAddress, desk.portfolio.equityUsd) : null);
   const switchChain = (next: ChainId) => {
     setWatchAddress(null);
     onSwitch(next);
@@ -722,7 +765,7 @@ function ChainDesk({
     );
   }
 
-  if (!wallet) {
+  if (!shownWallet) {
     return (
       <div className="min-h-dvh overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
@@ -836,7 +879,7 @@ function ChainDesk({
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
         <Header
         desk={desk}
-        wallet={wallet}
+        wallet={shownWallet}
         clock={clock}
         solPx={solPx}
         solChg={solChg}
@@ -848,7 +891,7 @@ function ChainDesk({
         updatedAt={updatedAt}
         onDisconnect={() => void disconnect()}
         onRefresh={() => void refresh()}
-        onWatch={() => openWatch(wallet.address)}
+        onWatch={() => openWatch(shownWallet.address)}
         trading={trading}
       />
 
@@ -916,12 +959,16 @@ function ChainDesk({
                 ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
                 : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : cronosHeld
-                ? cronosHeld.cro > 0 || wallet.usdc > 0
+                ? cronosHeld.cro > 0 || shownWallet.usdc > 0
                   ? cronosHeld.onPos
                     ? `${formatCro(cronosHeld.cro)} is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
-                    : `${formatCro(cronosHeld.cro)} · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                    : `${formatCro(cronosHeld.cro)} · ${shownWallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
                   : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos EVM and choose the account that holds the CRO."
-                : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
+                : !wallet
+                  ? desk?.bot.running
+                    ? "Wallet is reconnecting. The bot is still running."
+                    : "Wallet is reconnecting."
+                : `${shownWallet.sol.toFixed(3)} ${copy.native} · ${shownWallet.usdc.toFixed(2)} USDC. ${
                     desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
                   }`}
           </p>
@@ -936,9 +983,16 @@ function ChainDesk({
               {error}
             </div>
           ) : null}
+          {desk && !wallet ? (
+            <div className="rounded-[18px] border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm text-[var(--muted)]">
+              {desk.bot.running
+                ? "Wallet is reconnecting. The bot kept running through the refresh."
+                : "Wallet is reconnecting. Your book is still here."}
+            </div>
+          ) : null}
 
           {!desk ? (
-            <BootSkeleton address={wallet.address} />
+            <BootSkeleton address={shownWallet.address} />
           ) : (
             <div key={tab} className="tab-in">
               {tab === "home" ? (
@@ -946,9 +1000,9 @@ function ChainDesk({
                   desk={desk}
                   balanceUsd={
                     desk.config.walletSwaps
-                      ? trading?.equityUsd || cronosHeld?.usd || wallet.equityUsd
+                      ? trading?.equityUsd || cronosHeld?.usd || shownWallet.equityUsd
                       : desk.positions.length === 0 && desk.trades.length === 0
-                        ? Math.max(desk.portfolio.equityUsd, cronosHeld?.usd ?? wallet.equityUsd)
+                        ? Math.max(desk.portfolio.equityUsd, cronosHeld?.usd ?? shownWallet.equityUsd)
                         : desk.portfolio.equityUsd
                   }
                   busy={busy}
@@ -964,7 +1018,7 @@ function ChainDesk({
               {tab === "overview" ? (
                 <Overview
                   desk={desk}
-                  wallet={wallet}
+                  wallet={shownWallet}
                   trading={trading}
                   winRate={winRate}
                   focusMint={focusMint}
@@ -996,7 +1050,7 @@ function ChainDesk({
                 <Book
                   chain={chain}
                   desk={desk}
-                  wallet={wallet}
+                  wallet={shownWallet}
                   trading={trading}
                   winRate={winRate}
                   busy={busy}

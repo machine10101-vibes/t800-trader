@@ -165,6 +165,23 @@ describe("home", () => {
     });
     assert.match(stuck.walls[0]?.text ?? "", /looks stuck/);
 
+    const afterReload = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 3 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      pageStartedAt: now - 5_000,
+    });
+    assert.equal(afterReload.walls.length, 0);
+
     const off = botActivity({
       running: false,
       killSwitch: false,

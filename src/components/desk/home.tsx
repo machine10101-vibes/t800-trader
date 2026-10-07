@@ -5,6 +5,8 @@ import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
 
+const pageStartedAt = Date.now();
+
 function openPnl(position: Position): { usd: number; pct: number } {
   const dir = position.side === "long" ? 1 : -1;
   const move = position.entryPrice > 0 ? ((position.markPrice - position.entryPrice) / position.entryPrice) * 100 * dir : 0;
@@ -55,6 +57,7 @@ export function Home({
     trades,
     portfolio: desk.portfolio,
     config: desk.config,
+    pageStartedAt: pageStartedAt,
   });
   const statusNow = visibleActivity(activity);
   const results = homeResults(trades);

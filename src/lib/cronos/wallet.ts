@@ -318,7 +318,7 @@ export async function connectCronos(onlyIfTrusted = false): Promise<CronosSessio
   if (!onlyIfTrusted) await ensureCronos(provider);
   else {
     const current = await provider.request({ method: "eth_chainId" });
-    if (!chainIsCronos(current)) throw new Error("Wallet is not on Cronos.");
+    if (!chainIsCronos(current)) await ensureCronos(provider);
   }
   const { evm, pos } = await listCronosAccounts(provider, requested);
   if (!evm.length) throw new Error(onlyIfTrusted ? "Wallet is not connected." : "Wallet connected but did not return an account.");
