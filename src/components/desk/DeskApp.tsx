@@ -2,6 +2,7 @@
 
 import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
 import { ExecutionLog } from "@/components/desk/executions";
+import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
@@ -40,7 +41,7 @@ import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
 import { bookStats } from "@/lib/trading/stats";
 import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 
-type Tab = "overview" | "radar" | "bot" | "book" | "risk";
+type Tab = "home" | "overview" | "radar" | "bot" | "book" | "risk";
 
 const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "overview", label: "Overview", kicker: "01" },
@@ -49,6 +50,19 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "book", label: "Book", kicker: "04" },
   { id: "risk", label: "Options", kicker: "05" },
 ];
+
+const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
+  { id: "home", label: "Home", kicker: "01" },
+  { id: "overview", label: "Charts", kicker: "02" },
+  { id: "radar", label: "Coins", kicker: "03" },
+  { id: "bot", label: "Bot log", kicker: "04" },
+  { id: "book", label: "History", kicker: "05" },
+  { id: "risk", label: "Settings", kicker: "06" },
+];
+
+function navFor(chain: ChainId) {
+  return chain === "solana" ? SOLANA_NAV : NAV;
+}
 
 export function DeskApp() {
   const [view, setView] = useState<ChainId>("solana");
@@ -97,7 +111,7 @@ function ChainDesk({
   onSwitch: (next: ChainId) => void;
 }) {
   const copy = CHAIN_COPY[chain];
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(chain === "solana" ? "home" : "overview");
   const [wallet, setWallet] = useState<DeskSession | null>(null);
   const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -405,8 +419,8 @@ function ChainDesk({
         return;
       }
       if (isDeskShortcutTarget(e.target)) return;
-      if (e.key >= "1" && e.key <= "5") {
-        const next = NAV[Number(e.key) - 1];
+      if (e.key >= "1" && e.key <= String(navFor(chain).length)) {
+        const next = navFor(chain)[Number(e.key) - 1];
         if (next) {
           setTab(next.id);
           setThesis(null);
@@ -812,7 +826,7 @@ function ChainDesk({
       <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[200px_1fr]">
         <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
           <div className="flex flex-wrap gap-1 lg:block">
-          {NAV.map((item) => (
+          {navFor(chain).map((item) => (
             <button
               key={item.id}
               aria-label={item.label}
@@ -839,7 +853,7 @@ function ChainDesk({
               desk?.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"
             }`}
           >
-            {desk?.bot.running ? "Disarm bot" : "Arm bot"}
+            {chain === "solana" ? (desk?.bot.running ? "Stop bot" : "Start bot") : desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
           {error ? <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--crimson)]">{error}</p> : null}
           {chain === "solana" ? (
@@ -848,7 +862,7 @@ function ChainDesk({
               onClick={() => void control("kill")}
               className="btn mt-2 w-full bg-[var(--danger-soft)] text-[var(--crimson)]"
             >
-              Kill LIVE
+              Emergency stop
             </button>
           ) : null}
           {desk?.config.walletSwaps ? (
@@ -886,6 +900,20 @@ function ChainDesk({
             <BootSkeleton address={wallet.address} />
           ) : (
             <div key={tab} className="tab-in">
+              {tab === "home" ? (
+                <Home
+                  desk={desk}
+                  balanceUsd={desk.config.walletSwaps ? trading?.equityUsd || wallet.equityUsd : desk.portfolio.equityUsd}
+                  busy={busy}
+                  closingId={closingId}
+                  closeError={closeError}
+                  onStartStop={() => void control(desk.bot.running ? "stop" : "start")}
+                  onMode={(real) => (real ? requestLive() : void saveConfig({ walletSwaps: false, executionMode: "paper" }))}
+                  onClose={(id) => void closePos(id)}
+                  onOpenPosition={setDetailId}
+                  onMore={() => setTab("risk")}
+                />
+              ) : null}
               {tab === "overview" ? (
                 <Overview
                   desk={desk}
@@ -939,7 +967,9 @@ function ChainDesk({
           )}
           {desk ? (
             <div className="cmd hidden sm:block">
-              1–5 tabs · Space arm · R refresh · F flatten · Esc thesis
+              {chain === "solana"
+                ? "1–6 pages · Space start or stop · R refresh · F sell everything · Esc close"
+                : "1–5 tabs · Space arm · R refresh · F flatten · Esc thesis"}
             </div>
           ) : null}
         </main>
