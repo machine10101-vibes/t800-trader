@@ -979,6 +979,9 @@ describe("settings stop and target", () => {
       targetPrice: 104,
       bracketPreset: true,
     });
-    assert.equal(managePosition(cro).exit, "time");
+    assert.equal(managePosition(cro).feeHold, true);
+    assert.equal(managePosition(cro).exit, undefined);
+    const croCleared = { ...cro, markPrice: 102, highWater: 102 };
+    assert.equal(managePosition(croCleared).exit, "time");
   });
 });
