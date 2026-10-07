@@ -32,6 +32,21 @@ The published site is a **static** Next.js export (`output: 'export'`, `basePath
 
 Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). A **$5** wallet is enough to open. Max 4 positions. ~1.1% equity risk per trade, cut in defensive regimes. Daily loss cap 6%. Micro books ($5–$50) put most of the cash to work so a $5–$6 wallet can actually fill.
 
+## Solana strategy and replay results
+
+Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
+
+`scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
+
+| Setup, $200 book | 89-day tuning window | 30-day holdout |
+| --- | --- | --- |
+| Previous defaults (15m flow entries, fade exit, 5x/10x) | −98.5% | −84.6% |
+| Current Solana defaults | −2.1%, max drawdown 4.4% | −0.6%, max drawdown 2.6% |
+
+No configuration tested was profitable after fees in both windows. The current defaults lose the least and draw down the least. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
+
+The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
+
 ## Run it
 
 ```bash
@@ -61,7 +76,7 @@ No API keys required for the public endpoints above. Rate limits apply. On Pages
 
 ## Honest limits
 
-- PAPER fills assume a small mid-price slip. LIVE Jupiter priority fees, MEV, and impact are worse.
+- PAPER fills on Solana include a small slip plus the venue fee. LIVE Jupiter priority fees, MEV, and impact are worse.
 - LIVE requires typing `LIVE` each browser session. Kill switch flips back to PAPER; signed tickets still need a hand close or flatten.
 - Pool “unique takers” are not unique humans.
 - Unlock calendars, treasuries, audits, and protocol revenue are **not** in these feeds.
