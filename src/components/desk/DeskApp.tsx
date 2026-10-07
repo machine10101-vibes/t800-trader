@@ -31,6 +31,7 @@ import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
+import { croHoldings } from "@/lib/cronos/balance";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
@@ -687,6 +688,20 @@ function ChainDesk({
   const nativeRow = desk?.research.find((r) => r.ticker === copy.native);
   const solPx = (chain === "solana" ? desk?.regime.sol.price : 0) || nativeRow?.price || wallet?.solPriceUsd || 0;
   const solChg = chain === "solana" && desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
+  const cronosHeld = chain === "cronos" && wallet ? croHoldings(wallet, solPx || 0) : null;
+  const cronosMark = cronosHeld?.usd ?? 0;
+  useEffect(() => {
+    if (!wallet || !desk || cronosMark < MIN_TRADE_USD) return;
+    if (desk.positions.length > 0 || desk.trades.length > 0) return;
+    if (desk.portfolio.equityUsd >= MIN_TRADE_USD) return;
+    let cancelled = false;
+    void attachWallet(wallet.address, cronosMark, chain).then(() => {
+      if (!cancelled) void refresh();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chain, cronosMark, desk, refresh, wallet]);
   const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : peerArmed;
   const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : peerArmed;
   const switchChain = (next: ChainId) => {
@@ -900,13 +915,13 @@ function ChainDesk({
               ? chain === "cronos"
                 ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
                 : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
-              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
-                  chain === "cronos"
-                    ? "Arm and disarm ask the Onchain extension to sign."
-                    : desk?.config.walletSwaps
-                      ? "Arm signs once. That signature sends the swaps."
-                      : "Fills stay in this browser."
-                }`}
+              : cronosHeld
+                ? cronosHeld.cro > 0 || wallet.usdc > 0
+                  ? `${cronosHeld.cro.toFixed(3)} CRO · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                  : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos and choose the account that holds the CRO."
+                : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
+                    desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
+                  }`}
           </p>
           <button onClick={() => void disconnect()} className="mt-2 min-h-11 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
@@ -927,7 +942,13 @@ function ChainDesk({
               {tab === "home" ? (
                 <Home
                   desk={desk}
-                  balanceUsd={desk.config.walletSwaps ? trading?.equityUsd || wallet.equityUsd : desk.portfolio.equityUsd}
+                  balanceUsd={
+                    desk.config.walletSwaps
+                      ? trading?.equityUsd || cronosHeld?.usd || wallet.equityUsd
+                      : desk.positions.length === 0 && desk.trades.length === 0
+                        ? Math.max(desk.portfolio.equityUsd, cronosHeld?.usd ?? wallet.equityUsd)
+                        : desk.portfolio.equityUsd
+                  }
                   busy={busy}
                   closingId={closingId}
                   closeError={closeError}
@@ -1154,7 +1175,11 @@ function Header({
   trading: { equityUsd: number } | null;
 }) {
   const armed = Boolean(desk?.bot.running);
-  const equity = usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
+  const markedUsd = trading ? trading.equityUsd : holdings ? holdings.usd : wallet.equityUsd;
+  const equity = holdings && !trading ? `${holdings.cro.toFixed(3)} CRO` : usd(markedUsd);
+  const equityNote =
+    holdings && !trading ? (holdings.usd > 0 ? usd(holdings.usd) : holdings.cro === 0 ? "No CRO on Cronos" : null) : null;
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
@@ -1205,6 +1230,7 @@ function Header({
             <div className="text-right">
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
               <div className="num">{equity}</div>
+              {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
             </div>
             <button onClick={onDisconnect} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Disconnect
@@ -1230,6 +1256,7 @@ function Header({
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
             <div className="num text-xs">{equity}</div>
+            {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
           </div>
           <button onClick={onRefresh} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Refresh
@@ -2209,6 +2236,7 @@ function Book({
     ? bookStats(fills, { ...desk.portfolio, peakEquity: marked || desk.portfolio.equityUsd, equityUsd: marked || desk.portfolio.equityUsd }, [])
     : desk.stats;
   const profit = trading ? tradingProfitUsd(trading.equityUsd, desk.bot.swapPrincipalUsd) : 0;
+  const walletCro = chain === "cronos" ? croHoldings(wallet) : null;
   const signedCloses = fills.filter((trade) => trade.action === "close" && trade.pnlUsd !== null);
   const wins = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) > 0).length : desk.portfolio.winCount;
   const losses = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) <= 0).length : desk.portfolio.lossCount;
@@ -2240,11 +2268,13 @@ function Book({
         <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
           label={trading ? "Trading balance" : "Wallet mark"}
-          value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
+          value={trading ? usd(trading.equityUsd) : walletCro ? `${walletCro.cro.toFixed(3)} CRO` : usd(wallet.equityUsd)}
           sub={
             trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
-              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
+              : walletCro
+                ? `${walletCro.usd > 0 ? usd(walletCro.usd) : "Price pending"} · ${wallet.usdc.toFixed(2)} USDC`
+                : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
           }
         />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />

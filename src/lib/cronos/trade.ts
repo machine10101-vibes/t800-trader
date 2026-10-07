@@ -275,11 +275,19 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
     };
   }
   const account = loadOrCreateCronosKey(session.address);
-  const live = await readCronosBalances(session.address);
-  const plan = planCronosArm(live.sol, live.usdc);
+  const live = await readCronosBalances(session.address, session.provider);
+  const plan = planCronosArm(live.sol, live.usdc, live.wcro);
   let signature = "";
   if (plan.croToBot > 0) {
     signature = await userSend(session, account.address, units(plan.croToBot, 18));
+  }
+  if (plan.wcroToBot > 0) {
+    const data = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [account.address, units(plan.wcroToBot, 18)],
+    });
+    signature = await userSend(session, WCRO, undefined, data);
   }
   if (plan.usdcToBot > 0) {
     const data = encodeFunctionData({
