@@ -222,6 +222,15 @@ describe("risk", () => {
       canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
       "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
     );
+    const cro = { ...signal, mint: "0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23", symbol: "CRO" };
+    assert.equal(
+      canOpen({ positions: [], signal: cro, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
+      null,
+    );
+    assert.equal(
+      canOpen({ positions: [], signal: cro, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
+      "A live short is not sent on Cronos. WolfSwap and cro.trade only buy and sell. Practice can short this coin.",
+    );
   });
 
   it("blocks a fourth attempt after three straight losses", () => {

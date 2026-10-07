@@ -118,6 +118,29 @@ describe("screenCandidate", () => {
     assert.equal(screenCandidate(token({ dex: "vvs" }), bookScreen(saved, "solana")), "Venue VVS Finance is off");
   });
 
+  it("keeps a thin named Cronos pool and still rejects dust", () => {
+    const saved = {
+      minLiquidityUsd: 120_000,
+      minVolume24hUsd: 80_000,
+      minAgeHours: 8,
+      allowMemes: true,
+      venues: ["raydium"],
+    };
+    const named = token({
+      symbol: "CRIMECAT",
+      name: "Crime Cat",
+      chain: "cronos",
+      dex: "vvs",
+      sector: "Meme",
+      watchlist: true,
+      liquidityUsd: 15_000,
+      volume24hUsd: 6_000,
+    });
+    assert.equal(screenCandidate(named, bookScreen(saved, "cronos")), null);
+    const dust = token({ ...named, liquidityUsd: 100, volume24hUsd: 10, watchlist: true });
+    assert.match(screenCandidate(dust, bookScreen(saved, "cronos")) ?? "", /Liquidity/);
+  });
+
   it("passes liquid watchlist names", () => {
     const reason = screenCandidate(token(), {
       minLiquidityUsd: 120_000,

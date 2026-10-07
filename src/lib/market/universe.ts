@@ -26,10 +26,22 @@ export const RAY_MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
 
 /** Wrapped CRO on Cronos. The desk trades this as CRO. */
 export const WCRO_MINT = "0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23";
-/** USDC on the VVS WCRO pool. */
+/** USDC on Cronos. Buys spend this. Sells return it. */
 export const CRONOS_USDC = "0xc21223249ca28397b4b6541dffaecc539bff0c59";
-/** Deep VVS WCRO/USDC pool. GeckoTerminal network id is `cro`. */
+/** Deep WCRO/USDC pool. GeckoTerminal network id is `cro`. */
 export const CRO_POOL = "0xe61db569e231b3f5530168aa2c9d50246525b6d6";
+/** Ultra Cat. The liquid pool is ULTCAT/WCRO. */
+export const ULTCAT_MINT = "0xbf19931ebf1bc9fb85820aa8f6ba29030a9b9a27";
+export const ULTCAT_POOL = "0xe7abe288bca3ee2322f82ac52a2fc44a222cdbfa";
+/** Crime Cat. The Sep 21 2026 contract. A later contract with the same ticker is dust. */
+export const CRIMECAT_MINT = "0x5b326376d34253fab935d3113698c335c7e61e85";
+export const CRIMECAT_POOL = "0x7d5e144ca906f1e1cc93494560b0f1eee9aa8492";
+/** Mistery. */
+export const MERY_MINT = "0x3b41b27e74dd366ce27cb389dc7877d4e1516d4d";
+export const MERY_POOL = "0xa51231984ff01f4933a9fa24e8fd143f18ae6772";
+/** Wolfies. The token ticker is PACK. */
+export const PACK_MINT = "0x0d0b4a6fc6e7f5635c2ff38de75af2e96d6d6804";
+export const PACK_POOL = "0x82234ae6d2df79e4d22ce05c63a703f3dbc32520";
 
 /** The only Solana names this desk trades. Jupiter's most-traded list is not on the book. */
 export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT, PUMP_MINT, ZEC_MINT, RAY_MINT] as const;
@@ -52,7 +64,13 @@ export function popularTokens(): WatchToken[] {
   return popularBook;
 }
 
-const CRONOS_BOOK: WatchToken[] = [{ symbol: "CRO", name: "Cronos", mint: WCRO_MINT, sector: "L1" }];
+const CRONOS_BOOK: WatchToken[] = [
+  { symbol: "CRO", name: "Cronos", mint: WCRO_MINT, sector: "L1", pool: CRO_POOL },
+  { symbol: "ULTCAT", name: "Ultra Cat", mint: ULTCAT_MINT, sector: "Meme", pool: ULTCAT_POOL },
+  { symbol: "CRIMECAT", name: "Crime Cat", mint: CRIMECAT_MINT, sector: "Meme", pool: CRIMECAT_POOL },
+  { symbol: "MERY", name: "Mistery", mint: MERY_MINT, sector: "Meme", pool: MERY_POOL },
+  { symbol: "PACK", name: "Wolfies", mint: PACK_MINT, sector: "Meme", pool: PACK_POOL },
+];
 
 export function geckoNetwork(chain: ChainId = "solana"): string {
   return chain === "cronos" ? "cro" : "solana";
@@ -151,7 +169,7 @@ export function classifySector(symbol: string, name: string): Sector {
 }
 
 export function coreBookMints(chain: ChainId = "solana"): string[] {
-  if (chain === "cronos") return [WCRO_MINT];
+  if (chain === "cronos") return CRONOS_BOOK.map((token) => token.mint);
   return [...ACTIVE_BOOK];
 }
 
@@ -161,7 +179,9 @@ export function bookTokens(chain: ChainId = "solana"): WatchToken[] {
 }
 
 export function bookPools(chain: ChainId = "solana"): { mint: string; pool: string }[] {
-  if (chain === "cronos") return [{ mint: WCRO_MINT, pool: CRO_POOL }];
+  if (chain === "cronos") {
+    return CRONOS_BOOK.flatMap((token) => (token.pool ? [{ mint: token.mint, pool: token.pool }] : []));
+  }
   return BOOK_POOLS;
 }
 
@@ -170,7 +190,7 @@ export function bookMints(chain: ChainId = "solana"): string[] {
 }
 
 export function headlineFor(chain: ChainId = "solana"): { symbol: string; label: string }[] {
-  if (chain === "cronos") return [{ symbol: "CRO", label: "CRO" }];
+  if (chain === "cronos") return CRONOS_BOOK.map((token) => ({ symbol: token.symbol, label: token.symbol }));
   const labels: Record<string, string> = { SOL: "SOL", ZBCN: "Zebec", PUMP: "Pump", ZEC: "ZEC", RAY: "Ray" };
   return bookTokens(chain).map((token) => ({ symbol: token.symbol, label: labels[token.symbol] ?? token.symbol }));
 }

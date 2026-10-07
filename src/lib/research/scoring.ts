@@ -12,10 +12,20 @@ export interface ScreenConfig {
   venues?: string[];
 }
 
-/** Cronos only trades the VVS pool. The saved Solana venue list must not blank that book. */
+/**
+ * Cronos liquidity sits in VVS pools. WolfSwap and cro.trade both settle those pools.
+ * The saved Solana venue list must not blank that book.
+ * The Solana liquidity floor would hide ULTCAT and CRIMECAT, so the named book uses a lower floor.
+ * A dust pool still fails it.
+ */
 export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
   if (chain !== "cronos") return cfg;
-  return { ...cfg, venues: ["vvs"] };
+  return {
+    ...cfg,
+    venues: ["vvs"],
+    minLiquidityUsd: Math.min(cfg.minLiquidityUsd, 10_000),
+    minVolume24hUsd: Math.min(cfg.minVolume24hUsd, 2_000),
+  };
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {

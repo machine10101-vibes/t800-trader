@@ -1,26 +1,23 @@
 import type { ArmAuth, TradingSnap } from "@/lib/solana/authorize";
 import { planProfitWithdrawal, tradingKeyCoversSpend } from "@/lib/solana/authorize";
-import { sellQty } from "@/lib/solana/swap";
 import type { WalletBudget } from "@/lib/trading/risk";
 import type { ChainExecutor, ChainFill, ChainOrder } from "@/lib/types";
 import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { cronos } from "viem/chains";
-import { minOut, planCronosArm } from "./arm";
-import { BOT_MIN_CRO, GAS_CRO, USDC, VVS_ROUTER } from "./constants";
-import { buildVvsCall, planCronosOpen, planVvsSell, type VvsSwap } from "./vvs";
-import { cronosClient, readCronosBalances, readWcroBalance, type CronosSession, type EthereumProvider } from "./wallet";
+import { sameMint } from "@/lib/chain";
+import { planCronosArm } from "./arm";
+import { BOT_MIN_CRO, GAS_CRO, USDC, WCRO } from "./constants";
+import { buildCroTradeCall, buildWolfswapCall, croTradeMinOut, quoteCronos, type CronosRoute } from "./route";
+import { cronosClient, readCronosBalances, type CronosSession, type EthereumProvider } from "./wallet";
 
-const quoteAbi = [
+const depositAbi = [
   {
-    name: "getAmountsOut",
+    name: "deposit",
     type: "function",
-    stateMutability: "view",
-    inputs: [
-      { name: "amountIn", type: "uint256" },
-      { name: "path", type: "address[]" },
-    ],
-    outputs: [{ name: "amounts", type: "uint256[]" }],
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
   },
 ] as const;
 
@@ -120,79 +117,104 @@ async function userSend(
   }
 }
 
-async function quoteOut(amountIn: bigint, path: readonly [`0x${string}`, `0x${string}`]): Promise<bigint> {
-  const amounts = await cronosClient().readContract({
-    address: VVS_ROUTER,
-    abi: quoteAbi,
-    functionName: "getAmountsOut",
-    args: [amountIn, [...path]],
-  });
-  const out = amounts[amounts.length - 1] ?? 0n;
-  if (out <= 0n) throw new Error("VVS has no route for this ticket");
-  return out;
-}
-
-async function ensureAllowance(account: PrivateKeyAccount, token: `0x${string}`, amount: bigint): Promise<void> {
+async function ensureAllowance(
+  account: PrivateKeyAccount,
+  token: `0x${string}`,
+  spender: `0x${string}`,
+  amount: bigint,
+): Promise<void> {
   const allowance = await cronosClient().readContract({
     address: token,
     abi: erc20Abi,
     functionName: "allowance",
-    args: [account.address, VVS_ROUTER],
+    args: [account.address, spender],
   });
   if (allowance >= amount) return;
   const data = encodeFunctionData({
     abi: erc20Abi,
     functionName: "approve",
-    args: [VVS_ROUTER, amount],
+    args: [spender, amount],
   });
   await sendFrom(account, { to: token, data });
 }
 
-function inputDecimals(swap: VvsSwap): number {
-  return swap.method === "swapExactETHForTokens" || swap.approve === undefined ? 18 : swap.path[0] === USDC ? 6 : 18;
+async function readTokenBalance(owner: `0x${string}`, token: `0x${string}`): Promise<bigint> {
+  return cronosClient().readContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [owner],
+  });
 }
 
-async function sendVvsSwap(account: PrivateKeyAccount, swap: VvsSwap, mark: number): Promise<ChainFill> {
-  const amountIn = units(swap.amountIn, inputDecimals(swap));
-  if (swap.approve) await ensureAllowance(account, swap.approve, amountIn);
-  const quoted = await quoteOut(amountIn, swap.path);
-  const call = buildVvsCall({
-    method: swap.method,
-    amountIn,
-    amountOutMin: minOut(quoted),
-    path: swap.path,
-    recipient: account.address,
+async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeIn: boolean): Promise<string> {
+  if (nativeIn) {
+    const data = encodeFunctionData({ abi: depositAbi, functionName: "deposit" });
+    await sendFrom(account, { to: WCRO, data, value: route.amountIn });
+  }
+  if (route.venue === "wolfswap") {
+    if (!route.wolfQuoteId) throw new Error("WolfSwap quote expired before the swap was built");
+    const call = await buildWolfswapCall(route.wolfQuoteId, account.address);
+    const src = route.path[0];
+    if (!src) throw new Error("WolfSwap quote has no input token");
+    await ensureAllowance(account, src, call.to, route.amountIn);
+    return sendFrom(account, call);
+  }
+  const call = buildCroTradeCall({
+    amountIn: route.amountIn,
+    amountOutMin: croTradeMinOut(route.amountOut),
+    path: route.path,
     deadline: deadline(),
   });
-  const signature = await sendFrom(account, call);
-  const buyingCro = swap.method === "swapExactTokensForETH";
-  if (buyingCro) {
-    const outQty = Number(formatUnits(quoted, 18));
-    const price = outQty > 0 ? swap.amountIn / outQty : mark;
-    return { signature, qty: outQty, price, tokenDecimals: 18 };
-  }
-  const usdcOut = Number(formatUnits(quoted, 6));
-  const price = swap.amountIn > 0 ? usdcOut / swap.amountIn : mark;
-  return { signature, qty: swap.amountIn, price, tokenDecimals: 18 };
+  const src = route.path[0];
+  if (!src) throw new Error("cro.trade quote has no input token");
+  await ensureAllowance(account, src, call.to, route.amountIn);
+  return sendFrom(account, call);
 }
 
 async function settleCronos(session: CronosSession, order: ChainOrder): Promise<ChainFill> {
   const account = cronosTradingAccount(session.address);
   if (!account) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
-  if (order.side === "short") throw new Error("Wallet swaps are spot buys and sells. Shorts are not sent to the wallet.");
+  if (order.side === "short") {
+    throw new Error("WolfSwap and cro.trade are spot buys and sells. A live short is not sent.");
+  }
+  const mint = order.mint as `0x${string}`;
+  if (!mint.toLowerCase().startsWith("0x")) throw new Error("This ticket is not a Cronos token");
+  const balances = await readCronosBalances(account.address);
+  const mark = order.price || balances.solPriceUsd || 0;
+
   if (order.kind === "open") {
-    const balances = await readCronosBalances(account.address);
-    const price = order.price || balances.solPriceUsd || 0;
-    const plan = planCronosOpen(order.notionalUsd, balances.usdc, balances.sol);
-    return sendVvsSwap(account, plan.swap, price);
+    if (!(balances.usdc + 1e-6 >= order.notionalUsd)) {
+      throw new Error(
+        `Buying ${order.symbol} needs USDC in the trading key. This key has ${balances.usdc.toFixed(2)} USDC.`,
+      );
+    }
+    const amountIn = units(order.notionalUsd, 6);
+    const route = await quoteCronos({ token: mint, amountIn, side: "buy" });
+    const signature = await sendRoute(account, route, false);
+    const qty = Number(formatUnits(route.amountOut, 18));
+    const price = qty > 0 ? order.notionalUsd / qty : mark;
+    return { signature, qty, price, tokenDecimals: 18 };
   }
 
-  const balances = await readCronosBalances(account.address);
-  const wrapped = await readWcroBalance(account.address);
-  const native = sellQty(order.qty, Math.max(0, balances.sol - GAS_CRO));
-  const wrappedQty = sellQty(order.qty, wrapped);
-  const plan = planVvsSell(native, wrappedQty);
-  return sendVvsSwap(account, plan, order.price || balances.solPriceUsd || 0);
+  const want = units(order.qty, 18);
+  const held = await readTokenBalance(account.address, mint);
+  let amountIn = held < want ? held : want;
+  let nativeIn = false;
+  if (sameMint(mint, WCRO) && amountIn < want) {
+    const native = units(Math.max(0, balances.sol - GAS_CRO), 18);
+    if (native > amountIn) {
+      nativeIn = true;
+      amountIn = native < want ? native : want;
+    }
+  }
+  if (amountIn <= 0n) throw new Error("ALREADY_FLAT: trading key does not hold this token");
+  const route = await quoteCronos({ token: mint, amountIn, side: "sell" });
+  const signature = await sendRoute(account, { ...route, amountIn }, nativeIn);
+  const usdcOut = Number(formatUnits(route.amountOut, 6));
+  const qty = Number(formatUnits(amountIn, 18));
+  const price = qty > 0 ? usdcOut / qty : mark;
+  return { signature, qty, price, tokenDecimals: 18 };
 }
 
 export function cronosExecutor(session: CronosSession): ChainExecutor {

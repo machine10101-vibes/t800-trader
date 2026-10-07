@@ -1,3 +1,4 @@
+import { sameMint } from "@/lib/chain";
 import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { feeHurdlePct, targetAboveFees } from "./fees";
@@ -231,13 +232,15 @@ export function canOpen(args: {
   stance?: MarketRegime["stance"];
   /** Wallet swaps size from the spendable leg, which can sit under the marked $3 balance. */
   minCashUsd?: number;
-  /** Solana shorts the same setups in a falling tape. Cronos keeps the old block. */
+  /** Shorts use the same setups in a falling tape on both chains. */
   defensiveShorts?: boolean;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT && config.walletSwaps) {
-    return "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
+  if (signal.side === "short" && config.walletSwaps && !sameMint(signal.mint, SOL_MINT)) {
+    return signal.mint.toLowerCase().startsWith("0x")
+      ? "A live short is not sent on Cronos. WolfSwap and cro.trade only buy and sell. Practice can short this coin."
+      : "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
   }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";

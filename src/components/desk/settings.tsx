@@ -50,7 +50,7 @@ export function SettingsPanel({
               onClick={() =>
                 setLocal(
                   normalizeConfig({
-                    ...(chain === "solana" ? solanaDefaults() : DEFAULT_CONFIG),
+                    ...(chain === "solana" || chain === "cronos" ? solanaDefaults() : DEFAULT_CONFIG),
                     startingEquity: local.startingEquity,
                   }),
                 )
@@ -72,7 +72,7 @@ export function SettingsPanel({
           {local.allowMemes ? " · meme coins on" : " · meme coins off"}
           {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
-          {chain === "cronos" ? "VVS Finance" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
+          {chain === "cronos" ? "WolfSwap and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
           {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : " · no extra size"}
@@ -92,11 +92,7 @@ export function SettingsPanel({
         />
         <Field
           label="Sell if it rises"
-          hint={
-            chain === "solana"
-              ? "Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
-              : "Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
-          }
+          hint="Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
           suffix="%"
           min={0.5}
           max={30}
@@ -175,7 +171,7 @@ export function SettingsPanel({
         title="Bigger buys"
         hint={
           chain === "cronos"
-            ? "CRO is a normal buy and a normal sell. 5x and 10x are SOL only."
+            ? "Cronos is a normal buy and a normal sell. 5x and 10x are SOL only."
             : "SOL only, and off by default. In 120-day replays, 5x and 10x lost more than plain buys every time. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it."
         }
       >
@@ -202,11 +198,17 @@ export function SettingsPanel({
       {chain === "cronos" ? (
         <Section
           title="Where it buys"
-          hint="Cronos buys and sells go through VVS Finance. A buy spends USDC. A sell turns the coin back into USDC."
+          hint="Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
         >
           <Toggle
-            label="VVS Finance"
-            hint="This stays on. Every Cronos buy and sell uses VVS."
+            label="WolfSwap"
+            hint="This stays on. The quote is compared with cro.trade."
+            checked
+            onChange={() => {}}
+          />
+          <Toggle
+            label="cro.trade"
+            hint="This stays on. Its 0.9% fee is taken off the quote before the comparison."
             checked
             onChange={() => {}}
           />
@@ -265,11 +267,7 @@ export function SettingsPanel({
         />
         <Toggle
           label="Sell a buy that is going nowhere"
-          hint={
-            chain === "solana"
-              ? "Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
-              : "If a buy is still barely up and the short-term price turns down hard, sell it."
-          }
+          hint="Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
           checked={local.scratchEnabled}
           onChange={(v) => set({ scratchEnabled: v })}
         />
@@ -330,7 +328,7 @@ export function SettingsPanel({
             hint={
               chain === "solana"
                 ? "Practice bets against SOL, Zebec, Pump, ZEC, and Ray with the same 4-hour setups it uses to buy. A real-money short is SOL only, as a Jupiter perpetual."
-                : "SOL shorts are sent as a Jupiter perpetual. Other tokens stay in practice. They turn off when the market looks shaky."
+                : "Practice bets against CRO, ULTCAT, CRIMECAT, MERY, and PACK with the same 4-hour setups it uses to buy. Real money only buys and sells."
             }
             checked={local.allowShorts}
             onChange={(v) => set({ allowShorts: v })}

@@ -14,7 +14,7 @@ import type {
 } from "@/lib/types";
 import { snapshotTechnical, technicalFromFlows } from "@/lib/trading/signals";
 import { usd } from "@/lib/utils";
-import { scoreCandidate, screenCandidate } from "./scoring";
+import { bookScreen, scoreCandidate, screenCandidate } from "./scoring";
 
 function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number, maxUnknown: number): boolean {
   if (out.some((x) => x.mint === item.mint)) return false;
@@ -264,13 +264,16 @@ export async function runResearch(
     return cached.value;
   }
   const market = await loadMarket(false, chain);
-  const screen = {
-    minLiquidityUsd: config.minLiquidityUsd,
-    minVolume24hUsd: config.minVolume24hUsd,
-    minAgeHours: config.minAgeHours,
-    allowMemes: config.allowMemes,
-    venues: chain === "cronos" ? ["vvs"] : config.venues,
-  };
+  const screen = bookScreen(
+    {
+      minLiquidityUsd: config.minLiquidityUsd,
+      minVolume24hUsd: config.minVolume24hUsd,
+      minAgeHours: config.minAgeHours,
+      allowMemes: config.allowMemes,
+      venues: config.venues,
+    },
+    chain,
+  );
 
   const passed: TokenCandidate[] = [];
   let eliminated = 0;
@@ -306,7 +309,8 @@ export async function runResearch(
   const scored = seed.map((c) => scoreCandidate(c, structureFor(c)));
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
-  const finalists = pickFinalists(scored, config.allowMemes ? 2 : 0);
+  const memeCap = chain === "cronos" ? 4 : config.allowMemes ? 2 : 0;
+  const finalists = pickFinalists(scored, memeCap);
   const research = finalists.map((c) => thesisFrom(c, market.regime));
 
   const value = {
@@ -352,7 +356,7 @@ export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): st
     research.some((r) => r.sector === "Meme")
       ? "Meme finalists can print research scores from activity alone. Activity is not value accrual."
       : "Excluding memes does not make remaining tokens 'fundamentals'. Many Solana venues do not route value to the token.",
-    "PAPER fills assume mid-price plus a small slip. LIVE Jupiter impact, MEV, and priority fees are worse, and a kill switch does not unwind already-signed tickets.",
+    "PAPER fills assume mid-price plus a small slip. LIVE swap impact and fees are worse, and a kill switch does not unwind already-signed tickets.",
     "SOL beta can invert in a session. The desk can be right on a pool and still lose if the L1 dumps.",
   ];
 }

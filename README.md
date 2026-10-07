@@ -50,6 +50,10 @@ Shorts use those same 4-hour setups turned over: a breakdown through the prior l
 
 No configuration tested was profitable after fees in both windows. Mirrored shorts use the same setups as the longs. On this replay they added a small loss. They did not produce a profit in either window. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
 
+## Cronos
+
+The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, fee hurdle, and short setups. The book is CRO, ULTCAT, CRIMECAT, MERY, and PACK. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Practice can short every name on the book. Real money only buys and sells, because those venues are spot. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
+
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 
 ## Run it
@@ -75,7 +79,9 @@ npm run build
 | [CoinGecko](https://www.coingecko.com) | BTC / ETH / SOL price, dominance, global cap |
 | [Alternative.me](https://alternative.me/crypto/fear-and-greed-index/) | Fear & Greed |
 | [DefiLlama](https://defillama.com) | Solana TVL and DEX volume |
-| [GeckoTerminal](https://www.geckoterminal.com) | Solana pools, flow, OHLCV |
+| [GeckoTerminal](https://www.geckoterminal.com) | Solana and Cronos pools, flow, OHLCV |
+| [WolfSwap](https://wolfswap.gg) | Cronos swap quotes |
+| [cro.trade](https://cro.trade) | Cronos swap quotes |
 
 No API keys required for the public endpoints above. Rate limits apply. On Pages the browser calls these feeds directly, so a blocked or rate-limited origin degrades that slice (the rest of the desk still boots).
 

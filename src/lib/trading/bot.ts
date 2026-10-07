@@ -1,7 +1,6 @@
 import { sameMint, type ChainId } from "@/lib/chain";
-import { GAS_CRO } from "@/lib/cronos/constants";
 import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, cashExit, foldCandles, keepEntry, printClose, solanaKeepEntry, solanaPass, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -32,8 +31,8 @@ import {
   withUserBracket,
   type WalletBudget,
 } from "./risk";
-import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
-import { entrySignals, snapshotTechnical, solanaEntrySignals } from "./signals";
+import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
+import { snapshotTechnical, solanaEntrySignals } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
@@ -139,7 +138,6 @@ export async function tickBot(
       }
       let closed = 0;
       let presetFilled = false;
-      let croAlreadyLive = false;
       const blocked: string[] = [];
 
       if (next.bot.running && market.regime.stance === "defensive") {
@@ -196,18 +194,15 @@ export async function tickBot(
           }
         }
       }
-      if (next.bot.running) {
-        croAlreadyLive = next.positions.some((pos) => sameMint(pos.mint, WCRO_MINT) && Boolean(pos.signature));
-      }
       if (next.bot.running) for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint) ?? [...byMint.values()].find((row) => sameMint(row.mint, pos.mint));
         const candles = cachedOhlcv(pos.poolAddress);
         const m15 = live ? live.flows.m15.priceChangePct : candleChangePct(candles ?? [], 15);
         const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
-        if (chain === "solana" && next.config.scratchEnabled === false) continue;
+        if (next.config.scratchEnabled === false) continue;
         const cashTape = m15 !== null && cashExit(pos.side, m15);
         const scratch = m5 !== null && m15 !== null && shouldScratch(pos, m5, m15);
-        if (chain === "solana" && favorableMovePct(pos) > 0 && !profitClearsFees(pos) && (cashTape || scratch)) {
+        if (favorableMovePct(pos) > 0 && !profitClearsFees(pos) && (cashTape || scratch)) {
           blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
           continue;
         }
@@ -217,7 +212,6 @@ export async function tickBot(
           if (next.positions.length < before) closed += 1;
           continue;
         }
-        if (next.config.scratchEnabled === false) continue;
         if (!scratch) continue;
         const before = next.positions.length;
         next = await walletExit(next, pos, "time", executor, blocked);
@@ -262,52 +256,6 @@ export async function tickBot(
           }
         } catch (error) {
           blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
-        }
-      }
-      if (
-        chain === "cronos" &&
-        next.bot.running &&
-        next.config.walletSwaps &&
-        executor &&
-        budget &&
-        !croAlreadyLive
-      ) {
-        const cro = byMint.get(WCRO_MINT) ?? [...byMint.values()].find((row) => sameMint(row.mint, WCRO_MINT));
-        const price = cro?.priceUsd || budget.solPriceUsd || 0;
-        const qty = Math.max(0, budget.sol - GAS_CRO);
-        const flat = Boolean(cro && tapeInCash(cro.flows.m15.priceChangePct));
-        if (flat && price > 0 && qty * price >= MIN_TICKET_USD) {
-          try {
-            const fill = await executor({
-              kind: "close",
-              side: "long",
-              mint: WCRO_MINT,
-              symbol: "CRO",
-              notionalUsd: qty * price,
-              qty,
-              price,
-              venues: ["vvs"],
-              tokenDecimals: 18,
-            });
-            next = recordCashSale(next, {
-              mint: WCRO_MINT,
-              symbol: "CRO",
-              qty: fill.qty,
-              price: fill.price,
-              signature: fill.signature,
-              note: "CRO 15m is red, so the trading key sold CRO to USDC on VVS.",
-            });
-            closed += 1;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "wallet sell failed";
-            blocked.push(`CRO: ${message}`);
-          }
-        } else if (flat && budget.sol > GAS_CRO + 1) {
-          blocked.push(
-            price > 0
-              ? `CRO: trading key has ${qty.toFixed(3)} CRO, under the minimum sell`
-              : "CRO: price is missing, so the cash sell waits",
-          );
         }
       }
       const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
@@ -357,27 +305,16 @@ export async function tickBot(
           }
           const decision = cachedDecisionChart(token.mint, chain);
           const charted = decision && decision.length >= 30 ? snapshotTechnical(decision) : null;
-          if (chain === "solana" && !charted) {
+          if (!charted) {
             blocked.push(`${token.symbol}: 4-hour chart has not loaded`);
             continue;
           }
-          const candles = cachedOhlcv(token.poolAddress);
-          const folded = candles ? foldCandles(candles, 5) : [];
-          const tech = charted ?? (folded.length >= 20 ? snapshotTechnical(folded) : null);
-          const found = (
-            chain === "solana"
-              ? solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx)
-              : entrySignals(token, tech, token.researchScore, next.config.allowShorts, tapeCtx)
-          ).filter((signal) =>
-            chain === "solana"
-              ? solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)
-              : keepEntry(signal.side, token.flows.m15.priceChangePct),
+          const found = solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx).filter(
+            (signal) => solanaKeepEntry(signal.side, token.flows.m15.priceChangePct),
           );
           signals.push(...found);
           if (!found.length) {
-            blocked.push(
-              chain === "solana" ? solanaPass(token.symbol, token.flows.m15.priceChangePct) : tickPass(token.symbol, token.flows.m15.priceChangePct),
-            );
+            blocked.push(solanaPass(token.symbol, token.flows.m15.priceChangePct));
           }
         }
 
@@ -444,7 +381,7 @@ export async function tickBot(
             trades: risk.trades,
             stance: market.regime.stance,
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
-            defensiveShorts: chain === "solana",
+            defensiveShorts: true,
           });
           if (gate) {
             const native = chain === "cronos" ? "CRO" : "SOL";

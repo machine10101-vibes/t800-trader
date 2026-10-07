@@ -29,7 +29,7 @@ describe("paper", () => {
     assert.equal(venueFeeBps("mint", "SOL"), 3);
     assert.equal(venueFeeBps("mint", "SOL", 5), 7);
     assert.equal(venueFeeBps("pumpMint", "PUMP"), 20);
-    assert.equal(venueFeeBps("0xabc", "CRO"), 0);
+    assert.equal(venueFeeBps("0xabc", "CRO"), 50);
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100 }), 1);
     assert.ok(Math.abs(opened.positions[0].entryPrice - 100 * (1 + 28 / 10_000)) < 1e-9);

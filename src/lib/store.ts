@@ -113,8 +113,10 @@ export function withSolanaStrategy(config: BotConfig): BotConfig {
   return normalizeConfig({ ...config, ...SOLANA_STRATEGY });
 }
 
+/** Solana and Cronos share the 4-hour stop, target, and time defaults. Later edits stick. */
 function chainConfig(chain: ChainId, config: Partial<BotConfig>): Partial<BotConfig> {
-  return chain === "solana" ? withSolanaStrategy(normalizeConfig(config)) : config;
+  const next = normalizeConfig(config);
+  return chain === "solana" || chain === "cronos" ? withSolanaStrategy(next) : next;
 }
 
 /**
@@ -251,7 +253,7 @@ function readRaw(key: string): AppState | null {
 
 function readBrowserState(chain: ChainId, wallet: string): AppState | null {
   const found = readRaw(bookStorageKey(chain, wallet)) ?? (chain === "solana" ? readRaw(legacyStorageKey(wallet)) : null);
-  if (!found || chain !== "solana") return found;
+  if (!found) return found;
   return { ...found, config: withSolanaStrategy(found.config) };
 }
 

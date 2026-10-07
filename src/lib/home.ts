@@ -118,7 +118,7 @@ export interface BotActivity {
 }
 
 const LIMIT_LINE =
-  /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short needs/i;
+  /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short/i;
 
 const WALL_LINE =
   /4-hour chart has not loaded|price feeds disagree|pool tape has not arrived|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;

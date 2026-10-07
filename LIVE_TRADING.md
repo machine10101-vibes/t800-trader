@@ -12,7 +12,7 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 | Long close (button, stop, target, trail, time) | Yes | Token → USDC. If the trading key has under 0.006 SOL, Jupiter Ultra sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
 | SOL 5x / 10x | Yes | Jupiter perps on the polished desk, when the trading key can post collateral. |
 | Short open / cover | SOL only | Practice can short every book name with the same 4-hour setups used to buy. A live short is a SOL Jupiter perpetual. Other live names stay spot buys and sells. |
-| Cronos | Separate | VVS path on the Cronos desk. LIVE confirm is Solana-only. |
+| Cronos | Same 4-hour logic | Book is CRO, ULTCAT, CRIMECAT, MERY, and PACK. Buys and sells quote WolfSwap and cro.trade and send the better output. Practice can short those names. A live short is not sent. LIVE confirm is Solana-only. |
 
 ## Enable LIVE
 
@@ -33,6 +33,7 @@ Reload locks LIVE again. The preference may still say LIVE, but this session wil
 | `NEXT_PUBLIC_JUPITER_API` | `https://lite-api.jup.ag/swap/v1` | Keyless quote + swap build |
 | `NEXT_PUBLIC_JUPITER_ULTRA_API` | `https://lite-api.jup.ag/ultra/v1` | Fee-sponsored closes when SOL is under 0.006 |
 | `NEXT_PUBLIC_JUPITER_API_KEY` | unset | Optional `x-api-key` if you use `https://api.jup.ag/swap/v1` |
+| `NEXT_PUBLIC_WOLFSWAP_API_KEY` | WolfSwap's published test key | Cronos quotes. A production key replaces the test key. |
 
 No private key env vars exist. Do not add any.
 
