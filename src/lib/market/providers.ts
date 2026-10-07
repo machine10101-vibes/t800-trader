@@ -419,16 +419,30 @@ function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
+function candlesFromOhlcv(json: {
+  data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+}): Candle[] {
+  const list = json.data?.attributes?.ohlcv_list ?? [];
+  return list
+    .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
+    .sort((a, b) => a.time - b.time);
+}
+
 async function readOhlcv(url: string): Promise<Candle[]> {
   const json = await paceGecko(() =>
     fetchJson<{
       data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
     }>(url, { timeoutMs: 8_000, retries: 0 }),
   );
-  const list = json.data?.attributes?.ohlcv_list ?? [];
-  return list
-    .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
-    .sort((a, b) => a.time - b.time);
+  return candlesFromOhlcv(json);
+}
+
+/** Cronos book charts skip the 2.1s Gecko queue so all five names paint on login. */
+async function readOhlcvDirect(url: string): Promise<Candle[]> {
+  const json = await fetchJson<{
+    data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+  }>(url, { timeoutMs: 8_000, retries: 1 });
+  return candlesFromOhlcv(json);
 }
 
 async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
@@ -442,13 +456,14 @@ async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId
 }
 
 /** Native 4-hour bars from the pool the desk trades. The token series is only a fallback. */
-async function fetchChartOnce(poolAddress: string, chain: ChainId): Promise<Candle[]> {
+async function fetchChartOnce(poolAddress: string, chain: ChainId, opts?: { direct?: boolean }): Promise<Candle[]> {
+  const read = opts?.direct ? readOhlcvDirect : readOhlcv;
   const network = geckoNetwork(chain);
-  const poolRows = await readOhlcv(geckoHourlyChartUrl(network, poolAddress, "pools"));
+  const poolRows = await read(geckoHourlyChartUrl(network, poolAddress, "pools"));
   if (poolRows.length) return poolRows;
-  const mint = poolMint.get(poolAddress);
+  const mint = poolMint.get(poolAddress) ?? bookPools(chain).find((row) => row.pool.toLowerCase() === poolAddress.toLowerCase())?.mint;
   if (!mint) return poolRows;
-  return readOhlcv(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
+  return read(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
 }
 
 function staleCandles(poolAddress: string): Candle[] | null {
@@ -784,7 +799,10 @@ function decisionKey(chain: ChainId, mint: string): string {
 /** The 4-hour series the bot reads before it trades. Solana comes from Jupiter. */
 export function cachedDecisionChart(mint: string, chain: ChainId = "solana"): Candle[] | null {
   const hit = decisionCache.get(decisionKey(chain, mint));
-  return hit?.rows.length ? hit.rows : null;
+  if (hit?.rows.length) return hit.rows;
+  if (chain !== "cronos") return null;
+  const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+  return pool ? cachedChart(pool) : null;
 }
 
 async function fetchJupiterDecision(mint: string): Promise<Candle[]> {
@@ -796,6 +814,10 @@ async function fetchJupiterDecision(mint: string): Promise<Candle[]> {
 }
 
 export async function loadDecisionChart(mint: string, chain: ChainId = "solana"): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    return pool ? loadCronosDecision(mint, pool, false) : [];
+  }
   const key = decisionKey(chain, mint);
   const hit = decisionCache.get(key);
   if (hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
@@ -809,16 +831,14 @@ export async function loadDecisionChart(mint: string, chain: ChainId = "solana")
 }
 
 async function readDecisionChart(mint: string, chain: ChainId, key: string, stale: Candle[]): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    return pool ? loadCronosDecision(mint, pool, false) : stale;
+  }
   const missedAt = decisionMiss.get(key);
   if (missedAt && Date.now() - missedAt < CANDLE_COOL_MS) return stale;
   try {
-    const rows =
-      chain === "solana"
-        ? await fetchJupiterDecision(mint)
-        : await (async () => {
-            const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
-            return pool ? fetchChartOnce(pool, chain) : [];
-          })();
+    const rows = await fetchJupiterDecision(mint);
     if (rows.length) {
       decisionCache.set(key, { at: Date.now(), rows });
       decisionMiss.delete(key);
@@ -832,12 +852,58 @@ async function readDecisionChart(mint: string, chain: ChainId, key: string, stal
   }
 }
 
-/** Start a Jupiter 4-hour read for every tradable mint. A fresh chart is left alone. */
+async function loadCronosDecision(mint: string, pool: string, force: boolean): Promise<Candle[]> {
+  const key = decisionKey("cronos", mint);
+  const hit = decisionCache.get(key);
+  if (!force && hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
+  const inflight = decisionInflight.get(key);
+  if (inflight) return inflight;
+  const run = (async () => {
+    const missedAt = decisionMiss.get(key);
+    const coolMs = hit?.rows.length ? CANDLE_COOL_MS : 2_000;
+    if (!force && missedAt && Date.now() - missedAt < coolMs) return hit?.rows ?? [];
+    try {
+      const rows = (await fetchChartOnce(pool, "cronos", { direct: true })).slice(-CHART_BARS);
+      if (rows.length) {
+        decisionCache.set(key, { at: Date.now(), rows });
+        chartCache.set(pool, { at: Date.now(), rows });
+        decisionMiss.delete(key);
+        return rows;
+      }
+      decisionMiss.set(key, Date.now());
+      return hit?.rows ?? [];
+    } catch {
+      decisionMiss.set(key, Date.now());
+      return hit?.rows ?? [];
+    }
+  })().finally(() => {
+    if (decisionInflight.get(key) === run) decisionInflight.delete(key);
+  });
+  decisionInflight.set(key, run);
+  return run;
+}
+
+async function prefetchCronosDecisionCharts(force = false): Promise<void> {
+  await Promise.all(bookPools("cronos").map(({ mint, pool }) => loadCronosDecision(mint, pool, force)));
+}
+
+/** Start a 4-hour read for every tradable mint. Cronos pulls all five at once. */
 export function requestDecisionCharts(mints: string[], chain: ChainId): void {
+  if (chain === "cronos") {
+    void prefetchCronosDecisionCharts();
+    return;
+  }
   for (const mint of mints) {
     if (!mint) continue;
     void loadDecisionChart(mint, chain);
   }
+}
+
+/** Login and refresh start here. Cronos does not wait on the wallet or the 1-minute tape. */
+export function prefetchDecisionCharts(chain: ChainId): Promise<void> {
+  if (chain === "cronos") return prefetchCronosDecisionCharts();
+  requestDecisionCharts(bookMints(chain), chain);
+  return Promise.resolve();
 }
 
 /** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */
@@ -882,7 +948,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
-  requestDecisionCharts(bookMints(chain), chain);
+  const chartsReady = prefetchDecisionCharts(chain);
   const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
   const regimePromise = fetchRegime();
   let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
@@ -903,6 +969,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     (candidate) => candidate.mint,
   );
   const pinnedPools = new Set(bookPools(chain).map((row) => row.pool));
+  if (chain === "cronos") await chartsReady.catch(() => undefined);
   requestBookCandles(
     candleRows.map((candidate) => candidate.poolAddress),
     chain,

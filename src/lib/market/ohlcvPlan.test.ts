@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   CANDLE_COOL_MS,
   CHART_BARS,
+  CHART_CANDLE_MS,
   CORE_POOL_MS,
   geckoHourlyChartUrl,
   mintsToFetch,
@@ -71,5 +72,6 @@ describe("4-hour chart url", () => {
     assert.match(url, /currency=usd/);
     assert.match(url, new RegExp(`limit=${CHART_BARS}`));
     assert.match(geckoHourlyChartUrl("cro", "MINT", "tokens"), /\/tokens\/MINT\/ohlcv\/hour\?aggregate=4/);
+    assert.equal(CHART_CANDLE_MS, 60_000);
   });
 });

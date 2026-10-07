@@ -27,7 +27,7 @@ import {
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { getActiveWallet, listLocalBooks, readLastWallet, resumeSavedBook } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
+import { cachedDecisionChart, prefetchDecisionCharts, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -269,6 +269,14 @@ function ChainDesk({
     if (parsed) return;
     void connect(true);
   }, [chain, connect]);
+
+  useEffect(() => {
+    void prefetchDecisionCharts(chain);
+    const id = window.setInterval(() => {
+      void prefetchDecisionCharts(chain);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [chain]);
 
   useEffect(() => {
     const last = readLastWallet(chain);
@@ -1461,7 +1469,7 @@ function useDecisionCharts(mints: string[], chain: ChainId): Record<string, Cand
       });
     };
     paint();
-    const id = setInterval(paint, 2_000);
+    const id = setInterval(paint, 500);
     return () => {
       live = false;
       clearInterval(id);
