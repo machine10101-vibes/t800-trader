@@ -40,7 +40,7 @@ async function main() {
   const risk = await import("../src/lib/trading/risk");
   const paper = await import("../src/lib/trading/paper");
   const { solanaEntrySignals, snapshotTechnical } = await import("../src/lib/trading/signals");
-  const { keepEntry, cashExit } = await import("../src/lib/market/tape");
+  const { cashExit, solanaKeepEntry } = await import("../src/lib/market/tape");
   const { advise, studyTape } = await import("../src/lib/trading/learn");
   const lev = await import("../src/lib/trading/leverage");
   const close = await import("../src/lib/trading/close");
@@ -240,7 +240,7 @@ async function main() {
         const r = rows.find((row) => row.c.mint === token.mint)!;
         const bars = fourHour(r.s, r.j);
         const tech = bars.length >= 30 ? snapshotTechnical(bars) : null;
-        signals.push(...solanaEntrySignals(token, tech, 60, next.config.allowShorts, ctx).filter((sig) => keepEntry(sig.side, token.flows.m15.priceChangePct)));
+        signals.push(...solanaEntrySignals(token, tech, 60, next.config.allowShorts, ctx).filter((sig) => solanaKeepEntry(sig.side, token.flows.m15.priceChangePct)));
       }
       signals.sort((a, b) => b.confidence - a.confidence);
       let opened = 0;
@@ -254,7 +254,7 @@ async function main() {
         if (presetFilled || close.bracketQuiet(next.bot.bracketQuietUntil)) continue;
         if (opened >= 2 && next.config.oneTicketPerTick !== false) continue;
         if (advice.block) continue;
-        const gate = risk.canOpen({ positions: next.positions, signal: learned, config: next.config, portfolio: next.portfolio, trades: next.trades, stance });
+        const gate = risk.canOpen({ positions: next.positions, signal: learned, config: next.config, portfolio: next.portfolio, trades: next.trades, stance, defensiveShorts: true });
         if (gate) {
           gates.set(gate, (gates.get(gate) ?? 0) + 1);
           continue;
@@ -336,6 +336,7 @@ async function main() {
     grossPnl: Number(gross(closes).toFixed(2)),
     fees: Number(fees.toFixed(2)),
     bySymbol: group((c) => c.symbol),
+    bySide: group((c) => c.side),
     byExit: group((c) => c.exit),
     byEntry: group((c) => c.reason),
     byLeverage: group((c) => `${c.lev}x`),

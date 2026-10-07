@@ -231,11 +231,13 @@ export function canOpen(args: {
   stance?: MarketRegime["stance"];
   /** Wallet swaps size from the spendable leg, which can sit under the marked $3 balance. */
   minCashUsd?: number;
+  /** Solana shorts the same setups in a falling tape. Cronos keeps the old block. */
+  defensiveShorts?: boolean;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT) {
-    return "Only SOL can be shorted. This name is a spot buy and a spot sell.";
+  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT && config.walletSwaps) {
+    return "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
   }
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
@@ -248,7 +250,7 @@ export function canOpen(args: {
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
   if (portfolio.cashUsd < minCash) return "Insufficient cash";
-  if (stance === "defensive" && signal.side === "short") return "No shorts in a defensive tape";
+  if (stance === "defensive" && signal.side === "short" && !args.defensiveShorts) return "No shorts in a defensive tape";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
     return `Breakouts need a ${breakoutScore}+ score when defensive`;

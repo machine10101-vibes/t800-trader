@@ -11,7 +11,7 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 | Long open | Yes | After you arm, a browser trading key sends Jupiter ExactIn (USDC or SOL → token). |
 | Long close (button, stop, target, trail, time) | Yes | Token → USDC. If the trading key has under 0.006 SOL, Jupiter Ultra sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
 | SOL 5x / 10x | Yes | Jupiter perps on the polished desk, when the trading key can post collateral. |
-| Short open / cover | **No** | Spot Solana has no native short. Shorts stay paper-only. |
+| Short open / cover | SOL only | Practice can short every book name with the same 4-hour setups used to buy. A live short is a SOL Jupiter perpetual. Other live names stay spot buys and sells. |
 | Cronos | Separate | VVS path on the Cronos desk. LIVE confirm is Solana-only. |
 
 ## Enable LIVE
@@ -44,7 +44,7 @@ Rebuild after changing `NEXT_PUBLIC_*` (`npm run build` or `npm run dev`).
 - **Max live size** (default $250 USDC per ticket)
 - **Min SOL for fees** (default 0.02)
 - Existing paper risk: per-trade %, daily loss cap, max positions, liquidity floor
-- Preflight refuses: kill switch, unarmed session, shorts, dust, oversize
+- Preflight refuses: kill switch, unarmed session, a spot short, dust, oversize. A SOL short is sent as a Jupiter perpetual.
 
 ## Dry-run / tests
 
@@ -55,7 +55,7 @@ Rebuild after changing `NEXT_PUBLIC_*` (`npm run build` or `npm run dev`).
 ## Risks
 
 - You can lose the USDC you swap plus SOL fees, and leveraged tickets can lose faster.
-- The minute-bar replay in the README found no configuration that was profitable after fees in both test windows. The Solana defaults lose the least, but they still lose. 5x and 10x lost more in every run.
+- The minute-bar replay in the README found no configuration that was profitable after fees in both test windows. The Solana defaults still lose. Adding the mirrored shorts lost a little more. 5x and 10x lost more in every run.
 - A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser.
 - Jupiter lite-api is rate-limited (~0.5 rps keyless). A burst of ticks can 429.
 - Public RPC can drop or delay confirmations. The desk reports the signature even if refresh is slow.

@@ -99,6 +99,12 @@ export function keepEntry(side: "long" | "short", m15: number): boolean {
   return side === "short" || !tapeInCash(m15);
 }
 
+/** A Solana short uses the same 15m gate as a long, turned over. A rising 15m does not get shorted. */
+export function solanaKeepEntry(side: "long" | "short", m15: number): boolean {
+  if (side === "short") return m15 < 0.25;
+  return keepEntry(side, m15);
+}
+
 /** Cash a long when the 15m turns red. A short stays open through that tape. */
 export function cashExit(side: "long" | "short", m15: number): boolean {
   return side !== "short" && tapeInCash(m15);
@@ -106,8 +112,7 @@ export function cashExit(side: "long" | "short", m15: number): boolean {
 
 /** Solana entries come from the 4-hour chart. A red 15m still holds a buy back. */
 export function solanaPass(symbol: string, m15: number): string {
-  if (m15 <= -0.25) return `${symbol}: dropping right now (${m15.toFixed(2)}% in 15 minutes), so it waits`;
-  return `${symbol}: no 4-hour setup yet`;
+  return `${symbol}: no 4-hour setup yet (${m15.toFixed(2)}% in 15 minutes)`;
 }
 
 export function tickPass(symbol: string, m15: number): string {

@@ -38,14 +38,17 @@ Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). 
 
 A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
 
+Shorts use those same 4-hour setups turned over: a breakdown through the prior low, an extreme RSI reject, a watchlist continuation that has real volume, and a VWAP reject. The stop and the target are the same distances, with the stop above the fill and the goal below it. Practice can short every name on the book. A real-money short is SOL only, sent as a Jupiter perpetual. Other live names stay spot buys and sells.
+
 `scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
 
 | Setup, $200 book | 89-day tuning window | 30-day holdout |
 | --- | --- | --- |
 | Previous defaults (15m flow entries, fade exit, 5x/10x) | −98.5% | −84.6% |
-| Current Solana defaults | −0.9%, max drawdown 3.2% | −1.3%, max drawdown 3.2% |
+| Current Solana defaults, longs only | −0.9%, max drawdown 3.2% | −1.3%, max drawdown 3.2% |
+| Same defaults with mirrored shorts | −1.4%, max drawdown 5.0% | −2.4%, max drawdown 3.6% |
 
-No configuration tested was profitable after fees in both windows. The current defaults lose the least and draw down the least. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
+No configuration tested was profitable after fees in both windows. Mirrored shorts use the same setups as the longs. On this replay they added a small loss. They did not produce a profit in either window. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
 
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 

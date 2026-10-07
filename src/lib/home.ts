@@ -72,11 +72,13 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 }
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
-export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled">): string[] {
+export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
   const rules = [
     "Buys only when the 4-hour chart sets up. It skips the noise in between.",
-    `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
+    config.allowShorts
+      ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid. A bet the price will fall uses the same distances, with the stop above and the goal below.`
+      : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
     `Holds at most ${config.maxPositions} coins at once.`,
     config.lossStreakPause > 0
@@ -84,6 +86,9 @@ export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitP
       : "It does not pause after a losing streak.",
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
+  if (config.allowShorts) {
+    rules.push("It can bet a price will fall, with the same 4-hour setups it uses to buy. Real-money bets against the price are SOL only.");
+  }
   if (config.multipliers.length) rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
   return rules;

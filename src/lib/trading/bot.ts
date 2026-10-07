@@ -1,7 +1,7 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { GAS_CRO } from "@/lib/cronos/constants";
 import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, cashExit, foldCandles, keepEntry, printClose, solanaPass, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
+import { candleChangePct, cashExit, foldCandles, keepEntry, printClose, solanaKeepEntry, solanaPass, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -368,7 +368,11 @@ export async function tickBot(
             chain === "solana"
               ? solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx)
               : entrySignals(token, tech, token.researchScore, next.config.allowShorts, tapeCtx)
-          ).filter((signal) => keepEntry(signal.side, token.flows.m15.priceChangePct));
+          ).filter((signal) =>
+            chain === "solana"
+              ? solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)
+              : keepEntry(signal.side, token.flows.m15.priceChangePct),
+          );
           signals.push(...found);
           if (!found.length) {
             blocked.push(
@@ -440,6 +444,7 @@ export async function tickBot(
             trades: risk.trades,
             stance: market.regime.stance,
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
+            defensiveShorts: chain === "solana",
           });
           if (gate) {
             const native = chain === "cronos" ? "CRO" : "SOL";

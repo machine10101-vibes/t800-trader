@@ -84,6 +84,8 @@ export interface TechnicalSnapshot {
   priorHigh: number | null;
   priorLow: number | null;
   barsAboveEma9: number;
+  /** Closes under EMA9, counted the same way as barsAboveEma9. Shorts use it. */
+  barsBelowEma9?: number;
 }
 
 export interface ScoredCandidate extends TokenCandidate {

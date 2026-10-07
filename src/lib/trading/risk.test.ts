@@ -192,6 +192,36 @@ describe("risk", () => {
       stance: "defensive",
     });
     assert.equal(reason, "No shorts in a defensive tape");
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...signal, sector: "L1" },
+        config: DEFAULT_CONFIG,
+        portfolio: portfolio(),
+        stance: "defensive",
+        defensiveShorts: true,
+      }),
+      null,
+    );
+  });
+
+  it("lets practice short a coin other than SOL, and keeps a live short on SOL", () => {
+    const signal = {
+      mint: "ray",
+      symbol: "RAY",
+      sector: "DEX",
+      side: "short",
+      reason: "breakout",
+      confidence: 80,
+    } as Signal;
+    assert.equal(
+      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
+      null,
+    );
+    assert.equal(
+      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
+      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
+    );
   });
 
   it("blocks a fourth attempt after three straight losses", () => {
@@ -728,7 +758,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("lets a SOL short through and keeps every other name a spot buy and spot sell", () => {
+  it("lets a live SOL short through and a practice short of any book name", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -739,15 +769,25 @@ describe("LIVE gates and short trail", () => {
       }),
       null,
     );
-    assert.match(
+    assert.equal(
       canOpen({
         positions: [],
         signal: { ...longSignal, side: "short", symbol: "ZBCN" },
         config: { ...DEFAULT_CONFIG, walletSwaps: false, allowShorts: true },
         portfolio: portfolio(),
         stance: "mixed",
-      }) ?? "",
-      /spot buy/,
+      }),
+      null,
+    );
+    assert.equal(
+      canOpen({
+        positions: [],
+        signal: { ...longSignal, side: "short", symbol: "ZBCN" },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "mixed",
+      }),
+      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
     );
   });
 
