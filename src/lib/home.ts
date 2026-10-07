@@ -120,8 +120,11 @@ export interface BotActivity {
 const LIMIT_LINE =
   /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short/i;
 
+/** Charts and pool prints still arriving. The bot is working, not stuck. */
+const WAIT_LINE = /4-hour chart has not loaded|pool tape has not arrived/i;
+
 const WALL_LINE =
-  /4-hour chart has not loaded|price feeds disagree|pool tape has not arrived|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
+  /price feeds disagree|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
 
 function lineCore(line: string): string {
   return line.replace(/^[A-Za-z0-9.]+\s+(long|short):\s+/i, "").replace(/^[A-Za-z0-9.]+:\s+/, "");
@@ -201,6 +204,7 @@ export function botActivity(input: {
   for (const line of input.blocked) {
     if (/fee to open and the fee to close/i.test(line)) continue;
     if (/already in this mint/i.test(line)) continue;
+    if (WAIT_LINE.test(line)) continue;
     const core = lineCore(line);
     if (LIMIT_LINE.test(line)) {
       if (/most allowed at once|daily loss|cooling for an hour|kill switch/i.test(line)) continue;

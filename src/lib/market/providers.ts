@@ -3,7 +3,7 @@ import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
-import { applyJupiterTape, loadJupiterTapes } from "./jupiterTape";
+import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
@@ -113,6 +113,52 @@ function bookComplete(rows: TokenCandidate[], chain: ChainId): boolean {
   return coreBookMints(chain).every((mint) => rows.some((row) => sameMint(row.mint, mint)));
 }
 
+function quietFlows(): Record<Timeframe, FlowWindow> {
+  const quiet: FlowWindow = { buys: 0, sells: 0, buyers: 0, sellers: 0, volumeUsd: 0, priceChangePct: 0 };
+  return {
+    m5: { ...quiet },
+    m15: { ...quiet },
+    m30: { ...quiet },
+    h1: { ...quiet },
+    h6: { ...quiet },
+    h24: { ...quiet },
+  };
+}
+
+/** Pinned book rows so Jupiter can stamp prices when GeckoTerminal is cooling. */
+export function skeletonBook(chain: ChainId): TokenCandidate[] {
+  return bookTokens(chain).flatMap((token) => {
+    const pin = bookPools(chain).find((row) => sameMint(row.mint, token.mint))?.pool;
+    if (!pin) return [];
+    return [
+      {
+        id: token.mint,
+        chain,
+        symbol: token.symbol,
+        name: token.name,
+        mint: token.mint,
+        poolAddress: pin,
+        dex: chain === "cronos" ? "wolf" : "raydium",
+        quoteSymbol: chain === "cronos" || token.mint === SOL_MINT ? "USDC" : "SOL",
+        priceUsd: token.priceUsd ?? 0,
+        marketCapUsd: null,
+        fdvUsd: null,
+        liquidityUsd: 0,
+        volume24hUsd: 0,
+        poolCreatedAt: null,
+        ageHours: null,
+        sector: token.sector,
+        flows: quietFlows(),
+        watchlist: true,
+        sources: ["book"],
+        priceAgreement: "thin",
+        apyPct: null,
+        apySources: [],
+      },
+    ];
+  });
+}
+
 function fillActiveBook(rows: TokenCandidate[], chain: ChainId): TokenCandidate[] {
   const slot = markets[chain];
   const out = [...rows];
@@ -210,19 +256,29 @@ const GECKO_COOL_MS = 8_000;
 let geckoTail: Promise<void> = Promise.resolve();
 let geckoNotBefore = 0;
 
+function noteGeckoResult(error?: unknown): void {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
+  else geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
+}
+
+/** True while GeckoTerminal is in the 429 cool-down. Solana can scan from Jupiter instead. */
+export function geckoIsCooling(): boolean {
+  return geckoNotBefore > Date.now();
+}
+
 /** One GeckoTerminal call at a time. A 429 pauses the whole book so candles are not burned. */
 function paceGecko<T>(task: () => Promise<T>): Promise<T> {
   const run = geckoTail.then(async () => {
     const wait = geckoNotBefore - Date.now();
     if (wait > 0) await sleep(wait);
     try {
-      return await task();
+      const value = await task();
+      noteGeckoResult();
+      return value;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
+      noteGeckoResult(error);
       throw error;
-    } finally {
-      geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
     }
   });
   geckoTail = run.then(
@@ -334,6 +390,10 @@ async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
       if (snap?.rows.length) pools.push(...snap.rows);
       continue;
     }
+    if (geckoIsCooling()) {
+      if (snap?.rows.length) pools.push(...snap.rows);
+      continue;
+    }
     if (paced) await sleep(450);
     paced = true;
     const pin = pins.find((row) => sameMint(row.mint, token.mint))?.pool ?? token.pool;
@@ -439,10 +499,16 @@ async function readOhlcv(url: string): Promise<Candle[]> {
 
 /** Cronos book charts skip the 2.1s Gecko queue so all five names paint on login. */
 async function readOhlcvDirect(url: string): Promise<Candle[]> {
-  const json = await fetchJson<{
-    data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  }>(url, { timeoutMs: 8_000, retries: 1 });
-  return candlesFromOhlcv(json);
+  try {
+    const json = await fetchJson<{
+      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+    }>(url, { timeoutMs: 8_000, retries: 1 });
+    noteGeckoResult();
+    return candlesFromOhlcv(json);
+  } catch (error) {
+    noteGeckoResult(error);
+    throw error;
+  }
 }
 
 async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
@@ -861,6 +927,7 @@ async function loadCronosDecision(mint: string, pool: string, force: boolean): P
   const run = (async () => {
     const missedAt = decisionMiss.get(key);
     const coolMs = hit?.rows.length ? CANDLE_COOL_MS : 2_000;
+    if (!force && geckoIsCooling()) return hit?.rows ?? [];
     if (!force && missedAt && Date.now() - missedAt < coolMs) return hit?.rows ?? [];
     try {
       const rows = (await fetchChartOnce(pool, "cronos", { direct: true })).slice(-CHART_BARS);
@@ -899,11 +966,10 @@ export function requestDecisionCharts(mints: string[], chain: ChainId): void {
   }
 }
 
-/** Login and refresh start here. Cronos does not wait on the wallet or the 1-minute tape. */
+/** Login and refresh start here. Solana reads Jupiter. Cronos does not wait on the wallet. */
 export function prefetchDecisionCharts(chain: ChainId): Promise<void> {
   if (chain === "cronos") return prefetchCronosDecisionCharts();
-  requestDecisionCharts(bookMints(chain), chain);
-  return Promise.resolve();
+  return Promise.all(bookMints(chain).map((mint) => loadDecisionChart(mint, chain).catch(() => []))).then(() => undefined);
 }
 
 /** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */
@@ -949,10 +1015,16 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   scanned: number;
 }> {
   const chartsReady = prefetchDecisionCharts(chain);
-  const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
+  const tapesPromise: Promise<Map<string, JupiterTape>> =
+    chain === "solana" ? loadJupiterTapes(bookMints(chain)).catch(() => new Map()) : Promise.resolve(new Map());
   const regimePromise = fetchRegime();
-  let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
-  if (!bookComplete(merged, chain)) {
+  const lastRows = [...markets[chain].lastBook.values()];
+  const lastComplete = bookComplete(lastRows, chain);
+  const skipGecko = geckoIsCooling() && (chain === "solana" || lastComplete);
+  const watch = skipGecko ? lastRows : await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
+  let merged = mergeCandidates([watch.length ? watch : lastRows]).filter((candidate) => isActiveBook(candidate.mint, chain));
+  merged = fillActiveBook(merged, chain);
+  if (!bookComplete(merged, chain) && !geckoIsCooling()) {
     for (const mint of bookMints(chain)) {
       if (merged.some((candidate) => sameMint(candidate.mint, mint))) continue;
       const meta = watchMeta(mint, chain);
@@ -962,29 +1034,32 @@ async function loadMarketOnce(chain: ChainId): Promise<{
       const row = await pinnedPool(mint, meta.symbol, pin, chain);
       if (row) merged.push(row);
     }
+    merged = fillActiveBook(merged, chain);
   }
-  merged = fillActiveBook(merged, chain);
+  if (!bookComplete(merged, chain)) {
+    merged = fillActiveBook(mergeCandidates([merged, skeletonBook(chain)]), chain);
+  }
   const candleRows = uniqueBy(
     merged.filter((candidate) => candidate.poolAddress),
     (candidate) => candidate.mint,
   );
   const pinnedPools = new Set(bookPools(chain).map((row) => row.pool));
-  if (chain === "cronos") await chartsReady.catch(() => undefined);
   requestBookCandles(
     candleRows.map((candidate) => candidate.poolAddress),
     chain,
     pinnedPools,
   );
-  const [regime, crossed] = await Promise.all([
+  const [regime, crossed, tapes] = await Promise.all([
     regimePromise,
     crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
+    tapesPromise,
+    chartsReady.catch(() => undefined),
   ]);
   let candidates = fillActiveBook(
     crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
     chain,
   );
   if (chain === "solana") {
-    const tapes = await loadJupiterTapes(candidates.map((candidate) => candidate.mint)).catch(() => new Map());
     candidates = candidates.map((candidate) => applyJupiterTape(candidate, tapes.get(candidate.mint) ?? null));
   }
   const stamped = withYields(regime, crossed.yields);

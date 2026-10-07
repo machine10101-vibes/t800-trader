@@ -271,12 +271,16 @@ function ChainDesk({
   }, [chain, connect]);
 
   useEffect(() => {
+    // Hidden Cronos still mounted. Its unpaced Gecko charts 429 the shared
+    // feed and leave Solana waiting on pool prints.
+    if (!active && chain === "cronos") return;
     void prefetchDecisionCharts(chain);
     const id = window.setInterval(() => {
+      if (!active && chain === "cronos") return;
       void prefetchDecisionCharts(chain);
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [chain]);
+  }, [active, chain]);
 
   useEffect(() => {
     const last = readLastWallet(chain);
@@ -411,17 +415,20 @@ function ChainDesk({
   positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
+    if (!active && !desk?.bot.running) return;
     if (!walletRef.current && !getActiveWallet(chain)) return;
     let cancel = false;
     let inflight = false;
     let timer = 0;
     const run = async () => {
-      const current = walletRef.current;
-      if (!current || cancel || inflight || busyRef.current) return false;
+      if (cancel || inflight || busyRef.current) return false;
+      if (!walletRef.current && !getActiveWallet(chain)) return false;
       inflight = true;
       const gen = controlGen.current;
       try {
-        const next = await controlBot("tick", current, chain);
+        // A saved book can tick before Phantom/Onchain returns. LIVE swaps
+        // wait for the session; the scan still updates lastTickAt.
+        const next = await controlBot("tick", walletRef.current, chain);
         // A start or stop click while this tick was in flight wins. Applying the
         // older book here would flip the button back.
         if (!cancel && !busyRef.current && gen === controlGen.current) applyDesk(next, { keepError: true });
@@ -448,12 +455,12 @@ function ChainDesk({
         })();
       }, delay);
     };
-    arm(300);
+    arm(active ? 300 : 1_200);
     return () => {
       cancel = true;
       window.clearTimeout(timer);
     };
-  }, [applyDesk, chain, desk?.bot.running, wallet?.address]);
+  }, [active, applyDesk, chain, desk?.bot.running, wallet?.address]);
 
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;

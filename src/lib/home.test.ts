@@ -139,14 +139,48 @@ describe("home", () => {
     assert.ok(held.limits.some((item) => /6% limit/.test(item.text)));
     assert.ok(held.limits.some((item) => /Resting for an hour/.test(item.text)));
     assert.equal(held.limits.filter((item) => /most allowed/.test(item.text)).length, 1);
-    assert.deepEqual(
-      held.walls.map((item) => item.text),
-      ["PUMP: 4-hour chart has not loaded"],
-    );
-    assert.match(held.summary, /stuck/);
+    assert.equal(held.walls.length, 0);
+    assert.match(held.summary, /profit goals/);
     assert.deepEqual(
       visibleActivity(held).map((group) => group.kind),
-      ["wall"],
+      ["limit", "target"],
+    );
+
+    const loading = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 1,
+      blocked: ["PUMP: 4-hour chart has not loaded", "SOL: pool tape has not arrived"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.equal(loading.walls.length, 0);
+    assert.equal(loading.limits.length, 0);
+    assert.match(loading.summary, /waiting for a 4-hour setup/);
+
+    const split = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 2,
+      blocked: ["RAY: price feeds disagree"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.deepEqual(
+      split.walls.map((item) => item.text),
+      ["RAY: price feeds disagree"],
     );
 
     const stuck = botActivity({
