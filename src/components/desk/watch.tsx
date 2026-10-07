@@ -196,7 +196,7 @@ export function WatchScreen({
                   trades={view.trades}
                   positions={view.positions}
                   chain={chain}
-                  empty="No buys saved for this address on this browser."
+                  empty="No trades saved for this address in this browser yet. They appear here after the bot trades on this device."
                 />
               </div>
             </section>

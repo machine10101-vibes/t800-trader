@@ -691,7 +691,9 @@ function ChainDesk({
             <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
           </div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
-          <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">Connect a wallet to arm the desk</h1>
+          <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">
+            {chain === "solana" ? "Connect a wallet to start trading" : "Connect a wallet to arm the desk"}
+          </h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
           {chain === "solana" && phone && !walletHint ? (
@@ -716,9 +718,19 @@ function ChainDesk({
                     : copy.connectFallback}
           </button>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
-            <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
-            <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
-            <GateChip label="Live swaps" hint={copy.swapHint} />
+            {chain === "solana" ? (
+              <>
+                <GateChip label="Real prices" hint="CoinGecko · GeckoTerminal · Jupiter" />
+                <GateChip label="Practice first" hint="No money moves until you choose" />
+                <GateChip label="You keep control" hint="No seed phrase, ever" />
+              </>
+            ) : (
+              <>
+                <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
+                <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
+                <GateChip label="Live swaps" hint={copy.swapHint} />
+              </>
+            )}
           </div>
           <form
             className="mt-6 border-t border-[var(--line)] pt-5"

@@ -41,12 +41,12 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     walletBook: "SOL + USDC",
     swapHint: "Jupiter from the trading key",
     connectBlurb:
-      "No demo book. No fallback equity. Phantom or Solflare must approve this origin, then the desk reads your real SOL and USDC and sizes the book from that. A $3 wallet is enough to open.",
+      "Connect Phantom or Solflare and the desk reads your SOL and USDC. It starts in practice mode, so no money moves until you turn on real money. $3 is enough to start.",
     connectFallback: "Connect Solana wallet",
     installHint: "On a phone, Connect opens Phantom. Unlock it and approve the connection. This browser then opens the desk. On a computer, install Phantom or Solflare, then reload.",
     armBlurb:
-      "Arm signs once. That signature moves spare SOL and USDC onto a trading key in this browser, and that key sends each swap. Tickets list only those signed fills.",
-    watchBlurb: "Paste a Solana address. This page shows that wallet's live SOL and USDC, plus signed swaps stored in this browser.",
+      "In real-money mode, turning the bot on asks your wallet to approve one transfer to a trading key kept in this browser. That key places each trade, and turning the bot off sends the money back.",
+    watchBlurb: "Paste any Solana address to see its SOL and USDC and the trades this browser saved for it. Nothing can be traded from here.",
     watchError: "That is not a Solana address.",
     needWallet: "Connect a Solana wallet to trade.",
     needFunds: "priced SOL/USDC",
@@ -58,7 +58,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     bookArm:
       "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back.",
     noOpen: "No open swap. A rising SOL, Zebec, Pump, ZEC, or Ray long is sent from the trading key.",
-    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. A red 15m tape stays in cash. A flat 15m can still open 5x or 10x.",
+    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. The bot buys when the 4-hour chart sets up, so a quiet day can pass with no trade.",
     explorerName: "Solscan",
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. A SOL short is a Jupiter perpetual. Other tokens cannot be shorted on-chain.",
