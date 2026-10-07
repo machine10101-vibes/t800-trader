@@ -1,4 +1,5 @@
 import { sameMint } from "@/lib/chain";
+import { SOL_MINT } from "@/lib/market/universe";
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
 import { rememberClose } from "./learn";
@@ -6,8 +7,24 @@ import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl 
 
 const SLIP_BPS = 8;
 
-export function fillPrice(signalPrice: number, side: "long" | "short", action: "open" | "close"): number {
-  const slip = signalPrice * (SLIP_BPS / 10_000);
+/**
+ * Venue cost a paper fill pays on top of the slip, so PAPER results read like LIVE.
+ * Jupiter perps charge about 6 bps of size per side. SOL/USDC routes are a few bps.
+ * Smaller Solana names route through 0.25% pools. Cronos rows are left as they were.
+ */
+export function venueFeeBps(mint: string, symbol: string, leverage = 1): number {
+  if (mint.startsWith("0x")) return 0;
+  if (symbol === "SOL" || sameMint(mint, SOL_MINT)) return leverage > 1 ? 7 : 3;
+  return 20;
+}
+
+export function fillPrice(
+  signalPrice: number,
+  side: "long" | "short",
+  action: "open" | "close",
+  feeBps = 0,
+): number {
+  const slip = signalPrice * ((SLIP_BPS + feeBps) / 10_000);
   if (action === "open") return side === "long" ? signalPrice + slip : signalPrice - slip;
   return side === "long" ? signalPrice - slip : signalPrice + slip;
 }
@@ -53,9 +70,12 @@ export function openPosition(
   stamp?: ChainFill,
 ): AppState {
   const signed = Boolean(stamp?.signature);
-  const price = signed && stamp ? stamp.price : fillPrice(signal.price, signal.side, "open");
-  const room = state.portfolio.cashUsd * 0.98;
   const leverage = stamp?.leverage && stamp.leverage > 1 ? stamp.leverage : 1;
+  const price =
+    signed && stamp
+      ? stamp.price
+      : fillPrice(signal.price, signal.side, "open", venueFeeBps(signal.mint, signal.symbol, leverage));
+  const room = state.portfolio.cashUsd * 0.98;
   let filledQty = signed && stamp ? stamp.qty : qty;
   let exposure = filledQty * price;
   let collateral = leverage > 1 ? (stamp?.collateralUsd ?? exposure / leverage) : exposure;
@@ -143,7 +163,9 @@ export function closePosition(
 ): AppState {
   const pos = state.positions.find((p) => p.id === positionId);
   if (!pos) return state;
-  const price = signature ? priceHint : fillPrice(priceHint, pos.side, "close");
+  const price = signature
+    ? priceHint
+    : fillPrice(priceHint, pos.side, "close", venueFeeBps(pos.mint, pos.symbol, pos.leverage));
   const marked = markPosition({ ...pos, markPrice: price }, price);
   const pnl = unrealizedPnl(marked);
   const proceeds = exitProceeds(pos, price, pnl.usd);
@@ -257,7 +279,9 @@ export function scaleOut(
   if (!pos || pos.scaled || fraction <= 0 || fraction >= 1) return state;
   const qty = pos.qty * fraction;
   if (qty <= 0) return state;
-  const price = fillPriceOverride ?? (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close"));
+  const price =
+    fillPriceOverride ??
+    (signature ? pos.markPrice : fillPrice(pos.markPrice, pos.side, "close", venueFeeBps(pos.mint, pos.symbol, pos.leverage)));
   const marked = markPosition({ ...pos, markPrice: price, qty }, price);
   const pnl = unrealizedPnl(marked);
   const lev = pos.leverage ?? 1;
