@@ -1,5 +1,7 @@
 import { feeHurdlePct } from "@/lib/trading/fees";
-import type { BotConfig, BotState, Position, Trade, TradeReason } from "@/lib/types";
+import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
+import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
+import { priceFmt } from "@/lib/utils";
 
 /** What a sale was, in words a first-time user reads without a glossary. */
 export function exitWords(reason: TradeReason): string {
@@ -93,6 +95,134 @@ export interface HomeResults {
   netUsd: number;
   bestUsd: number | null;
   worstUsd: number | null;
+}
+
+export type ActivityKind = "target" | "limit" | "wall";
+
+export interface ActivityItem {
+  kind: ActivityKind;
+  text: string;
+}
+
+export interface BotActivity {
+  /** One sentence for the top of the section. */
+  summary: string;
+  targets: ActivityItem[];
+  limits: ActivityItem[];
+  walls: ActivityItem[];
+}
+
+const LIMIT_LINE =
+  /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short needs/i;
+
+const WALL_LINE =
+  /4-hour chart has not loaded|price feeds disagree|pool tape has not arrived|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
+
+function lineCore(line: string): string {
+  return line.replace(/^[A-Za-z0-9.]+\s+(long|short):\s+/i, "").replace(/^[A-Za-z0-9.]+:\s+/, "");
+}
+
+function goalText(position: Position, feeWait: boolean): string {
+  const toward = position.side === "long" ? 1 : -1;
+  const gap =
+    position.entryPrice > 0 ? ((position.targetPrice - position.markPrice) * toward * 100) / position.entryPrice : 0;
+  const goal = priceFmt(position.targetPrice);
+  const now = priceFmt(position.markPrice);
+  const stop = priceFmt(position.stopPrice);
+  if (gap <= 0.05) {
+    return `${position.symbol} has reached its profit goal at ${goal}. It should sell on the next check.`;
+  }
+  const fee = feeWait ? " The gain is not bigger than the buy and sell fees yet, so it stays open." : "";
+  return `${position.symbol} is waiting for its profit goal at ${goal}. Price is ${now}, about ${gap.toFixed(1)}% short of the goal. Safety stop is ${stop}.${fee}`;
+}
+
+/**
+ * Splits the live book into the three things a person needs to tell apart:
+ * a trade waiting on its profit goal, a limit that stopped new trades, or a wall that stuck the bot.
+ */
+export function botActivity(input: {
+  running: boolean;
+  killSwitch: boolean;
+  lastError: string | null;
+  lastTickAt: string | null;
+  ticks: number;
+  blocked: string[];
+  scanSeconds: number;
+  positions: Position[];
+  trades: Trade[];
+  portfolio: Portfolio;
+  config: BotConfig;
+  nowMs?: number;
+}): BotActivity {
+  const now = input.nowMs ?? Date.now();
+  const targets: ActivityItem[] = [];
+  const limits: ActivityItem[] = [];
+  const walls: ActivityItem[] = [];
+  const seen = new Set<string>();
+  const add = (list: ActivityItem[], kind: ActivityKind, text: string) => {
+    const key = `${kind}:${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push({ kind, text });
+  };
+
+  if (input.killSwitch) add(limits, "limit", "Emergency stop is on, so no new trades are sent.");
+  if (input.running && dayLossBreached(input.portfolio, input.config)) {
+    add(limits, "limit", `Today's loss hit the ${input.config.dailyLossLimitPct}% limit, so no new trades until tomorrow.`);
+  }
+  if (input.running && input.config.maxPositions > 0 && input.positions.length >= input.config.maxPositions) {
+    add(
+      limits,
+      "limit",
+      `Holding ${input.positions.length} coins, the most allowed at once, so no new coin until one sells.`,
+    );
+  }
+  if (input.running && lossStreakPaused(input.trades, input.config.lossStreakPause, now)) {
+    add(limits, "limit", `Resting for an hour after ${input.config.lossStreakPause} losses in a row. No new trades until that hour ends.`);
+  }
+
+  const feeWait = new Set(
+    input.blocked
+      .filter((line) => /fee to open and the fee to close/i.test(line))
+      .map((line) => line.split(":")[0]?.trim().toUpperCase())
+      .filter(Boolean),
+  );
+  for (const position of input.positions) {
+    add(targets, "target", goalText(position, feeWait.has(position.symbol.toUpperCase())));
+  }
+
+  for (const line of input.blocked) {
+    if (/fee to open and the fee to close/i.test(line)) continue;
+    if (/already in this mint/i.test(line)) continue;
+    const core = lineCore(line);
+    if (LIMIT_LINE.test(line)) {
+      if (/most allowed at once|daily loss|cooling for an hour|kill switch/i.test(line)) continue;
+      add(limits, "limit", core);
+      continue;
+    }
+    if (WALL_LINE.test(line)) add(walls, "wall", line);
+  }
+
+  if (input.lastError) add(walls, "wall", input.lastError);
+  if (input.running && input.ticks > 0 && input.lastTickAt) {
+    const at = Date.parse(input.lastTickAt);
+    const staleAfter = Math.max(input.scanSeconds * 8_000, 90_000);
+    if (Number.isFinite(at) && now - at > staleAfter) {
+      const secs = Math.round((now - at) / 1000);
+      const age = secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs}s`;
+      add(walls, "wall", `The last check was ${age} ago. The bot looks stuck.`);
+    }
+  }
+
+  let summary = "It is working and waiting for a 4-hour setup. Nothing is stopping it.";
+  if (!input.running && !input.killSwitch) summary = "The bot is off, so it is not checking for trades.";
+  if (targets.length && !limits.length && !walls.length) summary = "Open trades are waiting for their profit goals.";
+  if (limits.length && !targets.length && !walls.length) summary = "A limit is blocking new trades.";
+  if (limits.length && targets.length && !walls.length) summary = "Open trades are waiting for their profit goals. A limit is blocking new ones.";
+  if (walls.length) summary = "Something is stuck. New trades may wait until it clears.";
+  if (!input.running && targets.length && !walls.length) summary = "You still hold trades, but the bot is off so it will not sell them at the goal.";
+
+  return { summary, targets, limits, walls };
 }
 
 export function homeResults(trades: Pick<Trade, "action" | "pnlUsd">[]): HomeResults {

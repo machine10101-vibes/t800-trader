@@ -14,7 +14,7 @@ The published site is a **static** Next.js export (`output: 'export'`, `basePath
 
 ## What you get
 
-- **Home (Solana)** — the one screen most people need. It has a Practice / Real money switch, a big Start / Stop button, and one plain sentence saying what the bot is doing. It shows your balance, today, all closed trades and wins. Each open trade has a bar from its safety stop to its goal and a Sell now button. Recent results and the bot's rules are listed in plain words, written from your live settings. Charts, Coins, Bot log, History and Settings hold the detail.
+- **Home (Solana)** — the one screen most people need. It has a Practice / Real money switch, a big Start / Stop button, and one plain sentence saying what the bot is doing. **What the bot is doing** splits that into three lists: trades waiting for a profit goal, limits that stopped new trades, and a wall when a check is stuck. It shows your balance, today, all closed trades and wins. Each open trade has a bar from its safety stop to its goal and a Sell now button. Recent results and the bot's rules are listed in plain words, written from your live settings. Charts, Coins, Bot log, History and Settings hold the detail.
 
 - **Overview** — BTC / ETH / SOL regime, dominance, Fear & Greed, Solana TVL, Solana DEX volume, crowded vs overlooked tape
 - **Radar** — comparison table (asset, ticker, price, market cap, FDV, sector, thesis, catalyst, risk, key metric, score)

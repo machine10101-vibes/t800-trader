@@ -1,6 +1,6 @@
 "use client";
 
-import { exitWords, homeResults, homeStatus, planRules, progressToGoal } from "@/lib/home";
+import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, type ActivityItem } from "@/lib/home";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
@@ -42,10 +42,23 @@ export function Home({
   const positions = real ? desk.positions.filter((p) => p.signature || (p.leverage ?? 1) > 1) : desk.positions;
   const trades = real ? desk.trades.filter((t) => t.signature) : desk.trades;
   const status = homeStatus(desk.bot, desk.config, positions.length);
+  const running = desk.bot.running;
+  const activity = botActivity({
+    running,
+    killSwitch: desk.config.killSwitch,
+    lastError: desk.bot.lastError,
+    lastTickAt: desk.bot.lastTickAt,
+    ticks: desk.bot.ticks,
+    blocked: desk.bot.blocked,
+    scanSeconds: desk.config.scanSeconds,
+    positions,
+    trades,
+    portfolio: desk.portfolio,
+    config: desk.config,
+  });
   const results = homeResults(trades);
   const today = desk.portfolio.dayPnlUsd;
   const recent = trades.filter((t) => t.action === "close").slice(0, 5);
-  const running = desk.bot.running;
   const dot =
     status.tone === "mint" ? "bg-[var(--mint)]" : status.tone === "crimson" ? "bg-[var(--crimson)]" : status.tone === "amber" ? "bg-[var(--amber)]" : "bg-[var(--faint)]";
 
@@ -106,6 +119,26 @@ export function Home({
             label="Wins"
             value={results.closed ? `${results.wins} of ${results.closed}` : "None yet"}
           />
+        </div>
+      </section>
+
+      <section className="neon p-5 sm:p-6" aria-label="What the bot is doing">
+        <h3 className="text-lg font-medium">What the bot is doing</h3>
+        <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{activity.summary}</p>
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          <ActivityList
+            title="Waiting for a goal"
+            tone="mint"
+            items={activity.targets}
+            empty="No trade is waiting on a profit goal."
+          />
+          <ActivityList
+            title="Stopped by a limit"
+            tone="amber"
+            items={activity.limits}
+            empty="No limit is stopping new trades."
+          />
+          <ActivityList title="Hit a wall" tone="crimson" items={activity.walls} empty="Nothing is stuck." />
         </div>
       </section>
 
@@ -207,6 +240,38 @@ export function Home({
           </button>
         </section>
       </div>
+    </div>
+  );
+}
+
+function ActivityList({
+  title,
+  tone,
+  items,
+  empty,
+}: {
+  title: string;
+  tone: "mint" | "amber" | "crimson";
+  items: ActivityItem[];
+  empty: string;
+}) {
+  const dot = tone === "mint" ? "bg-[var(--mint)]" : tone === "amber" ? "bg-[var(--amber)]" : "bg-[var(--crimson)]";
+  const titleColor = tone === "mint" ? "text-[var(--mint)]" : tone === "amber" ? "text-[var(--amber)]" : "text-[var(--crimson)]";
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-4">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${dot}`} />
+        <h4 className={`text-sm font-medium ${titleColor}`}>{title}</h4>
+      </div>
+      {items.length ? (
+        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
+          {items.map((item) => (
+            <li key={item.text}>{item.text}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-[var(--faint)]">{empty}</p>
+      )}
     </div>
   );
 }

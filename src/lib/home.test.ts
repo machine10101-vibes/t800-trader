@@ -1,7 +1,48 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { exitWords, homeResults, homeStatus, planRules, progressToGoal } from "./home";
+import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal } from "./home";
 import { solanaDefaults } from "./store";
+import type { Portfolio, Position, Trade } from "./types";
+
+const book = (over: Partial<Portfolio> = {}): Portfolio => ({
+  cashUsd: 200,
+  equityUsd: 200,
+  peakEquity: 200,
+  dayStartEquity: 200,
+  dayPnlUsd: 0,
+  realizedPnlUsd: 0,
+  unrealizedPnlUsd: 0,
+  winCount: 0,
+  lossCount: 0,
+  tradeCount: 0,
+  ...over,
+});
+
+function ticket(over: Partial<Position> = {}): Position {
+  return {
+    id: "p",
+    mint: "m",
+    symbol: "SOL",
+    poolAddress: "x",
+    sector: "L1",
+    side: "long",
+    qty: 1,
+    entryPrice: 100,
+    markPrice: 103,
+    stopPrice: 96,
+    targetPrice: 108,
+    openedAt: new Date().toISOString(),
+    lastUpdate: new Date().toISOString(),
+    reason: "breakout",
+    researchScore: 70,
+    highWater: 103,
+    lowWater: 100,
+    notional: 103,
+    initialStop: 96,
+    scaled: false,
+    ...over,
+  };
+}
 
 describe("home", () => {
   it("says what the bot is doing in one line", () => {
@@ -45,5 +86,93 @@ describe("home", () => {
     assert.deepEqual(r, { closed: 2, wins: 1, netUsd: 2, bestUsd: 3, worstUsd: -1 });
     assert.equal(exitWords("target"), "Hit the profit goal");
     assert.equal(exitWords("stop"), "Hit the safety stop");
+  });
+
+  it("separates a goal wait, a limit, and a wall", () => {
+    const now = Date.now();
+    const config = { ...solanaDefaults(), maxPositions: 1, lossStreakPause: 3, dailyLossLimitPct: 6 };
+    const losses = [-1, -1, -1].map((pnlUsd, i) => ({ action: "close", pnlUsd, at: new Date(now - 60_000).toISOString(), mint: `m${i}` }) as Trade);
+    const quiet = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 4,
+      blocked: ["SOL: no 4-hour setup yet", "RAY: dropping right now (-0.40% in 15 minutes), so it waits"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.equal(quiet.targets.length, 0);
+    assert.equal(quiet.limits.length, 0);
+    assert.equal(quiet.walls.length, 0);
+    assert.match(quiet.summary, /waiting for a 4-hour setup/);
+
+    const held = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 4,
+      blocked: [
+        "SOL: the gain does not beat the fee to open and the fee to close yet",
+        "PUMP: 4-hour chart has not loaded",
+        "ZEC long: Holding 1 coins, the most allowed at once",
+      ],
+      scanSeconds: 5,
+      positions: [ticket()],
+      trades: losses,
+      portfolio: book({ equityUsd: 180, dayPnlUsd: -20 }),
+      config,
+      nowMs: now,
+    });
+    assert.match(held.targets[0]?.text ?? "", /SOL is waiting for its profit goal/);
+    assert.match(held.targets[0]?.text ?? "", /not bigger than the buy and sell fees/);
+    assert.ok(held.limits.some((item) => /most allowed at once/.test(item.text)));
+    assert.ok(held.limits.some((item) => /6% limit/.test(item.text)));
+    assert.ok(held.limits.some((item) => /Resting for an hour/.test(item.text)));
+    assert.equal(held.limits.filter((item) => /most allowed/.test(item.text)).length, 1);
+    assert.deepEqual(
+      held.walls.map((item) => item.text),
+      ["PUMP: 4-hour chart has not loaded"],
+    );
+    assert.match(held.summary, /stuck/);
+
+    const stuck = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 3 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.match(stuck.walls[0]?.text ?? "", /looks stuck/);
+
+    const off = botActivity({
+      running: false,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: null,
+      ticks: 0,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [ticket()],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.equal(off.limits.length, 0);
+    assert.equal(off.walls.length, 0);
+    assert.match(off.summary, /bot is off so it will not sell/);
   });
 });
