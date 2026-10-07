@@ -77,7 +77,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     walletBook: "CRO + USDC",
     swapHint: "WolfSwap and cro.trade",
     connectBlurb:
-      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the better one is sent. A $3 wallet is enough to open.",
+      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the better one is sent. About 3 CRO on Cronos EVM is enough to arm.",
     connectFallback: "Connect Cronos wallet",
     installHint: "Install the Crypto.com Onchain extension, then reload this page.",
     armBlurb:

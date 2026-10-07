@@ -22,8 +22,19 @@ describe("cronos arm", () => {
     assert.equal(plan.wcroToBot, 20);
   });
 
+  it("arms a 3 CRO Cronos EVM wallet without asking for a fourth coin", () => {
+    const plan = planCronosArm(3, 0);
+    assert.ok(plan.croToBot >= 1);
+    assert.ok(plan.croToBot + 0.4 <= 3);
+    assert.equal(plan.usdcToBot, 0);
+  });
+
+  it("tells the user to send Cronos POS CRO to Cronos EVM", () => {
+    assert.throws(() => planCronosArm(0, 0, 0, 40), /Cronos POS/);
+  });
+
   it("refuses a wallet that cannot pay Cronos gas", () => {
-    assert.throws(() => planCronosArm(0.4, 0), /3 CRO/);
+    assert.throws(() => planCronosArm(0.4, 0), /3 CRO on Cronos EVM/);
   });
 
   it("haircuts a quoted swap by the slippage band", () => {

@@ -548,7 +548,7 @@ function ChainDesk({
       if (action === "start" || action === "reset") {
         const session = await refreshDesk(chain, wallet);
         setWallet(session);
-        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD) {
+        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD && chain !== "cronos") {
           const funded = await tradingSnapshot(session.address, chain);
           if (!funded || funded.equityUsd < MIN_TRADE_USD) {
             const message = `Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`;

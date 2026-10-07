@@ -275,8 +275,12 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
     };
   }
   const account = loadOrCreateCronosKey(session.address);
-  const live = await readCronosBalances(session.address, session.provider);
-  const plan = planCronosArm(live.sol, live.usdc, live.wcro);
+  const live = await readCronosBalances(session.address, session.provider).catch(() => null);
+  const cro = Math.max(live?.sol ?? 0, session.sol);
+  const wcro = Math.max(live?.wcro ?? 0, session.wcro ?? 0);
+  const usdc = Math.max(live?.usdc ?? 0, session.usdc);
+  const posCro = Math.max(live?.posCro ?? 0, session.posCro ?? 0);
+  const plan = planCronosArm(cro, usdc, wcro, posCro);
   let signature = "";
   if (plan.croToBot > 0) {
     signature = await userSend(session, account.address, units(plan.croToBot, 18));
