@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chainIsCronos, croHoldings, mergeNativeBalance, orderCronosAccounts, preferFundedAccount } from "./balance";
+import {
+  chainIsCronos,
+  collectEvmAccounts,
+  collectPosAccounts,
+  croHoldings,
+  croPosToEvm,
+  mergeNativeBalance,
+  orderCronosAccounts,
+  parseRpcQuantity,
+  preferFundedAccount,
+} from "./balance";
 
 const FUNDED = "0x0000000000000000000000000000000000000001";
 const EMPTY = "0x0000000000000000000000000000000000000002";
@@ -12,6 +22,10 @@ describe("Cronos balance", () => {
     assert.equal(held.cro, 12);
     assert.equal(held.usd, 1.6);
     assert.equal(croHoldings({ sol: 2, usdc: 0, solPriceUsd: 0.1 }).usd, 0.2);
+    const posOnly = croHoldings({ sol: 0, posCro: 40, usdc: 0, solPriceUsd: 0.05 });
+    assert.equal(posOnly.cro, 40);
+    assert.equal(posOnly.onPos, true);
+    assert.equal(posOnly.usd, 2);
   });
 
   it("recognizes Cronos even when the wallet returns a number or a padded chain id", () => {
@@ -39,5 +53,19 @@ describe("Cronos balance", () => {
       { account: EMPTY, bal: { sol: 0, wcro: 0, usdc: 9 } },
     ]);
     assert.equal(selected, FUNDED);
+  });
+
+  it("pulls every 0x and cro1 address out of the Onchain account payload", () => {
+    const packed = {
+      accounts: [{ address: EMPTY }, { evmAddress: FUNDED }, { bech32Address: "cro1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpkwunx7" }],
+    };
+    assert.deepEqual(collectEvmAccounts(packed), [EMPTY, FUNDED]);
+    assert.deepEqual(collectPosAccounts(packed), ["cro1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpkwunx7"]);
+    assert.equal(parseRpcQuantity({ jsonrpc: "2.0", result: "0xde0b6b3a7640000" }), 10n ** 18n);
+  });
+
+  it("turns a Cronos POS address into the matching EVM account", () => {
+    assert.equal(croPosToEvm("not-an-address"), null);
+    assert.equal(croPosToEvm("cro1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpkwunx7"), FUNDED);
   });
 });

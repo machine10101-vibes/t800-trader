@@ -3,7 +3,7 @@ import { CRONOS_CHAIN_ID } from "./constants";
 
 /** Crypto.com Onchain injects these. MetaMask often owns `window.ethereum` beside them. */
 export interface CronosInjected {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   isDeficonnectProvider?: boolean;
   isDefiWallet?: boolean;
   isCryptoCom?: boolean;

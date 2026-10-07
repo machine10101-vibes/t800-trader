@@ -1,13 +1,21 @@
 import { fetchJson, nullableNum } from "@/lib/utils";
-import { formatUnits } from "viem";
+import { encodeFunctionData, formatUnits } from "viem";
 import { createPublicClient, erc20Abi, fallback, http } from "viem";
 import { cronos } from "viem/chains";
-import { chainIsCronos, mergeNativeBalance, orderCronosAccounts, preferFundedAccount } from "./balance";
-import { CRONOS_CHAIN_ID, CRONOS_RPCS, USDC, WCRO } from "./constants";
+import {
+  chainIsCronos,
+  collectPosAccounts,
+  croPosToEvm,
+  mergeNativeBalance,
+  orderCronosAccounts,
+  parseRpcQuantity,
+  preferFundedAccount,
+} from "./balance";
+import { CRONOS_CHAIN_ID, CRONOS_POS_LCDS, CRONOS_RPCS, USDC, WCRO } from "./constants";
 import { labelCronosProvider, pickCronosProvider, type CronosInjected, type CronosInjectedWindow } from "./provider";
 
 export interface EthereumProvider {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   on?: (event: string, handler: (...args: unknown[]) => void) => void;
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 }
@@ -18,6 +26,8 @@ export interface CronosSession {
   sol: number;
   /** Wrapped CRO. The wallet balance is native plus this. */
   wcro: number;
+  /** Cronos POS CRO. WolfSwap cannot spend this until it is sent to Cronos EVM. */
+  posCro: number;
   usdc: number;
   solPriceUsd: number | null;
   equityUsd: number;
@@ -96,59 +106,123 @@ export async function croPriceUsd(): Promise<number | null> {
   return lastCroPrice;
 }
 
-function parseWei(value: unknown): bigint | null {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
+async function walletRpc(provider: EthereumProvider, method: string, params: unknown[]): Promise<unknown> {
   try {
-    return BigInt(trimmed);
+    return await provider.request({ method, params });
   } catch {
-    return null;
+    // Onchain allows eth_getBalance only through the proxy.
   }
+  const bodies = [
+    { method: "eth_proxyJsonRpcRequest", params: [{ method, params }] },
+    { method: "eth_proxyJsonRpcRequest", params: { method, params } },
+  ];
+  for (const body of bodies) {
+    try {
+      const raw = await provider.request(body);
+      if (raw && typeof raw === "object" && "result" in raw) return (raw as { result: unknown }).result;
+      return raw;
+    } catch {
+      // Try the next parameter shape.
+    }
+  }
+  return null;
+}
+
+async function rpcNative(owner: `0x${string}`): Promise<number | null> {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [owner, "latest"] });
+  for (const url of CRONOS_RPCS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body,
+      });
+      if (!res.ok) continue;
+      const wei = parseRpcQuantity(await res.json());
+      if (wei != null) return Number(formatUnits(wei, 18));
+    } catch {
+      // The next node is the backup.
+    }
+  }
+  return null;
 }
 
 async function providerNative(provider: EthereumProvider, owner: `0x${string}`): Promise<number | null> {
-  try {
-    const chainId = await provider.request({ method: "eth_chainId" });
-    if (!chainIsCronos(chainId)) return null;
-    const hex = await provider.request({ method: "eth_getBalance", params: [owner, "latest"] });
-    const wei = parseWei(hex);
-    if (wei == null || wei < 0n) return null;
-    return Number(formatUnits(wei, 18));
-  } catch {
-    return null;
+  const hex = await walletRpc(provider, "eth_getBalance", [owner, "latest"]);
+  const wei = parseRpcQuantity(hex);
+  if (wei == null) return null;
+  return Number(formatUnits(wei, 18));
+}
+
+async function tokenUnits(
+  token: `0x${string}`,
+  owner: `0x${string}`,
+  decimals: number,
+  provider?: EthereumProvider | null,
+): Promise<number> {
+  const fromNode = await client
+    .readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner] })
+    .then((wei) => Number(formatUnits(wei, decimals)))
+    .catch(() => null);
+  if (fromNode && fromNode > 0) return fromNode;
+  if (!provider) return fromNode ?? 0;
+  const data = encodeFunctionData({ abi: erc20Abi, functionName: "balanceOf", args: [owner] });
+  const hex = await walletRpc(provider, "eth_call", [{ to: token, data }, "latest"]);
+  const wei = parseRpcQuantity(hex);
+  if (wei == null) return fromNode ?? 0;
+  return Number(formatUnits(wei, decimals));
+}
+
+export async function readPosCro(accounts: string[]): Promise<number> {
+  if (!accounts.length) return 0;
+  for (const base of CRONOS_POS_LCDS) {
+    const totals = await Promise.all(
+      accounts.map(async (account) => {
+        try {
+          const json = await fetchJson<{ balances?: Array<{ denom?: string; amount?: string }> }>(
+            `${base}/cosmos/bank/v1beta1/balances/${account}`,
+            { timeoutMs: 4_000, retries: 1 },
+          );
+          const raw = json.balances?.find((row) => row.denom === "basecro")?.amount;
+          if (!raw) return 0;
+          return Number(formatUnits(BigInt(raw), 8));
+        } catch {
+          return 0;
+        }
+      }),
+    );
+    const sum = totals.reduce((a, b) => a + b, 0);
+    if (sum > 0) return sum;
   }
+  return 0;
 }
 
 export async function readCronosBalances(
   address: string,
   provider?: EthereumProvider | null,
+  posAccounts: string[] = [],
 ): Promise<Omit<CronosSession, "provider">> {
   const owner = address as `0x${string}`;
-  const [nativeRpc, nativeWallet, wcroRaw, usdcRaw, price] = await Promise.all([
+  const [nativeRpc, nativeWallet, nativeViem, wcro, usdc, posCro, price] = await Promise.all([
+    rpcNative(owner),
+    provider ? providerNative(provider, owner) : Promise.resolve(null),
     client.getBalance({ address: owner }).then(
       (wei) => Number(formatUnits(wei, 18)),
       () => null,
     ),
-    provider ? providerNative(provider, owner) : Promise.resolve(null),
-    client
-      .readContract({ address: WCRO, abi: erc20Abi, functionName: "balanceOf", args: [owner] })
-      .then((wei) => Number(formatUnits(wei, 18)))
-      .catch(() => 0),
-    client.readContract({ address: USDC, abi: erc20Abi, functionName: "balanceOf", args: [owner] }),
+    tokenUnits(WCRO, owner, 18, provider),
+    tokenUnits(USDC, owner, 6, provider),
+    readPosCro(posAccounts),
     croPriceUsd(),
   ]);
-  if (nativeRpc == null && nativeWallet == null) {
+  const sol = mergeNativeBalance([nativeRpc, nativeWallet, nativeViem]);
+  if (nativeRpc == null && nativeWallet == null && nativeViem == null && !(wcro > 0) && !(posCro > 0)) {
     throw new Error("Could not read the CRO balance from Cronos.");
   }
-  const sol = mergeNativeBalance([nativeRpc, nativeWallet]);
-  const wcro = Number.isFinite(wcroRaw) ? wcroRaw : 0;
-  const usdc = Number(formatUnits(usdcRaw, 6));
   const solPriceUsd = price && price > 0 ? price : null;
   const equityUsd = usdc + (sol + wcro) * (solPriceUsd ?? 0);
-  return { address, sol, wcro, usdc, solPriceUsd, equityUsd };
+  return { address, sol, wcro, posCro, usdc, solPriceUsd, equityUsd };
 }
 
 export async function readWcroBalance(address: string): Promise<number> {
@@ -166,10 +240,45 @@ function selectedAddress(provider: EthereumProvider): string | null {
   return typeof selected === "string" ? selected : null;
 }
 
-async function accountWithCro(provider: EthereumProvider, accounts: string[]): Promise<string> {
+async function listPosAccounts(provider: EthereumProvider): Promise<string[]> {
+  const found: string[] = [];
+  for (const method of ["cosmos_getAccounts", "wallet_getAllAccounts"] as const) {
+    try {
+      collectPosAccounts(await provider.request({ method }), found);
+    } catch {
+      // The wallet may not expose this method.
+    }
+  }
+  return found;
+}
+
+async function listCronosAccounts(provider: EthereumProvider, requested: unknown): Promise<{ evm: string[]; pos: string[] }> {
+  const extra: unknown[] = [requested, selectedAddress(provider)];
+  for (const method of ["eth_accounts", "wallet_getAllAccounts"] as const) {
+    try {
+      extra.push(await provider.request({ method }));
+    } catch {
+      // Keep the accounts we already have.
+    }
+  }
+  const pos = await listPosAccounts(provider);
+  const evm = orderCronosAccounts(extra);
+  for (const account of pos) {
+    const converted = croPosToEvm(account);
+    if (converted && !evm.includes(converted)) evm.push(converted);
+  }
+  return { evm, pos };
+}
+
+async function accountWithCro(
+  provider: EthereumProvider,
+  accounts: string[],
+  posAccounts: string[],
+): Promise<string> {
+  if (!accounts.length) throw new Error("Wallet connected but did not return an account.");
   if (accounts.length === 1) return accounts[0]!;
   const rows = await Promise.all(
-    accounts.map(async (account) => ({ account, bal: await readCronosBalances(account, provider) })),
+    accounts.map(async (account) => ({ account, bal: await readCronosBalances(account, provider, posAccounts) })),
   );
   return preferFundedAccount(rows);
 }
@@ -203,23 +312,29 @@ export async function ensureCronos(provider: EthereumProvider): Promise<void> {
 export async function connectCronos(onlyIfTrusted = false): Promise<CronosSession> {
   const provider = injected();
   if (!provider) throw new Error("No Cronos wallet found. Install the Crypto.com Onchain extension, then reload.");
-  const accounts = orderCronosAccounts(
-    await provider.request({ method: onlyIfTrusted ? "eth_accounts" : "eth_requestAccounts" }),
-    selectedAddress(provider),
-  );
-  if (!accounts.length) throw new Error(onlyIfTrusted ? "Wallet is not connected." : "Wallet connected but did not return an account.");
+  const requested = await provider.request({
+    method: onlyIfTrusted ? "eth_accounts" : "eth_requestAccounts",
+  });
   if (!onlyIfTrusted) await ensureCronos(provider);
   else {
     const current = await provider.request({ method: "eth_chainId" });
     if (!chainIsCronos(current)) throw new Error("Wallet is not on Cronos.");
   }
-  const address = await accountWithCro(provider, accounts);
-  const balances = await readCronosBalances(address, provider);
+  const { evm, pos } = await listCronosAccounts(provider, requested);
+  if (!evm.length) throw new Error(onlyIfTrusted ? "Wallet is not connected." : "Wallet connected but did not return an account.");
+  const address = await accountWithCro(provider, evm, pos);
+  const balances = await readCronosBalances(address, provider, pos);
   return { ...balances, provider };
 }
 
 export async function refreshCronos(session: CronosSession): Promise<CronosSession> {
-  const balances = await readCronosBalances(session.address, session.provider);
+  const { evm, pos } = await listCronosAccounts(session.provider, session.address).catch(() => ({
+    evm: [session.address],
+    pos: [] as string[],
+  }));
+  const candidates = evm.length ? evm : [session.address];
+  const address = await accountWithCro(session.provider, candidates, pos);
+  const balances = await readCronosBalances(address, session.provider, pos);
   return { ...session, ...balances };
 }
 

@@ -50,7 +50,7 @@ describe("Cronos wallet picker", () => {
   });
 
   it("asks for a personal_sign and retries the parameter order unless the user declined", async () => {
-    const calls: unknown[][] = [];
+    const calls: unknown[] = [];
     const provider = wallet({
       request: async (args) => {
         calls.push(args.params ?? []);

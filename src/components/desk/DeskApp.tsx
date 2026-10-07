@@ -917,8 +917,10 @@ function ChainDesk({
                 : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : cronosHeld
                 ? cronosHeld.cro > 0 || wallet.usdc > 0
-                  ? `${cronosHeld.cro.toFixed(3)} CRO · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
-                  : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos and choose the account that holds the CRO."
+                  ? cronosHeld.onPos
+                    ? `${cronosHeld.cro.toFixed(3)} CRO is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
+                    : `${cronosHeld.cro.toFixed(3)} CRO · ${wallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                  : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos EVM and choose the account that holds the CRO."
                 : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
                     desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
                   }`}
@@ -1176,10 +1178,16 @@ function Header({
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const markedUsd = trading ? trading.equityUsd : holdings ? holdings.usd : wallet.equityUsd;
-  const equity = holdings && !trading ? `${holdings.cro.toFixed(3)} CRO` : usd(markedUsd);
-  const equityNote =
-    holdings && !trading ? (holdings.usd > 0 ? usd(holdings.usd) : holdings.cro === 0 ? "No CRO on Cronos" : null) : null;
+  const equity = holdings ? `${holdings.cro.toFixed(3)} CRO` : usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const equityNote = holdings
+    ? holdings.onPos
+      ? "Cronos POS. Send it to Cronos EVM to trade."
+      : holdings.usd > 0
+        ? usd(holdings.usd)
+        : holdings.cro === 0
+          ? "No CRO on this Cronos account"
+          : null
+    : null;
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
