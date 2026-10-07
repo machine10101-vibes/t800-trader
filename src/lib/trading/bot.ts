@@ -31,14 +31,14 @@ import {
   type WalletBudget,
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
-import { entrySignals, snapshotTechnical } from "./signals";
+import { entrySignals, snapshotTechnical, solanaEntrySignals } from "./signals";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
-function huntRank(token: ScoredCandidate): number {
+export function huntRank(token: ScoredCandidate): number {
   const m15 = token.flows.m15.priceChangePct;
   const green = m15 >= 0.1 ? 200 + Math.min(m15, 4) * 8 : m15;
   return green + token.researchScore * 0.15 + (token.watchlist ? 25 : 0);
@@ -201,6 +201,7 @@ export async function tickBot(
         const candles = cachedOhlcv(pos.poolAddress);
         const m15 = live ? live.flows.m15.priceChangePct : candleChangePct(candles ?? [], 15);
         const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
+        if (chain === "solana" && next.config.scratchEnabled === false) continue;
         const cashTape = m15 !== null && cashExit(pos.side, m15);
         if (cashTape) {
           const before = next.positions.length;
@@ -347,20 +348,18 @@ export async function tickBot(
             continue;
           }
           const decision = cachedDecisionChart(token.mint, chain);
+          const charted = decision && decision.length >= 30 ? snapshotTechnical(decision) : null;
+          if (chain === "solana" && !charted) {
+            blocked.push(`${token.symbol}: 4-hour chart has not loaded`);
+            continue;
+          }
           const candles = cachedOhlcv(token.poolAddress);
           const folded = candles ? foldCandles(candles, 5) : [];
-          const tech =
-            decision && decision.length >= 30
-              ? snapshotTechnical(decision)
-              : folded.length >= 20
-                ? snapshotTechnical(folded)
-                : null;
-          const found = entrySignals(
-            token,
-            tech,
-            token.researchScore,
-            next.config.allowShorts,
-            tapeCtx,
+          const tech = charted ?? (folded.length >= 20 ? snapshotTechnical(folded) : null);
+          const found = (
+            chain === "solana"
+              ? solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx)
+              : entrySignals(token, tech, token.researchScore, next.config.allowShorts, tapeCtx)
           ).filter((signal) => keepEntry(signal.side, token.flows.m15.priceChangePct));
           signals.push(...found);
           if (!found.length) blocked.push(tickPass(token.symbol, token.flows.m15.priceChangePct));

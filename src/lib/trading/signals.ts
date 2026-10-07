@@ -324,6 +324,21 @@ export function entrySignals(
   return buildFlowSignals(token, researchScore, allowShorts, ctx);
 }
 
+/**
+ * Solana entries come only from candle structure on the 4-hour decision chart.
+ * The 15m pool-flow setups traded noise: in a 120-day replay they made 30+ round trips a day
+ * and lost the book to fees. A missing 4-hour chart means no entry, not a 5m guess.
+ */
+export function solanaEntrySignals(
+  token: TokenCandidate,
+  decision: TechnicalSnapshot | null,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+): Signal[] {
+  return decision ? buildSignals(token, decision, researchScore, allowShorts, ctx) : [];
+}
+
 /** Trade the pool tape the desk already loaded. No candle request. */
 export function buildFlowSignals(
   token: TokenCandidate,

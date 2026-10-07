@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical } from "./signals";
+import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical, solanaEntrySignals } from "./signals";
 import { canOpen, cashConcentration, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
@@ -442,6 +442,10 @@ describe("indicators", () => {
     assert.equal(structured[0]?.side, "long");
     const preferred = entrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     assert.equal(preferred[0]?.side, "short");
+    const solana = solanaEntrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
+    const shape = (rows: typeof structured) => rows.map((s) => `${s.side}:${s.reason}:${s.confidence}`);
+    assert.deepEqual(shape(solana), shape(structured));
+    assert.deepEqual(solanaEntrySignals(both, null, 70, true), []);
   });
 
   it("does not buy a crashing watchlist name from pool flow", () => {

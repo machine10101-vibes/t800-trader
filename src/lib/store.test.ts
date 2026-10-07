@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_CONFIG, emptyState, freshBook, isIdleEmptyBook, normalizeConfig, seedFromLiveEquity } from "./store";
+import {
+  DEFAULT_CONFIG,
+  emptyState,
+  freshBook,
+  isIdleEmptyBook,
+  normalizeConfig,
+  seedFromLiveEquity,
+  SOLANA_STRATEGY,
+  solanaDefaults,
+  withSolanaStrategy,
+} from "./store";
 
 describe("store", () => {
   it("reseeds an idle empty book once the live wallet is at least $3", () => {
@@ -70,5 +80,23 @@ describe("store", () => {
     assert.equal(normalizeConfig({ walletSwaps: true, liveTradesRev: 1 }).walletSwaps, true);
     assert.equal(normalizeConfig({ executionMode: "live" }).walletSwaps, true);
     assert.equal(normalizeConfig({ walletSwaps: false, liveTradesRev: 1 }).walletSwaps, false);
+  });
+
+  it("moves a saved Solana book onto the tested strategy once, keeping its own limits", () => {
+    const saved = normalizeConfig({ ...DEFAULT_CONFIG, maxLiveNotionalUsd: 40, slippageBps: 120 });
+    assert.equal(saved.strategyRev, 0);
+    const moved = withSolanaStrategy(saved);
+    assert.equal(moved.stopLossPct, SOLANA_STRATEGY.stopLossPct);
+    assert.equal(moved.targetProfitPct, SOLANA_STRATEGY.targetProfitPct);
+    assert.equal(moved.scratchEnabled, false);
+    assert.deepEqual(moved.multipliers, []);
+    assert.equal(moved.strategyRev, 1);
+    assert.equal(moved.maxLiveNotionalUsd, 40);
+    assert.equal(moved.slippageBps, 120);
+    assert.equal(moved.walletSwaps, false);
+
+    const edited = normalizeConfig({ ...moved, multipliers: [5], stopLossPct: 3 });
+    assert.equal(withSolanaStrategy(edited), edited);
+    assert.equal(solanaDefaults().timeCapMin, 360);
   });
 });

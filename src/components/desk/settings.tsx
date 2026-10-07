@@ -3,7 +3,7 @@
 import type { ChainId } from "@/lib/chain";
 import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
-import { DEFAULT_CONFIG, normalizeConfig } from "@/lib/store";
+import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -47,7 +47,14 @@ export function SettingsPanel({
             </button>
             <button
               disabled={busy}
-              onClick={() => setLocal(normalizeConfig({ ...DEFAULT_CONFIG, startingEquity: local.startingEquity }))}
+              onClick={() =>
+                setLocal(
+                  normalizeConfig({
+                    ...(chain === "solana" ? solanaDefaults() : DEFAULT_CONFIG),
+                    startingEquity: local.startingEquity,
+                  }),
+                )
+              }
               className="btn btn-ghost w-full sm:w-auto"
             >
               Reset these settings
@@ -165,7 +172,7 @@ export function SettingsPanel({
         hint={
           chain === "cronos"
             ? "CRO is a normal buy and a normal sell. 5x and 10x are SOL only."
-            : "SOL only. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it. Everything else is a normal buy and a normal sell."
+            : "SOL only, and off by default. In 120-day replays, 5x and 10x lost more than plain buys every time. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it."
         }
       >
         <Toggle
@@ -254,7 +261,11 @@ export function SettingsPanel({
         />
         <Toggle
           label="Sell a buy that is going nowhere"
-          hint="If a buy is still barely up and the short-term price turns down hard, sell it."
+          hint={
+            chain === "solana"
+              ? "Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
+              : "If a buy is still barely up and the short-term price turns down hard, sell it."
+          }
           checked={local.scratchEnabled}
           onChange={(v) => set({ scratchEnabled: v })}
         />
