@@ -809,6 +809,8 @@ function ChainDesk({
     );
   }
 
+  const homeOnPhone = chain === "solana" && tab === "home";
+
   return (
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
         <Header
@@ -857,12 +859,12 @@ function ChainDesk({
             onClick={() => void control(desk?.bot.running ? "stop" : "start")}
             className={`btn mt-3 w-full ${
               desk?.bot.running ? "bg-[var(--danger-soft)] text-[var(--crimson)]" : "btn-magenta"
-            }`}
+            } ${homeOnPhone ? "max-lg:hidden" : ""}`}
           >
             {chain === "solana" ? (desk?.bot.running ? "Stop bot" : "Start bot") : desk?.bot.running ? "Disarm bot" : "Arm bot"}
           </button>
           {error ? <p className="mt-2 px-2 text-[11px] leading-5 text-[var(--crimson)]">{error}</p> : null}
-          {chain === "solana" ? (
+          {chain === "solana" && (desk?.config.walletSwaps || desk?.config.killSwitch) ? (
             <button
               disabled={busy || !desk}
               onClick={() => void control("kill")}
@@ -882,8 +884,12 @@ function ChainDesk({
                 : "Send profits"}
             </button>
           ) : null}
-          {desk?.bot.lastNote ? <p className="mt-3 line-clamp-2 px-2 text-[11px] leading-5 text-[var(--magenta)]">{desk.bot.lastNote}</p> : null}
-          <p className="mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)]">
+          {desk?.bot.lastNote ? (
+            <p className={`mt-3 line-clamp-2 px-2 text-[11px] leading-5 text-[var(--magenta)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
+              {desk.bot.lastNote}
+            </p>
+          ) : null}
+          <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
               ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
