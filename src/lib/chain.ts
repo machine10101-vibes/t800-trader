@@ -77,11 +77,11 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     walletBook: "CRO + USDC",
     swapHint: "WolfSwap and cro.trade",
     connectBlurb:
-      "No demo book. No fallback equity. MetaMask or the Crypto.com DeFi wallet must approve this origin and switch to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the better one is sent. A $3 wallet is enough to open.",
+      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the better one is sent. A $3 wallet is enough to open.",
     connectFallback: "Connect Cronos wallet",
-    installHint: "Install MetaMask or the Crypto.com DeFi wallet, then reload this page.",
+    installHint: "Install the Crypto.com Onchain extension, then reload this page.",
     armBlurb:
-      "Arm signs the funding transfer. That signature moves spare CRO and USDC onto a trading key in this browser, and that key sends each swap. Tickets list only those signed fills.",
+      "Arm asks the Crypto.com Onchain extension to sign. The first signature moves spare CRO and USDC onto a trading key in this browser, and that key sends each swap. If that key already holds the balance, the extension still signs and no more CRO is moved.",
     watchBlurb: "Paste a Cronos address. This page shows that wallet's live CRO and USDC, plus signed swaps stored in this browser.",
     watchError: "That is not a Cronos address.",
     needWallet: "Connect a Cronos wallet to trade.",
@@ -92,13 +92,13 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     noSwaps:
       "No signed swaps yet. An armed bot sends the next 4-hour setup from the trading key. The row appears here with a Cronoscan link once that swap confirms.",
     bookArm:
-      "Arm asks the Cronos wallet to sign the funding transfer. That transaction moves a trading balance to a key in this browser, and that key signs each WolfSwap or cro.trade swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover CRO and USDC back.",
+      "Arm asks the Crypto.com Onchain extension to sign. That signature moves a trading balance to a key in this browser, and that key signs each WolfSwap or cro.trade swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm asks the extension to sign, sells open tickets, then sends the leftover CRO and USDC back.",
     noOpen: "No open swap. A 4-hour setup is sent from the trading key.",
     noTickets:
       "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. The bot buys when the 4-hour chart sets up, so a quiet day can pass with no trade. Practice can bet against these coins. Real money only buys and sells.",
     explorerName: "Cronoscan",
     settingsWallet:
-      "On: The first arm signs one transaction and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap and cro.trade and sends the better swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Real-money shorts are not sent.",
+      "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap and cro.trade and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Real-money shorts are not sent.",
     settingsMultiplier: "5x and 10x are SOL only. Cronos tickets are a spot buy and a spot sell.",
     settingsFive: "Does not apply on Cronos. 5x is a SOL perpetual.",
     settingsTen: "Does not apply on Cronos. 10x is a SOL perpetual.",

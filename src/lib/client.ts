@@ -75,13 +75,15 @@ async function budgetFor(session?: WalletSession | null): Promise<WalletBudget |
 }
 
 async function cronosLive(session: DeskSession | null | undefined) {
-  const { authorizeCronos, cronosBudget, cronosExecutor, reclaimCronos, sendCronosProfit } = await import("@/lib/cronos/trade");
+  const { authorizeCronos, confirmCronosDisarm, cronosBudget, cronosExecutor, reclaimCronos, sendCronosProfit } =
+    await import("@/lib/cronos/trade");
   const cronos = session as CronosSession | null | undefined;
   return {
     executor: cronos ? cronosExecutor(cronos) : undefined,
     maker: null as ReturnType<typeof makerDesk> | null,
     budget: () => cronosBudget(cronos),
     authorize: () => authorizeCronos(cronos as CronosSession),
+    confirmDisarm: () => confirmCronosDisarm(cronos as CronosSession),
     reclaim: (keep: number) => reclaimCronos(cronos?.address ?? "", keep),
     read: (address: string) => import("@/lib/cronos/wallet").then((mod) => mod.readCronosBalances(address)),
     hasKey: () => Boolean(cronos),
@@ -143,6 +145,9 @@ export async function controlBot(
     await tickBot(executor, funds, live ? maker : null, chain);
     return buildDesk(false, chain);
   }
+  if (action === "stop" && liveKit && session) {
+    await liveKit.confirmDisarm();
+  }
   if ((action === "stop" || action === "flatten" || action === "reset") && maker) {
     const resting = (await loadState(chain)).bot.resting;
     if (resting) await maker.cancel(resting.orderKey).catch(() => undefined);
@@ -180,14 +185,29 @@ export async function controlBot(
 
   let auth: ArmAuth | null = null;
   if (action === "start" && session) {
-    const state = await loadState(chain);
-    if (state.config.walletSwaps) auth = liveKit ? await liveKit.authorize() : await authorizeTrading(solana as WalletSession);
+    if (liveKit) auth = await liveKit.authorize();
+    else {
+      const state = await loadState(chain);
+      if (state.config.walletSwaps) auth = await authorizeTrading(solana as WalletSession);
+    }
   }
 
   await mutateState((state) => {
     const unsold = state.config.walletSwaps && state.positions.some((p) => signedOnChain(p));
     if ((action === "flatten" || action === "reset") && unsold) return state;
-    const next = applyControl(state, action);
+    const controlled = applyControl(state, action);
+    const next =
+      chain === "cronos" && action === "start" && auth
+        ? {
+            ...controlled,
+            config: normalizeConfig({
+              ...controlled.config,
+              walletSwaps: true,
+              executionMode: "live",
+              killSwitch: false,
+            }),
+          }
+        : controlled;
     if (reclaimed && (action === "stop" || action === "flatten")) {
       const short = `${reclaimed.slice(0, 8)}…`;
       return {

@@ -493,9 +493,11 @@ function ChainDesk({
                 running: true,
                 lastError: null,
                 lastNote:
-                  cur.config.walletSwaps || isLiveSessionArmed()
-                    ? "Armed — approve the wallet if it asks."
-                    : "Armed — first tick incoming",
+                  chain === "cronos"
+                    ? "Approve the wallet signature to arm."
+                    : cur.config.walletSwaps || isLiveSessionArmed()
+                      ? "Armed — approve the wallet if it asks."
+                      : "Armed — first tick incoming",
               },
             }
           : cur,
@@ -532,8 +534,12 @@ function ChainDesk({
     } catch (e) {
       const message = e instanceof Error ? e.message : "Control failed";
       setError(message);
-      if (action === "start") {
-        setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: message } } : cur));
+      if (action === "start" || action === "stop") {
+        setDesk((cur) =>
+          cur
+            ? { ...cur, bot: { ...cur.bot, running: action === "stop" ? true : false, lastNote: message } }
+            : cur,
+        );
       }
     } finally {
       busyRef.current = false;
@@ -891,9 +897,15 @@ function ChainDesk({
           ) : null}
           <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
-              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
+              ? chain === "cronos"
+                ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
+                : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
-                  desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
+                  chain === "cronos"
+                    ? "Arm and disarm ask the Onchain extension to sign."
+                    : desk?.config.walletSwaps
+                      ? "Arm signs once. That signature sends the swaps."
+                      : "Fills stay in this browser."
                 }`}
           </p>
           <button onClick={() => void disconnect()} className="mt-2 min-h-11 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">

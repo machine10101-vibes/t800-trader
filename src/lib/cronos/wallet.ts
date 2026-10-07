@@ -3,6 +3,7 @@ import { formatUnits } from "viem";
 import { createPublicClient, erc20Abi, fallback, http } from "viem";
 import { cronos } from "viem/chains";
 import { CRONOS_CHAIN_ID, CRONOS_RPCS, USDC, WCRO } from "./constants";
+import { labelCronosProvider, pickCronosProvider, type CronosInjected, type CronosInjectedWindow } from "./provider";
 
 export interface EthereumProvider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -28,10 +29,17 @@ export function cronosClient() {
   return client;
 }
 
-function injected(): EthereumProvider | null {
+function readInjected(): CronosInjectedWindow | null {
   if (typeof window === "undefined") return null;
-  const w = window as Window & { ethereum?: EthereumProvider };
-  return w.ethereum ?? null;
+  return window as unknown as CronosInjectedWindow;
+}
+
+function injected(): CronosInjected | null {
+  return pickCronosProvider(readInjected());
+}
+
+export function currentCronosProvider(): CronosInjected | null {
+  return injected();
 }
 
 export function cronosWalletInstalled(): boolean {
@@ -39,15 +47,7 @@ export function cronosWalletInstalled(): boolean {
 }
 
 export function detectedCronosWallet(): string | null {
-  if (typeof window === "undefined") return null;
-  const w = window as Window & {
-    ethereum?: { isMetaMask?: boolean; isCryptoCom?: boolean; isDefiWallet?: boolean };
-  };
-  const eth = w.ethereum;
-  if (!eth) return null;
-  if (eth.isDefiWallet || eth.isCryptoCom) return "Crypto.com";
-  if (eth.isMetaMask) return "MetaMask";
-  return "Ethereum wallet";
+  return labelCronosProvider(injected());
 }
 
 export async function croPriceUsd(): Promise<number | null> {
@@ -140,7 +140,7 @@ export async function ensureCronos(provider: EthereumProvider): Promise<void> {
 
 export async function connectCronos(onlyIfTrusted = false): Promise<CronosSession> {
   const provider = injected();
-  if (!provider) throw new Error("No Cronos wallet found. Install MetaMask or the Crypto.com DeFi wallet, then reload.");
+  if (!provider) throw new Error("No Cronos wallet found. Install the Crypto.com Onchain extension, then reload.");
   const accounts = (await provider.request({
     method: onlyIfTrusted ? "eth_accounts" : "eth_requestAccounts",
   })) as string[];

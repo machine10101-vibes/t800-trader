@@ -9,7 +9,15 @@ import { sameMint } from "@/lib/chain";
 import { planCronosArm } from "./arm";
 import { BOT_MIN_CRO, GAS_CRO, USDC, WCRO } from "./constants";
 import { buildCroTradeCall, buildWolfswapCall, croTradeMinOut, quoteCronos, type CronosRoute } from "./route";
-import { cronosClient, readCronosBalances, type CronosSession, type EthereumProvider } from "./wallet";
+import {
+  ARM_ALREADY_FUNDED,
+  DISARM_RETURN,
+  assertConnectedAccount,
+  chooseSignProvider,
+  cronosSendTx,
+  requestPersonalSign,
+} from "./provider";
+import { cronosClient, currentCronosProvider, ensureCronos, readCronosBalances, type CronosSession } from "./wallet";
 
 const depositAbi = [
   {
@@ -91,24 +99,39 @@ async function sendFrom(
   }
 }
 
+async function promptCronos(session: CronosSession): Promise<CronosSession["provider"]> {
+  const provider = chooseSignProvider(currentCronosProvider(), session.provider);
+  if (!provider) throw new Error("No Cronos wallet found. Install the Crypto.com Onchain extension, then reload.");
+  try {
+    await ensureCronos(provider);
+    const accounts = await provider.request({ method: "eth_requestAccounts" });
+    assertConnectedAccount(accounts, session.address);
+    return provider;
+  } catch (error) {
+    throw cronosError(error);
+  }
+}
+
+async function signWithWallet(session: CronosSession, message: string): Promise<string> {
+  const provider = await promptCronos(session);
+  try {
+    return await requestPersonalSign(provider, session.address, message);
+  } catch (error) {
+    throw cronosError(error);
+  }
+}
+
 async function userSend(
-  provider: EthereumProvider,
-  from: string,
+  session: CronosSession,
   to: `0x${string}`,
   value?: bigint,
   data?: Hex,
 ): Promise<string> {
+  const provider = await promptCronos(session);
   try {
     const hash = await provider.request({
       method: "eth_sendTransaction",
-      params: [
-        {
-          from,
-          to,
-          value: value && value > 0n ? `0x${value.toString(16)}` : undefined,
-          data,
-        },
-      ],
+      params: [cronosSendTx({ from: session.address, to, value, data })],
     });
     if (typeof hash !== "string" || !hash.startsWith("0x")) throw new Error("Wallet did not return a signature");
     return hash;
@@ -242,8 +265,9 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
     throw new Error("Could not read the trading account, so no more CRO or USDC was moved.");
   }
   if (tradingKeyCoversSpend(before, BOT_MIN_CRO)) {
+    const signature = await signWithWallet(session, ARM_ALREADY_FUNDED);
     return {
-      signature: "reused",
+      signature,
       botAddress: existing?.address ?? "",
       reused: true,
       equityUsd: before?.equityUsd ?? 0,
@@ -255,7 +279,7 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
   const plan = planCronosArm(live.sol, live.usdc);
   let signature = "";
   if (plan.croToBot > 0) {
-    signature = await userSend(session.provider, session.address, account.address, units(plan.croToBot, 18));
+    signature = await userSend(session, account.address, units(plan.croToBot, 18));
   }
   if (plan.usdcToBot > 0) {
     const data = encodeFunctionData({
@@ -263,13 +287,18 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
       functionName: "transfer",
       args: [account.address, units(plan.usdcToBot, 6)],
     });
-    signature = await userSend(session.provider, session.address, USDC, undefined, data);
+    signature = await userSend(session, USDC, undefined, data);
   }
   await new Promise((resolve) => setTimeout(resolve, 1200));
   const after = await readCronosBalances(account.address).catch(() => before);
   const equityUsd = after?.equityUsd ?? 0;
   const depositedUsd = Math.max(0, equityUsd - (before?.equityUsd ?? 0));
   return { signature: signature || "reused", botAddress: account.address, reused: false, equityUsd, depositedUsd };
+}
+
+/** Ask the Onchain extension to approve disarm before any trading-key transfer. */
+export async function confirmCronosDisarm(session: CronosSession): Promise<string> {
+  return signWithWallet(session, DISARM_RETURN);
 }
 
 export async function reclaimCronos(ownerAddress: string, keepCro = 0): Promise<string | null> {
