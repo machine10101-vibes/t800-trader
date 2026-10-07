@@ -143,6 +143,7 @@ function ChainDesk({
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const busyRef = useRef(false);
+  const controlGen = useRef(0);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
@@ -369,11 +370,12 @@ function ChainDesk({
       const current = walletRef.current;
       if (!current || cancel || inflight || busyRef.current) return false;
       inflight = true;
+      const gen = controlGen.current;
       try {
         const next = await controlBot("tick", current, chain);
-        // An arm click sets busy while this tick is still in flight. Applying the
-        // older book here would put the button back on "Arm bot".
-        if (!cancel && !busyRef.current) applyDesk(next, { keepError: true });
+        // A start or stop click while this tick was in flight wins. Applying the
+        // older book here would flip the button back.
+        if (!cancel && !busyRef.current && gen === controlGen.current) applyDesk(next, { keepError: true });
         return true;
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : "Tick failed");
@@ -474,8 +476,12 @@ function ChainDesk({
       return;
     }
     busyRef.current = true;
+    controlGen.current += 1;
     setBusy(true);
     setError(null);
+    if (action === "stop" || action === "kill") {
+      setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: "Stopping…" } } : cur));
+    }
     if (action === "start") {
       setDesk((cur) =>
         cur

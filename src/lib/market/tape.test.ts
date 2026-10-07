@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, cashExit, foldCandles, keepEntry, printClose, pushTapeMark, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, cashExit, foldCandles, keepEntry, printClose, pushTapeMark, solanaPass, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
@@ -88,6 +88,8 @@ describe("candle tape", () => {
     assert.match(tapeRead("SOL", 0.4, 0.8, 1), /green at 0.80%.*long is eligible/);
     assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), waiting on a 5m/);
     assert.match(tickPass("SOL", -0.4), /red \(-0.40%\), staying in cash/);
+    assert.equal(solanaPass("SOL", 0), "SOL: no 4-hour setup yet");
+    assert.match(solanaPass("RAY", -0.4), /dropping right now \(-0.40% in 15 minutes\)/);
     assert.equal(tapeInCash(-0.4), true);
     assert.equal(tapeInCash(-0.3), true);
     assert.equal(tapeInCash(0), false);

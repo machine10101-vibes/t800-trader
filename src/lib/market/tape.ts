@@ -104,6 +104,12 @@ export function cashExit(side: "long" | "short", m15: number): boolean {
   return side !== "short" && tapeInCash(m15);
 }
 
+/** Solana entries come from the 4-hour chart. A red 15m still holds a buy back. */
+export function solanaPass(symbol: string, m15: number): string {
+  if (m15 <= -0.25) return `${symbol}: dropping right now (${m15.toFixed(2)}% in 15 minutes), so it waits`;
+  return `${symbol}: no 4-hour setup yet`;
+}
+
 export function tickPass(symbol: string, m15: number): string {
   if (m15 <= -0.25) return `${symbol}: 15m is red (${m15.toFixed(2)}%), staying in cash`;
   if (m15 < 0.1) return `${symbol}: 15m is flat (${m15.toFixed(2)}%), waiting on a 5m that can take 5x or 10x`;

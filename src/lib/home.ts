@@ -57,7 +57,7 @@ export function homeStatus(
   return {
     tone: "amber",
     title: "Watching for a good setup",
-    detail: why ?? bot.lastNote ?? "It buys only when the 4-hour chart lines up. A quiet day can pass with no trade.",
+    detail: why ?? "It buys only when the 4-hour chart lines up. A quiet day can pass with no trade.",
   };
 }
 
