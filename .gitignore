@@ -11,3 +11,4 @@ data/state.json
 data/*.tmp
 .turbo
 tsconfig.tsbuildinfo
+.cache
