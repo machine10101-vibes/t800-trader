@@ -118,12 +118,15 @@ export function orderCronosAccounts(result: unknown, selected?: string | null): 
   return found;
 }
 
-export function preferFundedAccount<T extends { sol: number; wcro?: number; usdc: number }>(
+export function preferFundedAccount<T extends { sol: number; wcro?: number; usdc: number; posCro?: number }>(
   rows: Array<{ account: string; bal: T }>,
 ): string {
   if (!rows.length) throw new Error("Wallet connected but did not return an account.");
-  const score = (bal: T) => bal.sol + (bal.wcro ?? 0) + bal.usdc;
-  return rows.reduce((best, row) => (score(row.bal) > score(best.bal) ? row : best)).account;
+  const evm = (bal: T) => bal.sol + (bal.wcro ?? 0);
+  const total = (bal: T) => evm(bal) + bal.usdc + (bal.posCro ?? 0);
+  const armable = rows.filter((row) => evm(row.bal) >= 3 || row.bal.usdc >= 1);
+  const pool = armable.length ? armable : rows;
+  return pool.reduce((best, row) => (total(row.bal) > total(best.bal) ? row : best)).account;
 }
 
 function bech32Polymod(values: number[]): number {
@@ -160,6 +163,24 @@ function convertBits(data: number[], from: number, to: number, pad: boolean): nu
   return out;
 }
 
+function bech32HrpExpand(hrp: string): number[] {
+  return [...[...hrp].map((c) => c.charCodeAt(0) >> 5), 0, ...[...hrp].map((c) => c.charCodeAt(0) & 31)];
+}
+
+/** Cronos EVM `0x…` and Cronos POS `cro1…` are the same 20 bytes. */
+export function evmToCroPos(address: string, hrp = "cro"): string | null {
+  const evm = asEvmAddress(address);
+  if (!evm || (hrp !== "cro" && hrp !== "tcro")) return null;
+  const bytes: number[] = [];
+  for (let i = 2; i < evm.length; i += 2) bytes.push(Number.parseInt(evm.slice(i, i + 2), 16));
+  const data = convertBits(bytes, 8, 5, true);
+  if (!data) return null;
+  const mod = bech32Polymod([...bech32HrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0]) ^ 1;
+  const checksum: number[] = [];
+  for (let i = 0; i < 6; i += 1) checksum.push((mod >> (5 * (5 - i))) & 31);
+  return `${hrp}1${[...data, ...checksum].map((value) => BECH32[value]).join("")}`;
+}
+
 /** Cronos POS `cro1…` and Cronos EVM `0x…` are the same 20 bytes. */
 export function croPosToEvm(address: string): string | null {
   const raw = address.trim();
@@ -175,8 +196,7 @@ export function croPosToEvm(address: string): string | null {
     values.push(idx);
   }
   if (values.length < 6) return null;
-  const hrpExpand = [...[...hrp].map((c) => c.charCodeAt(0) >> 5), 0, ...[...hrp].map((c) => c.charCodeAt(0) & 31)];
-  if (bech32Polymod([...hrpExpand, ...values]) !== 1) return null;
+  if (bech32Polymod([...bech32HrpExpand(hrp), ...values]) !== 1) return null;
   const bytes = convertBits(values.slice(0, -6), 5, 8, false);
   if (!bytes || bytes.length < 20) return null;
   const hex = bytes

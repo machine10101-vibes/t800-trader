@@ -1,3 +1,4 @@
+import { formatCro } from "./balance";
 import { BOT_MIN_CRO, USER_KEEP_CRO } from "./constants";
 
 export interface CronosArmPlan {
@@ -27,9 +28,15 @@ export function planCronosArm(cro: number, usdc: number, wcro = 0, posCro = 0): 
   const keep = keepOnWallet(Math.max(0, cro));
   const croToBot = cro > keep ? round(cro - keep, 6) : 0;
   if (croToBot < BOT_MIN_CRO && wcroToBot < BOT_MIN_CRO) {
-    if (posCro >= 3 && cro + wcro < 3) {
+    const evm = cro + wcro;
+    if (posCro > 0 && evm < 3) {
       throw new Error(
-        `The wallet is holding ${posCro >= 1000 ? posCro.toFixed(1) : posCro.toFixed(3)} CRO on Cronos POS. Send it to Cronos EVM, then arm.`,
+        `The connected wallet shows ${formatCro(posCro)} on Cronos POS. In the Onchain wallet, send that CRO to Cronos EVM, then arm.`,
+      );
+    }
+    if (evm > 0) {
+      throw new Error(
+        `This Cronos EVM account has ${formatCro(evm)}. Need about 3 CRO on Cronos EVM so arming can pay for swaps.`,
       );
     }
     throw new Error("Need about 3 CRO on Cronos EVM in this wallet so arming can pay for swaps.");

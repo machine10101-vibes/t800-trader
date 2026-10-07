@@ -6,6 +6,7 @@ import {
   chainIsCronos,
   collectPosAccounts,
   croPosToEvm,
+  evmToCroPos,
   mergeNativeBalance,
   orderCronosAccounts,
   parseRpcQuantity,
@@ -204,6 +205,8 @@ export async function readCronosBalances(
   posAccounts: string[] = [],
 ): Promise<Omit<CronosSession, "provider">> {
   const owner = address as `0x${string}`;
+  const derivedPos = evmToCroPos(address);
+  const pos = derivedPos && !posAccounts.includes(derivedPos) ? [...posAccounts, derivedPos] : posAccounts;
   const [nativeRpc, nativeWallet, nativeViem, wcro, usdc, posCro, price] = await Promise.all([
     rpcNative(owner),
     provider ? providerNative(provider, owner) : Promise.resolve(null),
@@ -213,7 +216,7 @@ export async function readCronosBalances(
     ),
     tokenUnits(WCRO, owner, 18, provider),
     tokenUnits(USDC, owner, 6, provider),
-    readPosCro(posAccounts),
+    readPosCro(pos),
     croPriceUsd(),
   ]);
   const sol = mergeNativeBalance([nativeRpc, nativeWallet, nativeViem]);
@@ -327,6 +330,26 @@ export async function connectCronos(onlyIfTrusted = false): Promise<CronosSessio
   return { ...balances, provider };
 }
 
+function keepSessionHoldings(
+  previous: CronosSession,
+  next: Omit<CronosSession, "provider">,
+): Omit<CronosSession, "provider"> {
+  const same = previous.address.toLowerCase() === next.address.toLowerCase();
+  if (!same) return next;
+  const nextEvm = next.sol + next.wcro;
+  return {
+    ...next,
+    sol: nextEvm > 0 ? next.sol : previous.sol,
+    wcro: nextEvm > 0 ? next.wcro : previous.wcro,
+    usdc: Math.max(next.usdc, previous.usdc),
+    posCro: Math.max(next.posCro, previous.posCro),
+    solPriceUsd: next.solPriceUsd ?? previous.solPriceUsd,
+    equityUsd:
+      Math.max(next.usdc, previous.usdc) +
+      (nextEvm > 0 ? nextEvm : previous.sol + previous.wcro) * (next.solPriceUsd ?? previous.solPriceUsd ?? 0),
+  };
+}
+
 export async function refreshCronos(session: CronosSession): Promise<CronosSession> {
   const { evm, pos } = await listCronosAccounts(session.provider, session.address).catch(() => ({
     evm: [session.address],
@@ -335,7 +358,7 @@ export async function refreshCronos(session: CronosSession): Promise<CronosSessi
   const candidates = evm.length ? evm : [session.address];
   const address = await accountWithCro(session.provider, candidates, pos);
   const balances = await readCronosBalances(address, session.provider, pos);
-  return { ...session, ...balances };
+  return { ...session, ...keepSessionHoldings(session, balances) };
 }
 
 export function listenCronos(

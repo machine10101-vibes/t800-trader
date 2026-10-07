@@ -6,6 +6,7 @@ import {
   collectPosAccounts,
   croHoldings,
   croPosToEvm,
+  evmToCroPos,
   formatCro,
   mergeNativeBalance,
   orderCronosAccounts,
@@ -57,6 +58,11 @@ describe("Cronos balance", () => {
       { account: FUNDED, bal: { sol: 40, wcro: 0, usdc: 0 } },
     ]);
     assert.equal(dustFirst, FUNDED);
+    const posOverDust = preferFundedAccount([
+      { account: EMPTY, bal: { sol: 0.0001, wcro: 0, usdc: 0, posCro: 0 } },
+      { account: FUNDED, bal: { sol: 0, wcro: 0, usdc: 0, posCro: 200 } },
+    ]);
+    assert.equal(posOverDust, FUNDED);
   });
 
   it("pulls every 0x and cro1 address out of the Onchain account payload", () => {
@@ -71,5 +77,7 @@ describe("Cronos balance", () => {
   it("turns a Cronos POS address into the matching EVM account", () => {
     assert.equal(croPosToEvm("not-an-address"), null);
     assert.equal(croPosToEvm("cro1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpkwunx7"), FUNDED);
+    assert.equal(evmToCroPos(FUNDED), "cro1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpkwunx7");
+    assert.equal(croPosToEvm(evmToCroPos(FUNDED) ?? ""), FUNDED);
   });
 });
