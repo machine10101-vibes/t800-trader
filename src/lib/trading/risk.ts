@@ -76,6 +76,17 @@ export function dayLossUsedPct(portfolio: Portfolio, config: BotConfig): number 
   return Math.max(0, used / Math.max(config.dailyLossLimitPct, 0.1));
 }
 
+/** How long a losing streak pauses new tickets. Only a win resets the streak, so the pause has to expire on its own. */
+export const LOSS_STREAK_PAUSE_MS = 60 * 60_000;
+
+/** True while the last losing close of a streak is recent enough to hold new tickets. */
+export function lossStreakPaused(trades: Trade[], cap: number, nowMs = Date.now()): boolean {
+  if (!(cap > 0) || consecutiveLosses(trades) < cap) return false;
+  const last = trades.find((t) => t.action === "close" && t.pnlUsd !== null);
+  const at = last ? Date.parse(last.at) : NaN;
+  return Number.isFinite(at) && nowMs - at < LOSS_STREAK_PAUSE_MS;
+}
+
 export function consecutiveLosses(trades: Trade[]): number {
   let n = 0;
   for (const t of trades) {
@@ -229,6 +240,9 @@ export function canOpen(args: {
     return "Micro book rides two tickets";
   }
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
+  if (config.maxPositions > 0 && positions.length >= config.maxPositions) {
+    return `Holding ${config.maxPositions} coins, the most allowed at once`;
+  }
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
@@ -242,19 +256,20 @@ export function canOpen(args: {
   const sameSector = positions.filter((p) => (p.sector ?? "Unknown") === sector).length;
   const sectorCap = Math.max(1, policyNum(config.maxPerSector, POLICY.maxPerSector));
   if (sameSector >= sectorCap) return `Sector cap of ${sectorCap} reached for ${sector}`;
+  if (sector === "Meme" && stance === "defensive") return "Memes are flattened in a defensive tape, so none are opened";
   if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
     return "Meme cluster capped off risk-on";
   }
   const lastStop = trades.find(
     (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
   );
-  const cooldownMin = Math.min(8, Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)));
+  const cooldownMin = Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes));
   const cooldownMs = cooldownMin * 60_000;
   if (cooldownMs > 0 && lastStop && Date.now() - Date.parse(lastStop.at) < cooldownMs) {
     return "Cooldown after a stop/time-out on this mint";
   }
   const streakCap = policyNum(config.lossStreakPause, POLICY.lossStreakPause);
-  if (streakCap > 0 && consecutiveLosses(trades) >= streakCap) return `Cooling after ${streakCap} straight losses`;
+  if (lossStreakPaused(trades, streakCap)) return `Cooling for an hour after ${streakCap} straight losses`;
   const budget = policyNum(config.dayBudgetPct, POLICY.dayBudgetPct) / 100;
   if (dayLossUsedPct(portfolio, config) >= budget) return "Protect remaining day budget";
   const floor = policyNum(config.minConfidence, POLICY.minConfidence);

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
 import { SOL_MINT } from "../market/universe";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
@@ -222,7 +222,25 @@ describe("risk", () => {
         { action: "close", pnlUsd: -3, mint: "c", at: new Date().toISOString() } as never,
       ],
     });
-    assert.equal(reason, "Cooling after 3 straight losses");
+    assert.equal(reason, "Cooling for an hour after 3 straight losses");
+  });
+
+  it("lets the streak pause lapse after an hour so a win can reset it", () => {
+    const old = new Date(Date.now() - 61 * 60_000).toISOString();
+    const losses = [-10, -8, -3].map((pnlUsd, i) => ({ action: "close", pnlUsd, mint: `m${i}`, at: old }) as never);
+    assert.equal(lossStreakPaused(losses, 3), false);
+    assert.equal(lossStreakPaused(losses, 3, Date.parse(old) + 30 * 60_000), true);
+  });
+
+  it("holds no more coins than the most-at-once setting", () => {
+    const held = [{ mint: "a", sector: "L1" }, { mint: "b", sector: "DeFi" }] as never[];
+    const reason = canOpen({
+      positions: held,
+      signal: { mint: "zzz", symbol: "ZZZ", sector: "AI", side: "long", reason: "breakout", confidence: 90 } as never,
+      config: { ...DEFAULT_CONFIG, maxPositions: 2, microOneTicket: false },
+      portfolio: portfolio(),
+    });
+    assert.equal(reason, "Holding 2 coins, the most allowed at once");
   });
 
   it("sizes down after a two-loss streak", () => {
