@@ -8,7 +8,9 @@ import { readBalances } from "@/lib/solana/wallet";
 import { pct, shortAddress, usd } from "@/lib/utils";
 import { rMultiple } from "@/lib/trading/risk";
 import { useEffect, useState, type ReactNode } from "react";
+import { cashLegs } from "@/lib/cashHoldings";
 import { Label, Pill, Spark, Stat, Tone } from "./bits";
+import { CashLegs, WalletUsdcChip } from "./CashLegs";
 import { TokenLogo } from "./TokenLogo";
 
 export function WatchScreen({
@@ -82,6 +84,7 @@ export function WatchScreen({
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <Pill tone={view?.running ? "mint" : "default"}>{view?.running ? "Armed" : "Standby"}</Pill>
+            {view?.usdc != null ? <WalletUsdcChip usdc={view.usdc} chain={chain} /> : null}
             {toolbar}
             <button onClick={() => void copyLink()} className="min-h-11 px-1 text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">
               {copied ? "Link copied" : "Copy link"}
@@ -99,7 +102,25 @@ export function WatchScreen({
         ) : (
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label="Wallet mark" value={view.walletEquityUsd === null ? "—" : usd(view.walletEquityUsd)} sub={view.sol === null ? "Chain read pending" : `${view.sol.toFixed(3)} ${CHAIN_COPY[chain].native} · ${(view.usdc ?? 0).toFixed(2)} USDC`} />
+              <Stat
+                label="Wallet mark"
+                value={view.walletEquityUsd === null ? "—" : usd(view.walletEquityUsd)}
+                sub={
+                  view.sol === null ? (
+                    "Chain read pending"
+                  ) : (
+                    <CashLegs
+                      legs={cashLegs({
+                        chain,
+                        usdc: view.usdc ?? 0,
+                        native: view.sol,
+                        nativePriceUsd: view.solPriceUsd,
+                      })}
+                      chain={chain}
+                    />
+                  )
+                }
+              />
               <Stat label="Paper equity" value={view.paperEquityUsd === null ? "—" : usd(view.paperEquityUsd)} sub={<Spark values={view.equityCurve} />} />
               <Stat
                 label="Day P&L"

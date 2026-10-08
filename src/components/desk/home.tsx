@@ -1,11 +1,15 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
+import type { CashLeg } from "@/lib/cashHoldings";
+import { formatCashUsd } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
+import type { ReactNode } from "react";
 import { Pill } from "./bits";
+import { CashLegs } from "./CashLegs";
 import { TokenLogo } from "./TokenLogo";
 
 const pageStartedAt = Date.now();
@@ -24,6 +28,8 @@ export function Home({
   desk,
   chain = "solana",
   balanceUsd,
+  cashLegs = [],
+  walletUsdc,
   busy,
   closingId,
   closeError,
@@ -37,6 +43,8 @@ export function Home({
   desk: DeskPayload;
   chain?: ChainId;
   balanceUsd: number;
+  cashLegs?: CashLeg[];
+  walletUsdc?: number;
   busy: boolean;
   closingId: string | null;
   closeError: { id: string; message: string } | null;
@@ -125,8 +133,16 @@ export function Home({
           <p className={`mt-2 text-center text-xs ${runner ? "text-[var(--mint)]" : "text-[var(--faint)]"}`}>{alwaysOnNote(runner)}</p>
         ) : null}
 
+        {walletUsdc !== undefined ? (
+          <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1.5 text-sm">
+            <TokenLogo symbol="USDC" chain={chain} size="sm" />
+            <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--faint)]">Wallet USDC</span>
+            <span className="num font-medium">{formatCashUsd(walletUsdc)}</span>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Figure label={real ? "Trading balance" : "Practice balance"} value={usd(balanceUsd)} />
+          <Figure label={real ? "Trading balance" : "Practice balance"} value={usd(balanceUsd)} extra={cashLegs.length ? <CashLegs legs={cashLegs} chain={chain} /> : null} />
           <Figure label="Today" value={usd(today)} tone={today} />
           <Figure label="All closed trades" value={usd(results.netUsd)} tone={results.netUsd} />
           <Figure
@@ -291,11 +307,12 @@ function ActivityList({
   );
 }
 
-function Figure({ label, value, tone }: { label: string; value: string; tone?: number }) {
+function Figure({ label, value, tone, extra }: { label: string; value: string; tone?: number; extra?: ReactNode }) {
   return (
     <div className="stat-card neon hairline p-3">
       <div className="text-[11px] tracking-wide text-[var(--faint)]">{label}</div>
       <div className={`mt-1 break-words text-xl num ${tone === undefined ? "" : toneClass(tone)}`}>{value}</div>
+      {extra}
     </div>
   );
 }
