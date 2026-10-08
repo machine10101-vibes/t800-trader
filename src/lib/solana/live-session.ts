@@ -1,11 +1,32 @@
 const KEY = "t800-trader-live-session";
 
-function stored(): boolean {
-  if (typeof sessionStorage === "undefined") return false;
+function flagFrom(storage: Storage | undefined): boolean {
+  if (!storage) return false;
   try {
-    return sessionStorage.getItem(KEY) === "1";
+    return storage.getItem(KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function stored(): boolean {
+  const local = typeof localStorage !== "undefined" ? localStorage : undefined;
+  const session = typeof sessionStorage !== "undefined" ? sessionStorage : undefined;
+  return flagFrom(local) || flagFrom(session);
+}
+
+function writeFlag(on: boolean): void {
+  for (const storage of [
+    typeof localStorage !== "undefined" ? localStorage : null,
+    typeof sessionStorage !== "undefined" ? sessionStorage : null,
+  ]) {
+    if (!storage) continue;
+    try {
+      if (on) storage.setItem(KEY, "1");
+      else storage.removeItem(KEY);
+    } catch {
+      // Private mode still keeps the in-memory flag for this page.
+    }
   }
 }
 
@@ -17,25 +38,15 @@ export function isLiveSessionArmed(): boolean {
 
 export function armLiveSession(): void {
   armed = true;
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.setItem(KEY, "1");
-  } catch {
-    // Private mode still keeps the in-memory flag for this page.
-  }
+  writeFlag(true);
 }
 
 export function disarmLiveSession(): void {
   armed = false;
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.removeItem(KEY);
-  } catch {
-    // The in-memory flag is already cleared.
-  }
+  writeFlag(false);
 }
 
-/** A saved running LIVE book keeps sending after a refresh. */
+/** A saved running LIVE book keeps sending after a refresh or a later visit. */
 export function resumeLiveSession(): void {
   armLiveSession();
 }

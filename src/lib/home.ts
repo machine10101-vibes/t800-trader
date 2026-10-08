@@ -123,6 +123,13 @@ export function planRules(
   return rules;
 }
 
+/** Honest: GitHub Pages dies with the tab. The local desk runner does not. */
+export function alwaysOnNote(runner: boolean): string {
+  return runner
+    ? "The desk runner on this computer keeps checking after you close this browser. Stop that process to stop the bot."
+    : "This page stops checking when you close the tab. On your computer run npm run desk, open that address, then arm if you want the bot to keep going after you close the browser.";
+}
+
 export interface HomeResults {
   closed: number;
   wins: number;

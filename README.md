@@ -65,12 +65,21 @@ npm run dev
 
 Open [http://localhost:3000/t800-trader/](http://localhost:3000/t800-trader/). The `/t800-trader` base path matches GitHub Pages. Connect a wallet, then press **Space** to arm or disarm the bot.
 
+The published GitHub Pages tab stops scanning when you close it. To keep an armed bot running after you close the browser, build once and leave the desk runner up:
+
+```bash
+npm run build
+npm run desk
+```
+
+Open [http://127.0.0.1:8787/t800-trader/](http://127.0.0.1:8787/t800-trader/), connect, and arm from that address. The runner serves `out/` and ticks from `~/.t800-trader` (or `$T800_DATA`). Trading keys stay on that computer. They are not uploaded. Stop the process to stop the bot.
+
 ```bash
 npm test
 npm run build
 ```
 
-`next build` writes a static export to `out/` (project Pages layout: `basePath` / `assetPrefix` `/t800-trader`). Paper state is stored in the browser. Reset it from the Risk tab.
+`next build` writes a static export to `out/` (project Pages layout: `basePath` / `assetPrefix` `/t800-trader`). Paper state is stored in the browser. The desk runner also writes the book to disk. Reset it from the Risk tab.
 
 ## Data sources
 
@@ -93,7 +102,7 @@ No API keys required for the public endpoints above. Rate limits apply. On Pages
 - Unlock calendars, treasuries, audits, and protocol revenue are **not** in these feeds.
 - A research score is a ranking heuristic, not a valuation.
 - Fast 5m signals overfit noise. Silence is a valid position.
-- Static Pages cannot persist a shared book. Each browser has its own paper account.
+- Static Pages cannot persist a shared book. Each browser has its own paper account. `npm run desk` keeps a local book on disk so scans continue after you close the tab.
 
 ## License
 

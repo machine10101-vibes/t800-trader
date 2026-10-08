@@ -26,6 +26,7 @@ import {
   cronosSendTx,
   requestPersonalSign,
 } from "./provider";
+import { cronosSignerKey, readSecret, writeSecret } from "@/lib/keystore";
 import { cronosClient, currentCronosProvider, ensureCronos, readCronosBalances, type CronosSession } from "./wallet";
 
 const depositAbi = [
@@ -38,13 +39,8 @@ const depositAbi = [
   },
 ] as const;
 
-function signerStorageKey(owner: string): string {
-  return `t800-trader-signer:cronos:${owner.toLowerCase()}`;
-}
-
 export function cronosTradingAccount(owner: string): PrivateKeyAccount | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(signerStorageKey(owner));
+  const raw = readSecret(cronosSignerKey(owner));
   if (!raw || !/^0x[0-9a-fA-F]{64}$/.test(raw)) return null;
   return privateKeyToAccount(raw as Hex);
 }
@@ -52,10 +48,11 @@ export function cronosTradingAccount(owner: string): PrivateKeyAccount | null {
 export function loadOrCreateCronosKey(owner: string): PrivateKeyAccount {
   const existing = cronosTradingAccount(owner);
   if (existing) return existing;
-  if (typeof window === "undefined") throw new Error("Arm the bot from the browser so the wallet can sign.");
   const created = generatePrivateKey();
-  window.localStorage.setItem(signerStorageKey(owner), created);
-  return privateKeyToAccount(created);
+  writeSecret(cronosSignerKey(owner), created);
+  const stored = cronosTradingAccount(owner);
+  if (!stored) throw new Error("Arm the bot from the browser so the wallet can sign.");
+  return stored;
 }
 
 function cronosError(error: unknown): Error {

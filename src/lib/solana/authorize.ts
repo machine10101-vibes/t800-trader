@@ -10,6 +10,7 @@ import { DEFAULT_ARM_FUNDS_USD, usdcToLoad } from "@/lib/deskSettings";
 import { USDC_MINT } from "@/lib/market/universe";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
+import { readSecret, solanaSignerKey, writeSecret } from "@/lib/keystore";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -68,14 +69,9 @@ function round(n: number, digits: number): number {
   return Math.round(n * p) / p;
 }
 
-function storageKey(owner: string): string {
-  return `t800-trader-signer:${owner}`;
-}
-
 export function tradingKeypair(owner: string): Keypair | null {
-  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(storageKey(owner));
+    const raw = readSecret(solanaSignerKey(owner));
     if (!raw) return null;
     const bytes = Uint8Array.from(JSON.parse(raw) as number[]);
     if (bytes.length !== 64) return null;
@@ -88,10 +84,11 @@ export function tradingKeypair(owner: string): Keypair | null {
 export function loadOrCreateTradingKey(owner: string): Keypair {
   const existing = tradingKeypair(owner);
   if (existing) return existing;
-  if (typeof window === "undefined") throw new Error("Arm the bot from the browser so the wallet can sign.");
   const created = Keypair.generate();
-  window.localStorage.setItem(storageKey(owner), JSON.stringify(Array.from(created.secretKey)));
-  return created;
+  writeSecret(solanaSignerKey(owner), JSON.stringify(Array.from(created.secretKey)));
+  const stored = tradingKeypair(owner);
+  if (!stored) throw new Error("Arm the bot from the browser so the wallet can sign.");
+  return stored;
 }
 
 function associatedToken(owner: PublicKey, mint: PublicKey): PublicKey {

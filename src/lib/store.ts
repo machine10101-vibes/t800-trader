@@ -1,4 +1,5 @@
 import type { ChainId } from "@/lib/chain";
+import type { KeyBackend } from "@/lib/keystore";
 import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
 import { resumeLiveSession } from "@/lib/solana/live-session";
@@ -179,6 +180,60 @@ const slots: Record<ChainId, BookSlot> = {
   cronos: blankSlot(),
 };
 
+let storeBackend: KeyBackend | null = null;
+
+/** File map used only by the desk runner. The browser bundle never imports fs. */
+export function useDeskStore(next: KeyBackend | null): void {
+  storeBackend = next;
+}
+
+function storageGet(key: string): string | null {
+  if (typeof window !== "undefined") {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  return storeBackend?.get(key) ?? null;
+}
+
+function storageSet(key: string, value: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Quota or private-mode — keep the in-memory book.
+    }
+    return;
+  }
+  storeBackend?.set(key, value);
+}
+
+function storageRemove(key: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // The next connect writes a new address.
+    }
+    return;
+  }
+  storeBackend?.remove?.(key);
+}
+
+function storageKeys(): string[] {
+  if (typeof window !== "undefined") {
+    const out: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key) out.push(key);
+    }
+    return out;
+  }
+  return storeBackend?.keys?.() ?? [];
+}
+
 function slotFor(chain: ChainId = "solana"): BookSlot {
   return slots[chain];
 }
@@ -198,30 +253,15 @@ function lastWalletKey(chain: ChainId): string {
 }
 
 export function readLastWallet(chain: ChainId): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(lastWalletKey(chain));
-  } catch {
-    return null;
-  }
+  return storageGet(lastWalletKey(chain));
 }
 
 export function writeLastWallet(chain: ChainId, address: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(lastWalletKey(chain), address);
-  } catch {
-    // The in-memory slot still holds the book.
-  }
+  storageSet(lastWalletKey(chain), address);
 }
 
 export function clearLastWallet(chain: ChainId): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(lastWalletKey(chain));
-  } catch {
-    // The next connect writes a new address.
-  }
+  storageRemove(lastWalletKey(chain));
 }
 
 export function bookStorageKey(chain: ChainId, wallet: string): string {
@@ -274,13 +314,10 @@ export function peekBook(address: string, chain: ChainId = "solana"): AppState |
 }
 
 export function listLocalBooks(chain: ChainId = "solana"): string[] {
-  if (typeof window === "undefined") return [];
   const prefix = `t800-trader-state:${chain}:`;
   const legacy = "t800-trader-state:";
   const out: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const key = window.localStorage.key(i);
-    if (!key) continue;
+  for (const key of storageKeys()) {
     if (key.startsWith(prefix)) {
       out.push(key.slice(prefix.length));
       continue;
@@ -294,9 +331,8 @@ export function listLocalBooks(chain: ChainId = "solana"): string[] {
 }
 
 function readRaw(key: string): AppState | null {
-  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = storageGet(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed?.config || !parsed?.portfolio) return null;
@@ -317,12 +353,18 @@ function blankBook(chain: ChainId, startingEquity = 0): AppState {
 }
 
 function writeBrowserState(chain: ChainId, wallet: string, next: AppState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(bookStorageKey(chain, wallet), JSON.stringify(next));
-  } catch {
-    // Quota or private-mode — keep the in-memory book.
-  }
+  storageSet(bookStorageKey(chain, wallet), JSON.stringify(next));
+}
+
+/** Take a book the page posted to the desk runner. Does not reseed or invent cash. */
+export async function adoptPostedBook(chain: ChainId, wallet: string, state: AppState): Promise<AppState> {
+  const slot = slotFor(chain);
+  slot.wallet = wallet;
+  slot.memory = hydrate(state);
+  writeLastWallet(chain, wallet);
+  writeBrowserState(chain, wallet, slot.memory);
+  if (slot.memory.bot.running && slot.memory.config.walletSwaps) resumeLiveSession();
+  return slot.memory;
 }
 
 export function isIdleEmptyBook(state: AppState): boolean {

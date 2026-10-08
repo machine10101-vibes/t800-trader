@@ -524,6 +524,6 @@ export interface DeskPayload {
   stats: BookStats;
   learning: LearningReport;
   generatedAt: string;
-  /** In-memory only. Reload clears it even if the saved book still says LIVE. */
+  /** True after LIVE is typed, or after a saved LIVE book is reopened. */
   liveSessionArmed: boolean;
 }

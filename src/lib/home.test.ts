@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
+import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
 import { solanaDefaults } from "./store";
 import type { Portfolio, Position, Trade } from "./types";
 
@@ -93,6 +93,9 @@ describe("home", () => {
         r.includes("spends CRO") && r.includes("CRO itself is skipped"),
       ),
     );
+    assert.match(alwaysOnNote(false), /npm run desk/);
+    assert.match(alwaysOnNote(true), /desk runner/);
+    assert.match(alwaysOnNote(true), /close this browser/);
   });
 
   it("sums closed results and words every exit", () => {

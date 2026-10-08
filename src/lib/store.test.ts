@@ -2,16 +2,19 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_CONFIG,
+  adoptPostedBook,
   bookStorageKey,
   emptyState,
   freshBook,
   isIdleEmptyBook,
+  listLocalBooks,
   normalizeConfig,
   readLastWallet,
   resumeSavedBook,
   seedFromLiveEquity,
   SOLANA_STRATEGY,
   solanaDefaults,
+  useDeskStore,
   withSolanaStrategy,
   writeLastWallet,
 } from "./store";
@@ -164,5 +167,29 @@ describe("store", () => {
     assert.equal(normalizeConfig({ solTradeMode: "margin", multipliers: [] }).solTradeMode, "margin");
     assert.equal(normalizeConfig({ solTradeMode: "both", marginOnFourHour: true }).marginOnFourHour, true);
     assert.equal(normalizeConfig({ startingEquity: 6 }).solTradeMode, "spot");
+  });
+
+  it("loads a posted book from the desk file backend without a window", async () => {
+    const prior = (globalThis as { window?: unknown }).window;
+    delete (globalThis as { window?: unknown }).window;
+    const store = new Map<string, string>();
+    useDeskStore({
+      get: (key) => store.get(key) ?? null,
+      set: (key, value) => {
+        store.set(key, value);
+      },
+      remove: (key) => {
+        store.delete(key);
+      },
+      keys: () => [...store.keys()],
+    });
+    const posted = emptyState({ ...DEFAULT_CONFIG, startingEquity: 50, walletSwaps: true, executionMode: "live" });
+    posted.bot.running = true;
+    const next = await adoptPostedBook("solana", "SoRunner", posted);
+    assert.equal(next.bot.running, true);
+    assert.equal(readLastWallet("solana"), "SoRunner");
+    assert.ok(listLocalBooks("solana").includes("SoRunner"));
+    useDeskStore(null);
+    if (prior !== undefined) (globalThis as { window?: unknown }).window = prior;
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
-import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
+import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
@@ -30,6 +30,7 @@ export function Home({
   onClose,
   onOpenPosition,
   onMore,
+  runner = false,
 }: {
   desk: DeskPayload;
   chain?: ChainId;
@@ -42,6 +43,7 @@ export function Home({
   onClose: (id: string) => void;
   onOpenPosition: (id: string) => void;
   onMore: () => void;
+  runner?: boolean;
 }) {
   const real = desk.config.walletSwaps;
   const positions = real ? desk.positions.filter((p) => p.signature || (p.leverage ?? 1) > 1) : desk.positions;
@@ -116,6 +118,9 @@ export function Home({
         </button>
         {running && real ? (
           <p className="mt-2 text-center text-xs text-[var(--faint)]">Stopping sells what the bot holds and sends the money back to your wallet.</p>
+        ) : null}
+        {running ? (
+          <p className={`mt-2 text-center text-xs ${runner ? "text-[var(--mint)]" : "text-[var(--faint)]"}`}>{alwaysOnNote(runner)}</p>
         ) : null}
 
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -236,6 +241,7 @@ export function Home({
               ? "No bot can promise a profit. These Cronos rules have not been replayed. Practice first, and only use money you can afford to lose."
               : "No bot can promise a profit. In 120-day replays with fees these rules stayed close to flat. Practice first, and only use money you can afford to lose."}
           </p>
+          <p className="mt-3 text-xs leading-5 text-[var(--faint)]">{alwaysOnNote(runner)}</p>
           <button type="button" onClick={onMore} className="mt-3 text-sm text-[var(--magenta)] underline-offset-4 hover:underline">
             Change settings
           </button>

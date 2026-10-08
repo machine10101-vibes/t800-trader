@@ -25,7 +25,10 @@ import {
   withdrawTradingProfit,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
-import { getActiveWallet, listLocalBooks, readLastWallet, resumeSavedBook } from "@/lib/store";
+import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
+import { startDeskKeepalive } from "@/lib/deskKeepalive";
+import { getActiveWallet, listLocalBooks, loadState, readLastWallet, resumeSavedBook, saveState } from "@/lib/store";
+import { nextTickWaitMs } from "@/lib/trading/runtime";
 import { parseWalletAddress } from "@/lib/monitor";
 import { cachedFrameChart, prefetchFrameCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
@@ -157,11 +160,25 @@ function ChainDesk({
   const [liveConfirm, setLiveConfirm] = useState(false);
   const [armAfterLive, setArmAfterLive] = useState(false);
   const [pendingLiveConfig, setPendingLiveConfig] = useState<Partial<BotConfig> | null>(null);
+  const [runnerHost, setRunnerHost] = useState(false);
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const busyRef = useRef(false);
   const controlGen = useRef(0);
+  const runnerHostRef = useRef(false);
+  runnerHostRef.current = runnerHost;
+
+  const publishRunner = useCallback(async () => {
+    if (!runnerHostRef.current) return;
+    const address = walletRef.current?.address ?? getActiveWallet(chain);
+    if (!address) return;
+    try {
+      await publishDeskBook(chain, address, await loadState(chain));
+    } catch {
+      // The next poll retries. Arming in this tab still saved the book locally.
+    }
+  }, [chain]);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
@@ -409,6 +426,47 @@ function ChainDesk({
   positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
+    let cancel = false;
+    const check = async () => {
+      const status = await detectDeskRunner();
+      if (!cancel) setRunnerHost(Boolean(status));
+    };
+    void check();
+    const id = window.setInterval(() => {
+      void check();
+    }, 8_000);
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!runnerHost) return;
+    let cancel = false;
+    const pull = async () => {
+      const book = await pullDeskBook(chain);
+      if (cancel || !book?.state) return;
+      try {
+        await attachWallet(book.wallet, Math.max(0, book.state.portfolio.equityUsd), chain);
+        await saveState(book.state, chain);
+        if (!busyRef.current) applyDesk(shellDesk(book.state), { keepError: true });
+      } catch {
+        // The runner keeps the book. The next poll retries.
+      }
+    };
+    void pull();
+    const id = window.setInterval(() => {
+      void pull();
+    }, 4_000);
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, [applyDesk, chain, runnerHost]);
+
+  useEffect(() => {
+    if (runnerHost) return;
     if (!active && !desk?.bot.running) return;
     if (!walletRef.current && !getActiveWallet(chain)) return;
     let cancel = false;
@@ -434,10 +492,6 @@ function ChainDesk({
         inflight = false;
       }
     };
-    const delayMs = () => {
-      const configured = Math.max(4, scanSecondsRef.current) * 1000;
-      return positionOpenRef.current ? Math.min(configured, 4_000) : configured;
-    };
     const arm = (delay: number) => {
       timer = window.setTimeout(() => {
         void (async () => {
@@ -445,16 +499,26 @@ function ChainDesk({
           const started = Date.now();
           if (!busyRef.current) await run();
           if (cancel) return;
-          arm(Math.max(1_000, delayMs() - (Date.now() - started)));
+          arm(
+            nextTickWaitMs({
+              scanSeconds: scanSecondsRef.current,
+              openLivePosition: positionOpenRef.current,
+              usedMs: Date.now() - started,
+            }),
+          );
         })();
       }, delay);
     };
     arm(active ? 300 : 1_200);
+    const stopKeep = startDeskKeepalive(() => {
+      if (!cancel && !busyRef.current) void run();
+    });
     return () => {
       cancel = true;
       window.clearTimeout(timer);
+      stopKeep();
     };
-  }, [active, applyDesk, chain, desk?.bot.running, wallet?.address]);
+  }, [active, applyDesk, chain, desk?.bot.running, runnerHost, wallet?.address]);
 
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;
@@ -594,6 +658,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -617,6 +682,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -639,6 +705,7 @@ function ChainDesk({
         setError(e instanceof Error ? e.message : "Config failed");
       } finally {
         setBusy(false);
+        void publishRunner();
       }
       return;
     }
@@ -649,6 +716,7 @@ function ChainDesk({
       setError(e instanceof Error ? e.message : "Config failed");
     } finally {
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -683,6 +751,7 @@ function ChainDesk({
       setError(e instanceof Error ? e.message : "Could not arm LIVE");
     } finally {
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -702,6 +771,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setClosingId(null);
+      void publishRunner();
     }
   };
 
@@ -719,6 +789,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setCancelling(false);
+      void publishRunner();
     }
   };
 
@@ -1023,6 +1094,7 @@ function ChainDesk({
                   onClose={(id) => void closePos(id)}
                   onOpenPosition={setDetailId}
                   onMore={() => setTab("risk")}
+                  runner={runnerHost}
                 />
               ) : null}
               {tab === "overview" ? (
