@@ -26,12 +26,11 @@ export function croHoldings(
 ): { cro: number; usd: number; evm: number; pos: number; onPos: boolean } {
   const evm = Math.max(0, session.sol) + Math.max(0, session.wcro ?? 0);
   const pos = Math.max(0, session.posCro ?? 0);
-  const cro = evm > 0 ? evm : pos;
   const quoted = session.solPriceUsd && session.solPriceUsd > 0 ? session.solPriceUsd : chartPrice;
   const price = quoted > 0 ? quoted : 0;
   return {
-    cro,
-    usd: Math.max(0, session.usdc ?? 0) + cro * price,
+    cro: evm,
+    usd: Math.max(0, session.usdc ?? 0) + evm * price,
     evm,
     pos,
     onPos: evm === 0 && pos > 0,

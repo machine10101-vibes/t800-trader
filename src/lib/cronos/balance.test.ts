@@ -25,9 +25,15 @@ describe("Cronos balance", () => {
     assert.equal(held.usd, 1.6);
     assert.equal(croHoldings({ sol: 2, usdc: 0, solPriceUsd: 0.1 }).usd, 0.2);
     const posOnly = croHoldings({ sol: 0, posCro: 40, usdc: 0, solPriceUsd: 0.05 });
-    assert.equal(posOnly.cro, 40);
+    assert.equal(posOnly.cro, 0);
+    assert.equal(posOnly.evm, 0);
+    assert.equal(posOnly.pos, 40);
     assert.equal(posOnly.onPos, true);
-    assert.equal(posOnly.usd, 2);
+    assert.equal(posOnly.usd, 0);
+    const evmAndPos = croHoldings({ sol: 3.2, posCro: 200, usdc: 0, solPriceUsd: 0.1 });
+    assert.equal(evmAndPos.cro, 3.2);
+    assert.equal(evmAndPos.onPos, false);
+    assert.equal(Number(evmAndPos.usd.toFixed(2)), 0.32);
   });
 
   it("recognizes Cronos even when the wallet returns a number or a padded chain id", () => {

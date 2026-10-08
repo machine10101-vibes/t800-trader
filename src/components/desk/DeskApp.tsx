@@ -963,13 +963,13 @@ function ChainDesk({
           <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
               ? chain === "cronos"
-                ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
+                ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
                 : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : cronosHeld
-                ? cronosHeld.cro > 0 || shownWallet.usdc > 0
+                ? cronosHeld.cro > 0 || cronosHeld.pos > 0 || shownWallet.usdc > 0
                   ? cronosHeld.onPos
-                    ? `${formatCro(cronosHeld.cro)} is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
-                    : `${formatCro(cronosHeld.cro)} · ${shownWallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                    ? `${formatCro(cronosHeld.pos)} is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
+                    : `${formatCro(cronosHeld.cro)} on Cronos EVM · ${shownWallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
                   : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos EVM and choose the account that holds the CRO."
                 : !wallet
                   ? desk?.bot.running
@@ -1243,15 +1243,20 @@ function Header({
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const equity = holdings ? formatCro(holdings.cro) : usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const croEvm = trading && chain === "cronos" ? trading.sol : holdings?.cro ?? 0;
+  const equity = holdings ? `${formatCro(croEvm).replace(/ CRO$/, " CRO EVM")}` : usd(trading ? trading.equityUsd : wallet.equityUsd);
   const equityNote = holdings
-    ? holdings.onPos
-      ? "Cronos POS. Send it to Cronos EVM to trade."
-      : holdings.usd > 0
-        ? usd(holdings.usd)
-        : holdings.cro === 0
-          ? "No CRO on this Cronos account"
-          : null
+    ? trading
+      ? trading.equityUsd > 0
+        ? usd(trading.equityUsd)
+        : null
+      : holdings.onPos
+        ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.`
+        : holdings.usd > 0
+          ? usd(holdings.usd)
+          : holdings.cro === 0
+            ? "No CRO on Cronos EVM"
+            : null
     : null;
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
@@ -2391,12 +2396,20 @@ function Book({
         <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
           label={trading ? "Trading balance" : "Wallet mark"}
-          value={trading ? usd(trading.equityUsd) : walletCro ? formatCro(walletCro.cro) : usd(wallet.equityUsd)}
+          value={
+            trading
+              ? usd(trading.equityUsd)
+              : walletCro
+                ? formatCro(walletCro.cro).replace(/ CRO$/, " CRO EVM")
+                : usd(wallet.equityUsd)
+          }
           sub={
             trading
-              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
+              ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
               : walletCro
-                ? `${walletCro.usd > 0 ? usd(walletCro.usd) : "Price pending"} · ${wallet.usdc.toFixed(2)} USDC`
+                ? walletCro.onPos
+                  ? `${formatCro(walletCro.pos)} on Cronos POS`
+                  : `${walletCro.usd > 0 ? usd(walletCro.usd) : "Price pending"} · ${wallet.usdc.toFixed(2)} USDC`
                 : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
           }
         />
