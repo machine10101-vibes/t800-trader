@@ -6,6 +6,7 @@ import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey,
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
+import { paintRegime } from "./regime";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
 import {
@@ -28,6 +29,7 @@ import {
   geckoNetwork,
   isActiveBook,
   isQuote,
+  WCRO_MINT,
   isStable,
   SOL_MINT,
   SOL_USDC_POOLS,
@@ -621,33 +623,55 @@ export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 120):
 
 const REGIME_FEED = { timeoutMs: 3_500, retries: 1 };
 
-async function fetchRegime(): Promise<MarketRegime> {
+async function croMarkFallback(): Promise<{ price: number | null; change24h: number | null }> {
+  const [llama, gecko] = await Promise.allSettled([
+    fetchJson<{ coins?: Record<string, { price?: number }> }>(`https://coins.llama.fi/prices/current/cronos:${WCRO_MINT}`, REGIME_FEED),
+    fetchJson<{
+      data?: { attributes?: { token_prices?: Record<string, string> } };
+    }>(`https://api.geckoterminal.com/api/v2/simple/networks/cro/token_price/${WCRO_MINT}`, REGIME_FEED),
+  ]);
+  const llamaPx =
+    llama.status === "fulfilled" ? nullableNum(llama.value.coins?.[`cronos:${WCRO_MINT}`]?.price) : null;
+  const prices = gecko.status === "fulfilled" ? gecko.value.data?.attributes?.token_prices ?? {} : {};
+  const geckoPx = nullableNum(prices[WCRO_MINT] ?? prices[WCRO_MINT.toLowerCase()] ?? Object.values(prices)[0]);
+  return { price: llamaPx ?? geckoPx, change24h: null };
+}
+
+async function fetchRegime(chain: ChainId = "solana"): Promise<MarketRegime> {
+  const cronos = chain === "cronos";
+  const geckoIds = cronos ? "bitcoin,ethereum,crypto-com-chain" : "bitcoin,ethereum,solana";
+  const dexSlug = cronos ? "cronos" : "solana";
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
     fetchJson<CgSimple>(
-      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true",
+      `https://api.coingecko.com/api/v3/simple/price?ids=${geckoIds}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
       REGIME_FEED,
     ),
     fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global", REGIME_FEED),
     fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1", REGIME_FEED),
     fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains", REGIME_FEED),
     fetchJson<{ total24h?: number; change_1d?: number }>(
-      "https://api.llama.fi/overview/dexs/solana?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true",
+      `https://api.llama.fi/overview/dexs/${dexSlug}?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true`,
       REGIME_FEED,
     ),
   ]);
 
   const px = prices.status === "fulfilled" ? prices.value : null;
-  const needFallback = !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(px?.solana?.usd);
-  const fallback = needFallback ? await liveMajors().catch(() => null) : null;
+  const l1Gecko = cronos ? px?.["crypto-com-chain"] : px?.solana;
+  const needFallback =
+    !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(l1Gecko?.usd);
+  const fallback = !cronos && needFallback ? await liveMajors().catch(() => null) : null;
+  const croFallback = cronos && needFallback ? await croMarkFallback().catch(() => null) : null;
   const g = global.status === "fulfilled" ? global.value.data : null;
   const fear = fng.status === "fulfilled" ? fng.value.data?.[0] : null;
   const chainList = chains.status === "fulfilled" ? chains.value : [];
-  const solChain = chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
+  const l1Chain = cronos
+    ? chainList.find((c) => c.name === "Cronos" || c.gecko_id === "crypto-com-chain" || c.gecko_id === "cronos")
+    : chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
   const btcPx = nullableNum(px?.bitcoin?.usd) ?? fallback?.btc.price ?? null;
   const ethPx = nullableNum(px?.ethereum?.usd) ?? fallback?.eth.price ?? null;
-  const solPx = nullableNum(px?.solana?.usd) ?? fallback?.sol.price ?? null;
+  const l1Px = nullableNum(l1Gecko?.usd) ?? (cronos ? croFallback?.price : fallback?.sol.price) ?? null;
   const btc = {
     price: btcPx ?? 0,
     change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change ?? fallback?.btc.change24h),
@@ -661,56 +685,24 @@ async function fetchRegime(): Promise<MarketRegime> {
     volume24h: num(px?.ethereum?.usd_24h_vol),
   };
   const sol = {
-    price: solPx ?? 0,
-    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change ?? fallback?.sol.change24h),
-    marketCap: num(px?.solana?.usd_market_cap),
-    volume24h: num(px?.solana?.usd_24h_vol),
+    price: l1Px ?? 0,
+    change24h: l1Px === null ? 0 : num(l1Gecko?.usd_24h_change ?? (cronos ? croFallback?.change24h : fallback?.sol.change24h)),
+    marketCap: num(l1Gecko?.usd_market_cap),
+    volume24h: num(l1Gecko?.usd_24h_vol),
   };
 
-  const fearValue = fear ? num(fear.value) : null;
   const btcDom = nullableNum(g?.market_cap_percentage?.btc);
-  const solVsBtc = sol.change24h - btc.change24h;
-  const riskOn =
-    Boolean(btcPx && solPx) &&
-    btc.change24h > 0.4 &&
-    sol.change24h > 0 &&
-    (fearValue === null || fearValue >= 45) &&
-    (dex?.change_1d === undefined || dex.change_1d > -8);
-  const defensive =
-    Boolean(btcPx || solPx) &&
-    (btc.change24h < -2 || (fearValue !== null && fearValue < 30) || sol.change24h < -5);
-  const stance: MarketRegime["stance"] = !btcPx && !solPx ? "mixed" : defensive ? "defensive" : riskOn ? "risk-on" : "mixed";
-
-  const crowded: string[] = [];
-  const overlooked: string[] = [];
-  if (fearValue !== null && fearValue >= 70) crowded.push("High-beta memes (Fear & Greed in greed)");
-  else if (fearValue !== null) overlooked.push("Selective high-beta Solana names while sentiment is not euphoric");
-  if (btcPx && solPx && solVsBtc > 2) crowded.push("SOL beta / ecosystem rotation vs BTC");
-  else if (btcPx && solPx && solVsBtc < -2) overlooked.push("Solana beta vs BTC (SOL underperforming on the day)");
-  if (dex?.change_1d !== undefined && dex.change_1d > 15) crowded.push("Solana DEX volume chase");
-  else if (dex?.change_1d !== undefined) overlooked.push("Spot DEX flow that is not exploding day-over-day");
-  crowded.push("Paid Dexscreener boosts / launchpad tape");
-  overlooked.push("Fee-switch / LST / perps venues with measurable usage");
-
-  const stanceWhy =
-    !btcPx && !solPx
-      ? "BTC/SOL marks are missing this cycle. Stance is withheld — no fabricated tape."
-      : stance === "defensive"
-        ? "BTC or SOL is selling off, or sentiment is fearful — size down and demand cleaner setups."
-        : stance === "risk-on"
-          ? "BTC and SOL are green with non-panicked sentiment — short-term longs have a tailwind."
-          : "Tape is mixed. Prefer liquid names, tight risk, and fade only extreme extensions.";
-
-  const overview = [
-    `BTC ${btc.price ? `$${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)` : "n/a"}, ETH ${eth.price ? `$${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)` : "n/a"}, SOL ${sol.price ? `$${sol.price.toFixed(2)} (${sol.change24h.toFixed(2)}%)` : "n/a"}.`,
-    btcDom !== null ? `BTC dominance ${btcDom.toFixed(1)}%.` : "BTC dominance unavailable.",
-    fear ? `Fear & Greed ${fear.value} (${fear.value_classification}).` : "Fear & Greed unavailable.",
-    solChain ? `Solana DeFi TVL $${(solChain.tvl / 1e9).toFixed(2)}B.` : "Solana TVL unavailable.",
-    dex?.total24h
-      ? `Solana DEX volume 24h $${(dex.total24h / 1e9).toFixed(2)}B (${dex.change_1d !== undefined ? `${dex.change_1d.toFixed(1)}% d/d` : "d/d n/a"}).`
-      : "Solana DEX volume unavailable.",
-    stanceWhy,
-  ].join(" ");
+  const painted = paintRegime({
+    chain,
+    btc,
+    eth,
+    l1: sol,
+    btcDom,
+    fear: fear ? { value: num(fear.value), label: fear.value_classification } : null,
+    tvl: l1Chain?.tvl ?? null,
+    dexVolume24h: dex?.total24h ?? null,
+    dexChange1d: dex?.change_1d ?? null,
+  });
 
   return {
     asOf: new Date().toISOString(),
@@ -722,20 +714,10 @@ async function fetchRegime(): Promise<MarketRegime> {
     totalMarketCap: nullableNum(g?.total_market_cap?.usd),
     marketCapChange24h: nullableNum(g?.market_cap_change_percentage_24h_usd),
     fearGreed: fear ? { value: num(fear.value), label: fear.value_classification } : null,
-    solanaTvl: solChain?.tvl ?? null,
+    solanaTvl: l1Chain?.tvl ?? null,
     solanaDexVolume24h: dex?.total24h ?? null,
     solanaDexVolumeChange1d: dex?.change_1d ?? null,
-    stance,
-    stanceWhy,
-    crowded,
-    overlooked,
-    overview,
-    narratives:
-      stance === "risk-on"
-        ? ["SOL beta", "DEX flow", "Selective memes only with liquidity"]
-        : stance === "defensive"
-          ? ["Capital preservation", "SOL/USDC only", "Avoid illiquid launches"]
-          : ["Liquid majors", "Mean-reversion fades", "Research over tape-chasing"],
+    ...painted,
     yields: [],
   };
 }
@@ -1168,7 +1150,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   const chartsReady = prefetchFrameCharts(chain);
   const tapesPromise: Promise<Map<string, JupiterTape>> =
     chain === "solana" ? loadJupiterTapes(bookMints(chain)).catch(() => new Map()) : Promise.resolve(new Map());
-  const regimePromise = fetchRegime();
+  const regimePromise = fetchRegime(chain);
   const lastRows = [...markets[chain].lastBook.values()];
   const lastComplete = bookComplete(lastRows, chain);
   const skipGecko = geckoIsCooling() && (chain === "solana" || lastComplete);
@@ -1202,7 +1184,9 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   );
   const [regime, crossed, tapes] = await Promise.all([
     regimePromise,
-    crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
+    chain === "solana"
+      ? crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] }))
+      : Promise.resolve({ candidates: merged, yields: [] as YieldQuote[] }),
     tapesPromise,
     chartsReady.catch(() => undefined),
   ]);

@@ -735,8 +735,8 @@ function ChainDesk({
 
   const detail = desk?.positions.find((position) => position.id === detailId) ?? null;
   const nativeRow = desk?.research.find((r) => r.ticker === copy.native);
-  const solPx = (chain === "solana" ? desk?.regime.sol.price : 0) || nativeRow?.price || wallet?.solPriceUsd || 0;
-  const solChg = chain === "solana" && desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
+  const solPx = desk?.regime.sol.price || nativeRow?.price || wallet?.solPriceUsd || 0;
+  const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
   const cronosHeld = chain === "cronos" && wallet ? croHoldings(wallet, solPx || 0) : null;
   const cronosMark = cronosHeld?.usd ?? 0;
   useEffect(() => {
@@ -1884,7 +1884,9 @@ function Overview({
             const price =
               tape?.price ??
               token.priceUsd ??
-              (token.symbol === "SOL" && desk.regime.sol.price > 0 ? desk.regime.sol.price : undefined) ??
+              ((token.symbol === "SOL" || token.symbol === "CRO") && desk.regime.sol.price > 0
+                ? desk.regime.sol.price
+                : undefined) ??
               (token.symbol === "CRO" ? desk.research.find((row) => row.ticker === "CRO")?.price : undefined);
             const change5m = tape?.change5m ?? token.change5m;
             const selected = token.mint === (focus?.candidate.mint ?? focusTape?.mint);
