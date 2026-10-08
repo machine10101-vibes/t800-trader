@@ -428,6 +428,7 @@ export async function sendSolProfitShare(
   ownerAddress: string,
   shareUsd: number,
   solPriceUsd = 0,
+  prefer: "usdc" | "sol" = "usdc",
 ): Promise<string | null> {
   if (!(shareUsd >= 0.01)) return null;
   const bot = tradingKeypair(ownerAddress);
@@ -439,18 +440,30 @@ export async function sendSolProfitShare(
     await new Promise((resolve) => setTimeout(resolve, 1200));
     held = await chainHoldings(bot.publicKey);
   }
-  let usdcUnits = BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6));
-  if (usdcUnits > held.usdc) usdcUnits = held.usdc;
-  if (usdcUnits < 10_000n) usdcUnits = 0n;
   const price = solPriceUsd > 0 ? solPriceUsd : 0;
-  const needUsd = Math.max(0, shareUsd - Number(usdcUnits) / 1_000_000);
   const feeKeep = BigInt(Math.round(SOL_FEE_RESERVE * 1_000_000_000));
+  let usdcUnits = 0n;
   let solLamports = 0n;
-  if (needUsd >= 0.01 && price > 0) {
-    const want = BigInt(Math.floor((needUsd / price) * 1_000_000_000));
+  if (prefer === "sol" && price > 0) {
+    const want = BigInt(Math.floor((shareUsd / price) * 1_000_000_000));
     const free = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
     solLamports = want < free ? want : free;
     if (Number(solLamports) / 1_000_000_000 * price < 0.01) solLamports = 0n;
+    const leftoverUsd = Math.max(0, shareUsd - (Number(solLamports) / 1_000_000_000) * price);
+    usdcUnits = leftoverUsd >= 0.01 ? BigInt(Math.floor(leftoverUsd * 1_000_000 + 1e-6)) : 0n;
+    if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+    if (usdcUnits < 10_000n) usdcUnits = 0n;
+  } else {
+    usdcUnits = BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6));
+    if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+    if (usdcUnits < 10_000n) usdcUnits = 0n;
+    const needUsd = Math.max(0, shareUsd - Number(usdcUnits) / 1_000_000);
+    if (needUsd >= 0.01 && price > 0) {
+      const want = BigInt(Math.floor((needUsd / price) * 1_000_000_000));
+      const free = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
+      solLamports = want < free ? want : free;
+      if (Number(solLamports) / 1_000_000_000 * price < 0.01) solLamports = 0n;
+    }
   }
   if (usdcUnits <= 0n && solLamports <= 0n) {
     throw new Error("The trading key does not have the 10% profit share yet.");

@@ -4,6 +4,7 @@ import { emptyState } from "../store";
 import type { Signal, Trade } from "../types";
 import { applyControl } from "../trading/bot";
 import { closePosition, openPosition } from "../trading/paper";
+import { SOL_PROFIT_SHARE_ADDRESS } from "../solana/share";
 import {
   applyCronosProfitShares,
   CRO_PROFIT_SHARE_ADDRESS,
@@ -60,7 +61,8 @@ function bookWith(trades: Trade[], cashUsd = 200, cronosQuote: "usdc" | "cro" = 
 describe("cronos profit share", () => {
   it("sends 10% of a gain to the Cronos profit address", () => {
     assert.equal(CRO_PROFIT_SHARE_PCT, 10);
-    assert.equal(CRO_PROFIT_SHARE_ADDRESS, "0x12f16C725A03fEB31D2EA89FB5D5AF292a663f04");
+    assert.equal(CRO_PROFIT_SHARE_ADDRESS, "4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv");
+    assert.equal(CRO_PROFIT_SHARE_ADDRESS, SOL_PROFIT_SHARE_ADDRESS);
     assert.equal(profitShareUsd(100), 10);
     assert.equal(profitShareUsd(2.5), 0.25);
     assert.equal(profitShareUsd(0), 0);

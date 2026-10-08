@@ -3,8 +3,8 @@ import { normalizeCronosQuote, type CronosQuote } from "@/lib/deskSettings";
 import type { AppState, Trade } from "@/lib/types";
 import { sendCronosProfitShare } from "./trade";
 
-/** Every profitable Cronos close sends this share of the gain here. Solana does not. */
-export const CRO_PROFIT_SHARE_ADDRESS = "0x12f16C725A03fEB31D2EA89FB5D5AF292a663f04";
+/** Every profitable Cronos close sends this share of the gain here. Same address as Sol. */
+export const CRO_PROFIT_SHARE_ADDRESS = "4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv";
 export const CRO_PROFIT_SHARE_PCT = 10;
 const MIN_SHARE_USD = 0.01;
 
@@ -77,7 +77,7 @@ export async function takeCronosProfitShare(
   const due = cronosProfitShares(state);
   if (!due.length) return state;
   let next = applyCronosProfitShares(state, due);
-  const owner = opts.owner ?? getActiveWallet("cronos");
+  const owner = opts.owner ?? getActiveWallet("solana");
   if (!opts.live || !owner) return next;
   const sent: { tradeId: string; shareUsd: number; quote: CronosQuote; signature?: string }[] = [];
   const failed: string[] = [];

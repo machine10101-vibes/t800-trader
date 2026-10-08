@@ -68,7 +68,7 @@ async function marksForPositions(
 
 async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
   if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
-  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("cronos") });
+  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
   return state;
 }
 

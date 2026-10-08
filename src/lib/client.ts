@@ -40,7 +40,7 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
 
 async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
   if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
-  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("cronos") });
+  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
   return state;
 }
 
