@@ -40,7 +40,7 @@ import { leadingTokenSymbol } from "@/lib/market/logos";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
-import { croHoldings, formatCro, formatCroEvm } from "@/lib/cronos/balance";
+import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
@@ -1349,21 +1349,8 @@ function Header({
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const croEvm = trading && chain === "cronos" ? (trading.sol ?? 0) : holdings?.cro ?? 0;
-  const equity = holdings ? formatCroEvm(croEvm) : usd(trading ? trading.equityUsd : wallet.equityUsd);
-  const equityNote = holdings
-    ? trading
-      ? trading.equityUsd > 0
-        ? usd(trading.equityUsd)
-        : null
-      : holdings.onPos
-        ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.`
-        : holdings.usd > 0
-          ? usd(holdings.usd)
-          : holdings.cro === 0
-            ? "No CRO on Cronos EVM"
-            : null
-    : null;
+  const equity = usd(trading ? trading.equityUsd : holdings ? holdings.usd : wallet.equityUsd);
+  const equityNote = holdings?.onPos ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.` : null;
   const headerLegs = deskCashLegs({
     chain,
     live: Boolean(desk?.config.walletSwaps),
@@ -2705,7 +2692,7 @@ function Book({
             trading
               ? usd(trading.equityUsd)
               : walletCro
-                ? formatCroEvm(walletCro.cro)
+                ? usd(walletCro.usd || wallet.equityUsd)
                 : usd(wallet.equityUsd)
           }
           sub={
