@@ -8,9 +8,12 @@ import {
   croPosToEvm,
   evmToCroPos,
   formatCro,
+  formatCroEvm,
+  mergeCronosRefresh,
   mergeNativeBalance,
   orderCronosAccounts,
   parseRpcQuantity,
+  pickEvmNative,
   preferFundedAccount,
 } from "./balance";
 
@@ -34,6 +37,34 @@ describe("Cronos balance", () => {
     assert.equal(evmAndPos.cro, 3.2);
     assert.equal(evmAndPos.onPos, false);
     assert.equal(Number(evmAndPos.usd.toFixed(2)), 0.32);
+    assert.equal(formatCroEvm(0), "0 CRO EVM");
+    assert.equal(formatCroEvm(3.2), "3.200 CRO EVM");
+    assert.equal(pickEvmNative({ rpc: 0, wallet: 206.135, viem: 0, posCro: 206.135 }), 0);
+    assert.equal(pickEvmNative({ rpc: 3.1, wallet: 206.135, viem: 3.1, posCro: 206.135 }), 3.1);
+    assert.equal(pickEvmNative({ wallet: 206.135, posCro: 206.135 }), 0);
+    assert.equal(pickEvmNative({ wallet: 8, posCro: 0 }), 8);
+    const kept = mergeCronosRefresh(
+      {
+        address: FUNDED,
+        sol: 206.135,
+        wcro: 0,
+        usdc: 0,
+        posCro: 206.135,
+        solPriceUsd: 0.06,
+        equityUsd: 12,
+      },
+      {
+        address: FUNDED,
+        sol: 0,
+        wcro: 0,
+        usdc: 0,
+        posCro: 206.135,
+        solPriceUsd: 0.06,
+        equityUsd: 0,
+      },
+    );
+    assert.equal(kept.sol, 0);
+    assert.equal(kept.posCro, 206.135);
   });
 
   it("recognizes Cronos even when the wallet returns a number or a padded chain id", () => {

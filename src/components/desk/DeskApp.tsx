@@ -31,7 +31,7 @@ import { cachedDecisionChart, prefetchDecisionCharts, rememberTapeMark, requestD
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
-import { croHoldings, formatCro } from "@/lib/cronos/balance";
+import { croHoldings, formatCro, formatCroEvm } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
@@ -1244,7 +1244,7 @@ function Header({
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
   const croEvm = trading && chain === "cronos" ? (trading.sol ?? 0) : holdings?.cro ?? 0;
-  const equity = holdings ? `${formatCro(croEvm).replace(/ CRO$/, " CRO EVM")}` : usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const equity = holdings ? formatCroEvm(croEvm) : usd(trading ? trading.equityUsd : wallet.equityUsd);
   const equityNote = holdings
     ? trading
       ? trading.equityUsd > 0
@@ -2400,7 +2400,7 @@ function Book({
             trading
               ? usd(trading.equityUsd)
               : walletCro
-                ? formatCro(walletCro.cro).replace(/ CRO$/, " CRO EVM")
+                ? formatCroEvm(walletCro.cro)
                 : usd(wallet.equityUsd)
           }
           sub={

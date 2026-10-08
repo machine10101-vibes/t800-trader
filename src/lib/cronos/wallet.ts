@@ -7,9 +7,10 @@ import {
   collectPosAccounts,
   croPosToEvm,
   evmToCroPos,
-  mergeNativeBalance,
+  mergeCronosRefresh,
   orderCronosAccounts,
   parseRpcQuantity,
+  pickEvmNative,
   preferFundedAccount,
 } from "./balance";
 import { CRONOS_CHAIN_ID, CRONOS_POS_LCDS, CRONOS_RPCS, USDC, WCRO } from "./constants";
@@ -219,7 +220,7 @@ export async function readCronosBalances(
     readPosCro(pos),
     croPriceUsd(),
   ]);
-  const sol = mergeNativeBalance([nativeRpc, nativeWallet, nativeViem]);
+  const sol = pickEvmNative({ rpc: nativeRpc, wallet: nativeWallet, viem: nativeViem, posCro });
   if (nativeRpc == null && nativeWallet == null && nativeViem == null && !(wcro > 0) && !(posCro > 0)) {
     throw new Error("Could not read the CRO balance from Cronos.");
   }
@@ -334,20 +335,7 @@ function keepSessionHoldings(
   previous: CronosSession,
   next: Omit<CronosSession, "provider">,
 ): Omit<CronosSession, "provider"> {
-  const same = previous.address.toLowerCase() === next.address.toLowerCase();
-  if (!same) return next;
-  const nextEvm = next.sol + next.wcro;
-  return {
-    ...next,
-    sol: nextEvm > 0 ? next.sol : previous.sol,
-    wcro: nextEvm > 0 ? next.wcro : previous.wcro,
-    usdc: Math.max(next.usdc, previous.usdc),
-    posCro: Math.max(next.posCro, previous.posCro),
-    solPriceUsd: next.solPriceUsd ?? previous.solPriceUsd,
-    equityUsd:
-      Math.max(next.usdc, previous.usdc) +
-      (nextEvm > 0 ? nextEvm : previous.sol + previous.wcro) * (next.solPriceUsd ?? previous.solPriceUsd ?? 0),
-  };
+  return mergeCronosRefresh(previous, next);
 }
 
 export async function refreshCronos(session: CronosSession): Promise<CronosSession> {

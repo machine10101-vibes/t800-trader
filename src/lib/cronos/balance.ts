@@ -20,6 +20,45 @@ export function mergeNativeBalance(reads: Array<number | null | undefined>): num
   return best;
 }
 
+/**
+ * Cronos EVM CRO from public nodes. The Onchain wallet's eth_getBalance can
+ * repeat Cronos POS CRO, so a node that answered — even with 0 — wins.
+ */
+export function pickEvmNative(input: {
+  rpc?: number | null;
+  wallet?: number | null;
+  viem?: number | null;
+  posCro?: number;
+}): number {
+  const nodeAnswered = input.rpc != null || input.viem != null;
+  if (nodeAnswered) return mergeNativeBalance([input.rpc, input.viem]);
+  const wallet = input.wallet;
+  const pos = input.posCro ?? 0;
+  if (wallet != null && pos > 0 && Math.abs(wallet - pos) <= Math.max(pos * 0.05, 0.05)) return 0;
+  return mergeNativeBalance([wallet]);
+}
+
+export function formatCroEvm(n: number): string {
+  return `${formatCro(n).replace(/ CRO$/, "")} CRO EVM`;
+}
+
+/** Keep POS and USDC across a refresh. Do not copy a prior native figure onto a 0 EVM read. */
+export function mergeCronosRefresh<
+  T extends { address: string; sol: number; wcro: number; usdc: number; posCro: number; solPriceUsd: number | null; equityUsd: number },
+>(previous: T, next: T): T {
+  if (previous.address.toLowerCase() !== next.address.toLowerCase()) return next;
+  const usdc = Math.max(next.usdc, previous.usdc);
+  const posCro = Math.max(next.posCro, previous.posCro);
+  const solPriceUsd = next.solPriceUsd ?? previous.solPriceUsd;
+  return {
+    ...next,
+    usdc,
+    posCro,
+    solPriceUsd,
+    equityUsd: usdc + (next.sol + next.wcro) * (solPriceUsd ?? 0),
+  };
+}
+
 export function croHoldings(
   session: { sol: number; usdc?: number; wcro?: number; posCro?: number; solPriceUsd?: number | null },
   chartPrice = 0,
