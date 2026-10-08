@@ -195,9 +195,9 @@ function spreadTags<T extends { y: number }>(tags: T[], gap: number, lo: number,
 }
 
 function backCheckLine(bias: Bias): string {
-  if (bias === "up") return "15m longs pass · shorts blocked";
-  if (bias === "down") return "15m shorts pass · longs blocked";
-  return "needs the 1h to pick a side";
+  if (bias === "up") return "15m buys pass";
+  if (bias === "down") return "15m buys blocked";
+  return "needs the 1h to agree";
 }
 
 /** The 4-hour chart with the bot's full read drawn on it. Uses the same analysis the bot back-checks against. */
@@ -465,7 +465,7 @@ export function AnalysisChart({
             <g>
               {[
                 { v: trade.target, c: "var(--mint)", t: "Goal" },
-                { v: trade.entry, c: "var(--text)", t: trade.side === "long" ? "Bought" : "Shorted" },
+                { v: trade.entry, c: "var(--text)", t: trade.side === "long" ? "Bought" : "Sold" },
                 { v: trade.stop, c: "var(--crimson)", t: "Stop" },
               ].map((row) => (
                 <g key={row.t}>

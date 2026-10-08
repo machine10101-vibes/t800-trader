@@ -309,7 +309,7 @@ export async function tickBot(
             token,
             { m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
             token.researchScore,
-            next.config.allowShorts,
+            false,
             tapeCtx,
             { mode, marginOnFourHour: chain === "solana" && next.config.marginOnFourHour },
           );
@@ -317,8 +317,10 @@ export async function tickBot(
             blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
             return;
           }
-          const found = decision.signals.filter((signal) =>
-            signal.setupFrame === "4h" ? true : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct),
+          const found = decision.signals.filter(
+            (signal) =>
+              signal.side === "long" &&
+              (signal.setupFrame === "4h" ? true : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
           );
           signals.push(...found);
           if (!found.length) {
@@ -389,7 +391,6 @@ export async function tickBot(
             trades: risk.trades,
             stance: market.regime.stance,
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
-            defensiveShorts: true,
           });
           if (gate) {
             const native = chain === "cronos" ? "CRO" : "SOL";
@@ -428,20 +429,15 @@ export async function tickBot(
             setupFrame: learned.setupFrame,
           });
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
-          const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
+          if (learned.side === "short") {
+            blocked.push(`${learned.symbol}: this desk only buys and sells`);
+            continue;
+          }
           if (next.positions.some((pos) => sameMint(pos.mint, learned.mint))) {
             blocked.push(`${learned.symbol}: already in this mint`);
             continue;
           }
-          if (liveShort && mode === "spot") {
-            blocked.push(`${learned.symbol}: spot mode only sends Jupiter swaps, so a live short waits`);
-            continue;
-          }
-          if (liveShort && next.config.marginOnFourHour && learned.setupFrame !== "4h") {
-            blocked.push(`${learned.symbol}: margin waits for a solid 4-hour setup, so this 15-minute short stays off live`);
-            continue;
-          }
-          const wantedLev = liveShort && solPerp && wanted <= 1 ? 5 : wanted;
+          const wantedLev = wanted;
           const paying = wantedLev > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
           let leverage = ticket.leverage;
@@ -453,13 +449,7 @@ export async function tickBot(
             leverage = 1;
           }
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
-          if (liveShort && solPerp && (ticket.spotFallback || leverage <= 1)) {
-            blocked.push(
-              `${learned.symbol}: a live short needs $${PERP_MIN_COLLATERAL_USD} of collateral for a Jupiter perp`,
-            );
-            continue;
-          }
-          if (ticket.spotFallback && learned.side !== "short") {
+          if (ticket.spotFallback) {
             blocked.push(
               `${learned.symbol}: ${wantedLev}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
             );

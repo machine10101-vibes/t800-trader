@@ -1,5 +1,3 @@
-import { sameMint } from "@/lib/chain";
-import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { feeHurdlePct, targetAboveFees } from "./fees";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
@@ -227,11 +225,7 @@ export function canOpen(args: {
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (signal.side === "short" && config.walletSwaps && !sameMint(signal.mint, SOL_MINT)) {
-    return signal.mint.toLowerCase().startsWith("0x")
-      ? "A live short is not sent on Cronos. WolfSwap and cro.trade only buy and sell. Practice can short this coin."
-      : "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
-  }
+  if (signal.side === "short") return "This desk only buys and sells";
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
@@ -240,10 +234,8 @@ export function canOpen(args: {
     return `Holding ${config.maxPositions} coins, the most allowed at once`;
   }
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
-  if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
   if (portfolio.cashUsd < minCash) return "Insufficient cash";
-  if (stance === "defensive" && signal.side === "short" && !args.defensiveShorts) return "No shorts in a defensive tape";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
     return `Breakouts need a ${breakoutScore}+ score when defensive`;

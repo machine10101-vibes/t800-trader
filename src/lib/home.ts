@@ -74,7 +74,7 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour">,
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour">,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
@@ -85,9 +85,7 @@ export function planRules(
       : fourHourMargin
         ? "Finds spot trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. SOL margin waits for a solid 4-hour setup."
         : "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
-    config.allowShorts
-      ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid. A bet the price will fall uses the same distances, with the stop above and the goal below.`
-      : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
+    `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
     `Holds at most ${config.maxPositions} coins at once.`,
     `Arms with $${config.armFundsUsd ?? 50} and spends $${config.buySizeUsd ?? 10} on each buy.`,
@@ -96,13 +94,6 @@ export function planRules(
       : "It does not pause after a losing streak.",
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
-  if (config.allowShorts) {
-    rules.push(
-      chain === "cronos"
-        ? "Practice can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real money only buys and sells."
-        : "It can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real-money bets against the price are SOL only.",
-    );
-  }
   if (chain === "cronos") {
     rules.push("Every ticket is a normal buy and a normal sell. Extra size is not used.");
   } else if (config.solTradeMode === "margin") {

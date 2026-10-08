@@ -157,7 +157,7 @@ export function Home({
                     <button type="button" onClick={() => onOpenPosition(p.id)} className="text-left">
                       <span className="text-lg font-medium">{p.symbol}</span>
                       <span className="ml-2 text-xs text-[var(--faint)]">
-                        {p.side === "long" ? "betting it rises" : "betting it falls"}
+                        {p.side === "long" ? "buy" : "sell"}
                         {(p.leverage ?? 1) > 1 ? ` · ${p.leverage}x` : ""}
                       </span>
                     </button>

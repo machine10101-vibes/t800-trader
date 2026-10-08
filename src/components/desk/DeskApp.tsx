@@ -1141,8 +1141,8 @@ function LiveConfirmModal({
         <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
           {chain === "cronos"
-            ? "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus CRO fees. Real money only buys and sells. Practice can short these coins."
-            : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. A SOL short is a Jupiter perpetual. Other tokens stay in practice. A reload locks LIVE until you type LIVE again."}
+            ? "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus CRO fees. The bot only buys and sells."
+            : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. The bot only buys and sells. A reload locks LIVE until you type LIVE again."}
         </p>
         <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">
           <input type="checkbox" className="mt-1" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
@@ -1382,7 +1382,8 @@ function shownFills<T extends { signature?: string }>(rows: T[], walletSwaps: bo
 }
 
 function sideText(side: string, leverage?: number): string {
-  return leverage && leverage > 1 ? `${side} ${leverage}x` : side;
+  const label = side === "short" ? "sell" : "buy";
+  return leverage && leverage > 1 ? `${label} ${leverage}x` : label;
 }
 
 function rowPnl(position: Position): number {
@@ -1700,7 +1701,7 @@ function Overview({
                 <p className="text-sm text-[var(--muted)]">
                   {feed} {FRAME_LABEL[chartFrame]} chart.{" "}
                   {chartFrame === "15m"
-                    ? "The bot finds its long and short setups on this chart."
+                    ? "The bot finds its buy setups on this chart."
                     : chartFrame === "4h"
                       ? "The bot's technical read is drawn on the chart. A 15-minute trade must not fight this trend."
                       : chartFrame === "1h"
@@ -2398,7 +2399,7 @@ function BotView({
                   ))}
                 </ul>
               ) : (
-                <p>No long on this scan. A red 15-minute tape stays in cash.</p>
+                <p>No buy on this scan. A red 15-minute tape stays in cash.</p>
               )}
             </div>
           ) : (
@@ -2407,7 +2408,7 @@ function BotView({
                 <div key={s.id} className="rounded-2xl border border-[var(--line)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-medium">
-                      {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side}</Pill>
+                      {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side === "long" ? "buy" : "sell"}</Pill>
                     </div>
                     <span className="num text-[var(--magenta)]">{s.confidence.toFixed(0)}</span>
                   </div>

@@ -72,9 +72,7 @@ describe("home", () => {
   it("writes the rules from the live settings", () => {
     const rules = planRules(solanaDefaults());
     assert.ok(rules.some((r) => r.includes("4% below") && r.includes("8% above")));
-    assert.ok(rules.some((r) => r.includes("stop above and the goal below")));
-    assert.ok(rules.some((r) => r.includes("bet a price will fall")));
-    assert.ok(!planRules({ ...solanaDefaults(), allowShorts: false }).some((r) => r.includes("bet a price will fall")));
+    assert.ok(rules.every((r) => !r.includes("bet a price will fall") && !r.includes("stop above and the goal below")));
     assert.ok(rules.some((r) => r.includes("never sold until it beats the fees")));
     assert.ok(rules.some((r) => /Arms with \$50/.test(r) && /\$10 on each buy/.test(r)));
     assert.ok(!rules.some((r) => r.includes("loses faster")));
@@ -87,7 +85,6 @@ describe("home", () => {
     );
     const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");
     assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x")));
-    assert.ok(cronos.some((r) => r.includes("Real money only buys and sells")));
     assert.ok(cronos.some((r) => r.includes("normal buy and a normal sell")));
   });
 

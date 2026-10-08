@@ -245,6 +245,7 @@ export interface BotConfig {
   minLiquidityUsd: number;
   minVolume24hUsd: number;
   minAgeHours: number;
+  /** Kept on saved books. New tickets only buy and sell. */
   allowShorts: boolean;
   allowMemes: boolean;
   scanSeconds: number;

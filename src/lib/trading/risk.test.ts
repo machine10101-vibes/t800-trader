@@ -169,13 +169,13 @@ describe("risk", () => {
     assert.equal(reason, "Sector cap of 2 reached for DEX");
   });
 
-  it("blocks shorts when the tape is defensive", () => {
+  it("refuses a short on both desks", () => {
     const signal = {
       id: "s3",
       mint: SOL_MINT,
       symbol: "SOL",
       poolAddress: "z",
-      sector: "Meme",
+      sector: "L1",
       side: "short",
       reason: "fade",
       confidence: 80,
@@ -186,52 +186,25 @@ describe("risk", () => {
       researchScore: 60,
       createdAt: new Date().toISOString(),
     } as Signal;
-    const reason = canOpen({
-      positions: [],
-      signal,
-      config: DEFAULT_CONFIG,
-      portfolio: portfolio(),
-      stance: "defensive",
-    });
-    assert.equal(reason, "No shorts in a defensive tape");
     assert.equal(
       canOpen({
         positions: [],
-        signal: { ...signal, sector: "L1" },
-        config: DEFAULT_CONFIG,
+        signal,
+        config: { ...DEFAULT_CONFIG, walletSwaps: false, allowShorts: true },
         portfolio: portfolio(),
-        stance: "defensive",
-        defensiveShorts: true,
+        stance: "mixed",
       }),
-      null,
-    );
-  });
-
-  it("lets practice short a coin other than SOL, and keeps a live short on SOL", () => {
-    const signal = {
-      mint: "ray",
-      symbol: "RAY",
-      sector: "DEX",
-      side: "short",
-      reason: "breakout",
-      confidence: 80,
-    } as Signal;
-    assert.equal(
-      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
-      null,
+      "This desk only buys and sells",
     );
     assert.equal(
-      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
-      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
-    );
-    const cro = { ...signal, mint: "0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23", symbol: "CRO" };
-    assert.equal(
-      canOpen({ positions: [], signal: cro, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
-      null,
-    );
-    assert.equal(
-      canOpen({ positions: [], signal: cro, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
-      "A live short is not sent on Cronos. WolfSwap and cro.trade only buy and sell. Practice can short this coin.",
+      canOpen({
+        positions: [],
+        signal: { ...signal, mint: "ray", symbol: "RAY", sector: "DEX" },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "mixed",
+      }),
+      "This desk only buys and sells",
     );
   });
 
@@ -760,7 +733,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("lets a live SOL short through and a practice short of any book name", () => {
+  it("refuses every short, including a live SOL ticket", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -769,7 +742,7 @@ describe("LIVE gates and short trail", () => {
         portfolio: portfolio(),
         stance: "mixed",
       }),
-      null,
+      "This desk only buys and sells",
     );
     assert.equal(
       canOpen({
@@ -779,17 +752,7 @@ describe("LIVE gates and short trail", () => {
         portfolio: portfolio(),
         stance: "mixed",
       }),
-      null,
-    );
-    assert.equal(
-      canOpen({
-        positions: [],
-        signal: { ...longSignal, side: "short", symbol: "ZBCN" },
-        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
-        portfolio: portfolio(),
-        stance: "mixed",
-      }),
-      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
+      "This desk only buys and sells",
     );
   });
 

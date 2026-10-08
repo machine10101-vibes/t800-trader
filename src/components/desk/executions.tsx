@@ -25,7 +25,7 @@ export function ExecutionLog({
       <div className="desk-scroll max-h-80 space-y-2 overflow-y-auto">
         {trades.map((trade) => {
           const line = executionLine(trade, openIds.has(trade.id));
-          const direction = line.side === "short" ? "price down" : "price up";
+          const direction = line.side === "short" ? "sell" : "buy";
           return (
             <div key={line.id} className="rounded-xl border border-[var(--line)] px-3 py-2">
               <div className="flex items-start justify-between gap-3">

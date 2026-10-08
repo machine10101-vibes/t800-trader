@@ -75,7 +75,7 @@ export interface LiveFill {
 export function preflightLiveSwap(input: LivePreflightInput): string | null {
   if (input.executionMode !== "live") return "Not in LIVE mode";
   if (input.send && !input.sessionArmed) return "Re-confirm LIVE this session before sending swaps";
-  if (input.signalSide === "short") return "Spot Solana cannot short without perps — shorts stay paper-only";
+  if (input.signalSide === "short") return "This desk only buys and sells";
   if (input.killSwitch && input.leg === "buy") return "Kill switch is on";
   if (input.leg === "buy" && input.sol < input.minSolForFees) {
     return `Need at least ${input.minSolForFees} SOL for fees (wallet has ${input.sol.toFixed(4)})`;

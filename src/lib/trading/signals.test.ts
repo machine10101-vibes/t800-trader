@@ -108,7 +108,7 @@ describe("indicators", () => {
       barsBelowEma9: 2,
     } as TechnicalSnapshot;
     const shorts = candleSetups(token, shortTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
-    assert.equal(shorts.some((signal) => signal.side === "short" && signal.reason === "reclaim"), true);
+    assert.equal(shorts.some((signal) => signal.side === "short"), false);
   });
 
   it("lets a liquid watchlist name continue when the 5m range is held", () => {
@@ -387,7 +387,7 @@ describe("indicators", () => {
     assert.equal(buildFlowSignals(unprinted, 70, true, { stance: "mixed", fearGreed: 50, solChange: -1.2 }).length, 0);
   });
 
-  it("shorts a falling watchlist name and keeps a candle short", () => {
+  it("does not short a falling watchlist name", () => {
     const flow = (priceChangePct: number, buys = 40, sells = 60) => ({
       buys,
       sells,
@@ -415,9 +415,7 @@ describe("indicators", () => {
     assert.equal(buildFlowSignals(token, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).length, 0);
     assert.equal(buildFlowSignals(token, 70, true, { stance: "defensive", fearGreed: 40, solChange: -0.4 }).length, 0);
     const found = buildFlowSignals(token, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(found.length, 1);
-    assert.equal(found[0]?.side, "short");
-    assert.equal(found[0]?.reason, "fade");
+    assert.equal(found.some((signal) => signal.side === "short"), false);
     const climax = {
       ...token,
       priceUsd: 200,
@@ -445,8 +443,7 @@ describe("indicators", () => {
       barsAboveEma9: 4,
     } as TechnicalSnapshot;
     const kept = entrySignals(climax, tech, 60, true, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
-    assert.equal(kept[0]?.side, "short");
-    assert.equal(kept[0]?.reason, "fade");
+    assert.equal(kept.some((signal) => signal.side === "short"), false);
     const zebec = buildFlowSignals({ ...token, symbol: "ZBCN", mint: "zbcn" }, 70, true, {
       stance: "mixed",
       fearGreed: 50,
@@ -465,8 +462,7 @@ describe("indicators", () => {
       },
     };
     const mildShort = buildFlowSignals(mild, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(mildShort.length, 1);
-    assert.equal(mildShort[0]?.side, "short");
+    assert.equal(mildShort.some((signal) => signal.side === "short"), false);
     const tooFlat = {
       ...mild,
       flows: { ...mild.flows, m15: flow(-0.1, 52, 48) },
@@ -503,7 +499,7 @@ describe("indicators", () => {
     const structured = buildSignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     assert.equal(structured[0]?.side, "long");
     const preferred = entrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(preferred[0]?.side, "short");
+    assert.equal(preferred[0]?.side, "long");
     const solana = solanaEntrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     const shape = (rows: typeof structured) => rows.map((s) => `${s.side}:${s.reason}:${s.confidence}`);
     assert.deepEqual(shape(solana), shape(structured));
@@ -535,9 +531,7 @@ describe("indicators", () => {
       },
     };
     const rayShort = solanaEntrySignals(falling, down, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(rayShort[0]?.side, "short");
-    assert.equal(rayShort[0]?.reason, "breakout");
-    assert.equal(solanaEntrySignals(falling, down, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).some((s) => s.side === "short"), false);
+    assert.equal(rayShort.some((s) => s.side === "short"), false);
     const dip = {
       ...down,
       rsi14: 48,
@@ -566,12 +560,10 @@ describe("indicators", () => {
     } as TechnicalSnapshot;
     const grinding = { ...dipped, priceUsd: 97 };
     const cont = solanaEntrySignals(grinding, grind, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
-    assert.equal(cont[0]?.side, "short");
-    assert.equal(cont[0]?.reason, "reclaim");
+    assert.equal(cont.some((s) => s.side === "short"), false);
     const hot = { ...grind, rsi14: 82, ema9: 110, ema21: 100, barsBelowEma9: 0, barsAboveEma9: 3, lastClose: 108, priorLow: 90 } as TechnicalSnapshot;
     const ripped = solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, hot, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
-    assert.equal(ripped[0]?.side, "short");
-    assert.equal(ripped[0]?.reason, "reclaim");
+    assert.equal(ripped.some((s) => s.side === "short"), false);
     const warm = { ...hot, rsi14: 70 } as TechnicalSnapshot;
     assert.equal(solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, warm, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 }).some((s) => s.side === "short"), false);
   });

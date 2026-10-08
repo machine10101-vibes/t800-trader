@@ -68,7 +68,6 @@ export function SettingsPanel({
           Checks every {local.scanSeconds}s · up to {local.maxPositions} coins at once · one loss can cost{" "}
           {local.maxRiskPerTradePct.toFixed(1)}% · stops for the day after a {local.dailyLossLimitPct}% loss · needs a score of{" "}
           {local.minConfidence}
-          {local.allowShorts ? " · bets against the price are on" : " · bets against the price are off"}
           {local.allowMemes ? " · meme coins on" : " · meme coins off"}
           {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
@@ -383,16 +382,6 @@ export function SettingsPanel({
           onChange={(v) => set({ defensiveBreakoutScore: v })}
         />
         <div className="grid gap-3">
-          <Toggle
-            label="Allow bets that the price will fall"
-            hint={
-              chain === "solana"
-                ? "Practice bets against SOL, Zebec, Pump, ZEC, and Ray with the same 15-minute setups it uses to buy, checked against the 1-hour and 4-hour charts. A real-money short is SOL only, as a Jupiter perpetual."
-                : "Practice bets against CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI with the same 15-minute setups it uses to buy, checked against the 1-hour and 4-hour charts. Real money only buys and sells."
-            }
-            checked={local.allowShorts}
-            onChange={(v) => set({ allowShorts: v })}
-          />
           <Toggle
             label="Allow meme coins"
             hint="Off skips meme coins that are not already on the watch list."

@@ -122,6 +122,8 @@ describe("store", () => {
     assert.equal(next.venues.includes("pump"), true);
     assert.deepEqual(normalizeConfig({ venues: ["orca", "nope"] }).venues, ["orca"]);
     assert.deepEqual(normalizeConfig({ venues: [] }).venues, []);
+    assert.equal(next.allowShorts, false);
+    assert.equal(normalizeConfig({ allowShorts: true }).allowShorts, false);
     assert.equal(next.walletSwaps, false);
     assert.equal(next.executionMode, "paper");
     assert.equal(next.armFundsUsd, 50);

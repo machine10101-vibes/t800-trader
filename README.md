@@ -38,7 +38,7 @@ Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). 
 
 A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. The defaults find trades on the 15-minute chart, then check the 1-hour and 4-hour charts. A 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. Settings can switch the Sol desk to spot swaps, SOL margin, or both, and can wait for a solid 4-hour setup before a SOL perp. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
 
-Shorts use those same 4-hour setups turned over: a breakdown through the prior low, an extreme RSI reject, a watchlist continuation that has real volume, and a VWAP reject. The stop and the target are the same distances, with the stop above the fill and the goal below it. Practice can short every name on the book. A real-money short is SOL only, sent as a Jupiter perpetual. Other live names stay spot buys and sells.
+Both desks only buy and sell. They do not bet that a price will fall.
 
 `scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
 
@@ -52,7 +52,7 @@ No configuration tested was profitable after fees in both windows. Mirrored shor
 
 ## Cronos
 
-The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, fee hurdle, and short setups. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Practice can short every name on the book. Real money only buys and sells, because those venues are spot. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
+The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, and fee hurdle. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Both desks only buy and sell. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
 
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 
