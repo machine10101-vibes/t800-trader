@@ -175,6 +175,25 @@ export interface ChartTrade {
 
 const BIAS_TONE: Record<Bias, string> = { up: "var(--mint)", down: "var(--crimson)", range: "var(--amber)" };
 
+/** Short price for tags inside the chart, without the currency sign. */
+function tagPrice(v: number): string {
+  if (v >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (v >= 100) return v.toFixed(2);
+  if (v >= 1) return v.toFixed(3);
+  return v.toPrecision(3);
+}
+
+/** Push gutter tags apart so close levels stay readable. */
+function spreadTags<T extends { y: number }>(tags: T[], gap: number, lo: number, hi: number): T[] {
+  const sorted = [...tags].sort((a, b) => a.y - b.y);
+  for (let i = 1; i < sorted.length; i++) sorted[i].y = Math.max(sorted[i].y, sorted[i - 1].y + gap);
+  const overflow = sorted.length ? sorted[sorted.length - 1].y - hi : 0;
+  if (overflow > 0) for (const tag of sorted) tag.y -= overflow;
+  for (let i = sorted.length - 2; i >= 0; i--) sorted[i].y = Math.min(sorted[i].y, sorted[i + 1].y - gap);
+  for (const tag of sorted) tag.y = Math.max(lo, tag.y);
+  return sorted;
+}
+
 function backCheckLine(bias: Bias): string {
   if (bias === "up") return "15m longs pass · shorts blocked";
   if (bias === "down") return "15m shorts pass · longs blocked";
@@ -205,7 +224,7 @@ export function AnalysisChart({
   const W = 960;
   const H = 500;
   const left = 8;
-  const gutter = 78;
+  const gutter = 92;
   const right = W - gutter;
   const top = 34;
   const priceBottom = 340;
@@ -247,15 +266,24 @@ export function AnalysisChart({
     const x = ((clientX - rect.left) / rect.width) * W;
     setHover(Math.max(0, Math.min(n - 1, Math.floor((x - left) / slot))));
   };
-  const tag = (price: number, color: string, text: string, key: string) =>
-    inView(price) ? (
-      <g key={key}>
-        <rect x={right + 2} y={y(price) - 8} width={gutter - 4} height={16} rx="3" fill={color} opacity="0.18" />
-        <text x={right + 6} y={y(price) + 4} fontSize="10.5" fill={color} className="num">
-          {text}
-        </text>
-      </g>
-    ) : null;
+  const tagRows = spreadTags(
+    [
+      ...(layers.levels ? [...read.supports, ...read.resistances] : [])
+        .filter((lv) => inView(lv.price))
+        .map((lv) => ({
+          key: `g${lv.kind}${lv.price}`,
+          y: y(lv.price),
+          at: y(lv.price),
+          color: lv.kind === "support" ? "var(--mint)" : "var(--crimson)",
+          text: `${lv.kind === "support" ? "S" : "R"} ${tagPrice(lv.price)}${lv.touches > 1 ? ` ×${lv.touches}` : ""}`,
+          strong: false,
+        })),
+      { key: "last", y: y(last.close), at: y(last.close), color: last.close >= last.open ? "var(--mint)" : "var(--crimson)", text: `▸ ${tagPrice(last.close)}`, strong: true },
+    ],
+    17,
+    top + 8,
+    priceBottom - 8,
+  );
   return (
     <div className="relative h-full w-full">
       {hot ? (
@@ -288,8 +316,8 @@ export function AnalysisChart({
           return (
             <g key={p}>
               <line x1={left} x2={right} y1={yy} y2={yy} stroke="var(--chart-grid)" />
-              <text x={W - 4} y={yy + 3} textAnchor="end" fontSize="9.5" fill="var(--chart-label)" opacity="0.55" className="num">
-                {priceFmt(v)}
+              <text x={right - 4} y={yy - 3} textAnchor="end" fontSize="9" fill="var(--chart-label)" opacity="0.5" className="num">
+                {tagPrice(v)}
               </text>
             </g>
           );
@@ -298,7 +326,7 @@ export function AnalysisChart({
           i % tickEvery === 0 ? (
             <g key={`t${c.time}`}>
               <line x1={xOf(i)} x2={xOf(i)} y1={top} y2={rsiBottom} stroke="var(--chart-grid)" />
-              <text x={xOf(i)} y={axisY} textAnchor="middle" fontSize="9.5" fill="var(--chart-label)" className="num">
+              <text x={xOf(i)} y={axisY} textAnchor={i === 0 ? "start" : "middle"} fontSize="9.5" fill="var(--chart-label)" className="num">
                 {new Date(c.time * 1000).toLocaleDateString([], { month: "short", day: "numeric" })}
               </text>
             </g>
@@ -317,7 +345,7 @@ export function AnalysisChart({
                   <g key={`f${lv.ratio}`}>
                     <line x1={left} x2={right} y1={y(lv.price)} y2={y(lv.price)} stroke="var(--amber)" strokeOpacity="0.38" strokeDasharray="2 4" />
                     <text x={left + 4} y={y(lv.price) - 3} fontSize="9.5" fill="var(--amber)" opacity="0.85" className="num">
-                      Fib {(lv.ratio * 100).toFixed(1)}% · {priceFmt(lv.price)}
+                      Fib {(lv.ratio * 100).toFixed(1)}% · {tagPrice(lv.price)}
                     </text>
                   </g>
                 ) : null,
@@ -353,7 +381,6 @@ export function AnalysisChart({
           {layers.trendlines
             ? read.trendlines.map((line) => {
                 const x1 = xOf(local(line.from.index));
-                const slope = (line.to.price - line.from.price) / (line.to.index - line.from.index);
                 const endIdx = read.ema9.length - 1;
                 const color = line.kind === "support" ? "var(--mint)" : "var(--crimson)";
                 return (
@@ -362,8 +389,8 @@ export function AnalysisChart({
                     <circle cx={xOf(local(line.from.index))} cy={y(line.from.price)} r="2.6" fill={color} />
                     <circle cx={xOf(local(line.to.index))} cy={y(line.to.price)} r="2.6" fill={color} />
                     <text
-                      x={xOf(local(line.to.index)) + 6}
-                      y={y(line.to.price + slope * 2) + (line.kind === "support" ? 14 : -6)}
+                      x={Math.max(left + 4, x1 - 4)}
+                      y={y(line.from.price) + (line.kind === "support" ? 15 : -8)}
                       fontSize="10"
                       fill={color}
                     >
@@ -452,20 +479,25 @@ export function AnalysisChart({
           ) : null}
         </g>
 
-        {layers.levels
-          ? [...read.supports, ...read.resistances].map((lv) =>
-              tag(lv.price, lv.kind === "support" ? "var(--mint)" : "var(--crimson)", `${lv.kind === "support" ? "S" : "R"} ${priceFmt(lv.price)}${lv.touches > 1 ? ` ×${lv.touches}` : ""}`, `g${lv.kind}${lv.price}`),
-            )
-          : null}
-        {tag(last.close, last.close >= last.open ? "var(--mint)" : "var(--crimson)", `▸ ${priceFmt(last.close)}`, "last")}
+        {tagRows.map((row) => (
+          <g key={row.key}>
+            {Math.abs(row.y - row.at) > 1 ? <line x1={right} x2={right + 4} y1={row.at} y2={row.y} stroke={row.color} strokeOpacity="0.6" /> : null}
+            <rect x={right + 4} y={row.y - 8} width={gutter - 6} height={16} rx="3" fill={row.color} opacity={row.strong ? 0.32 : 0.16} />
+            <text x={right + 8} y={row.y + 4} fontSize="10.5" fill={row.strong ? "var(--text)" : row.color} fontWeight={row.strong ? 600 : 400} className="num">
+              {row.text}
+            </text>
+          </g>
+        ))}
 
         <g>
-          <rect x={left} y={4} width={Math.min(560, right - left)} height={24} rx="6" fill={tone} opacity="0.12" />
-          <text x={left + 10} y={20} fontSize="12" fill={tone} fontWeight="600">
-            {title} {read.bias === "range" ? "RANGE" : read.bias === "up" ? "UPTREND" : "DOWNTREND"}
-          </text>
-          <text x={left + 128} y={20} fontSize="11" fill="var(--chart-label)">
-            {read.structure} · RSI {rsiNow === null ? "—" : rsiNow.toFixed(0)} · {backCheckLine(read.bias)}
+          <rect x={left} y={4} width={Math.min(620, right - left)} height={24} rx="6" fill={tone} opacity="0.12" />
+          <text x={left + 10} y={20} fontSize="12">
+            <tspan fill={tone} fontWeight="600">
+              {title} {read.bias === "range" ? "RANGE" : read.bias === "up" ? "UPTREND" : "DOWNTREND"}
+            </tspan>
+            <tspan dx="10" fontSize="11" fill="var(--chart-label)">
+              {read.structure} · RSI {rsiNow === null ? "—" : rsiNow.toFixed(0)} · {backCheckLine(read.bias)}
+            </tspan>
           </text>
         </g>
 
