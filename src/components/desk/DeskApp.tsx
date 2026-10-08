@@ -1239,11 +1239,11 @@ function Header({
   onDisconnect: () => void;
   onRefresh: () => void;
   onWatch: () => void;
-  trading: { equityUsd: number } | null;
+  trading: { equityUsd: number; sol?: number } | null;
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const croEvm = trading && chain === "cronos" ? trading.sol : holdings?.cro ?? 0;
+  const croEvm = trading && chain === "cronos" ? (trading.sol ?? 0) : holdings?.cro ?? 0;
   const equity = holdings ? `${formatCro(croEvm).replace(/ CRO$/, " CRO EVM")}` : usd(trading ? trading.equityUsd : wallet.equityUsd);
   const equityNote = holdings
     ? trading
