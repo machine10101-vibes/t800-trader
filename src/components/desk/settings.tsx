@@ -329,7 +329,7 @@ export function SettingsPanel({
             hint={
               chain === "solana"
                 ? "Practice bets against SOL, Zebec, Pump, ZEC, and Ray with the same 15-minute setups it uses to buy, checked against the 1-hour and 4-hour charts. A real-money short is SOL only, as a Jupiter perpetual."
-                : "Practice bets against CRO, ULTCAT, CRIMECAT, MERY, and PACK with the same 15-minute setups it uses to buy, checked against the 1-hour and 4-hour charts. Real money only buys and sells."
+                : "Practice bets against CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI with the same 15-minute setups it uses to buy, checked against the 1-hour and 4-hour charts. Real money only buys and sells."
             }
             checked={local.allowShorts}
             onChange={(v) => set({ allowShorts: v })}

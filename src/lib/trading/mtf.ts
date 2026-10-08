@@ -1,5 +1,6 @@
 import { analyzeChart, frameBias, type Bias } from "@/lib/market/analysis";
-import type { Candle, MarketRegime, Signal, TokenCandidate } from "@/lib/types";
+import { closedCandles, FRAME_SECONDS } from "@/lib/market/frames";
+import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { candleSetups, FIFTEEN_MIN_ATR, snapshotTechnical, type SignalContext } from "./signals";
 
 export interface FrameSet {
@@ -17,6 +18,16 @@ const MIN_BARS = 30;
 
 function biasWord(bias: Bias): string {
   return bias === "range" ? "ranging" : bias;
+}
+
+function setupGap(tech: TechnicalSnapshot): string {
+  const bits: string[] = [];
+  if (tech.ema9 !== null && tech.ema21 !== null) bits.push(tech.ema9 >= tech.ema21 ? "EMA 9 over 21" : "EMA 9 under 21");
+  if (tech.rsi14 !== null) bits.push(`RSI ${tech.rsi14.toFixed(0)}`);
+  if ((tech.rsi14 ?? 50) >= 70) bits.push("overbought");
+  if ((tech.rsi14 ?? 50) <= 30) bits.push("oversold");
+  if ((tech.closeStrength ?? 0.5) < 0.4) bits.push("last closed bar was weak");
+  return bits.join(", ") || "no breakout or reclaim";
 }
 
 /**
@@ -65,23 +76,26 @@ export function frameEntrySignals(
   allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
 ): FrameDecision {
-  if (!frames.m15 || frames.m15.length < MIN_BARS) return { signals: [], pass: null, missing: "15-minute" };
-  if (!frames.h1 || frames.h1.length < MIN_BARS) return { signals: [], pass: null, missing: "1-hour" };
-  if (!frames.h4 || frames.h4.length < MIN_BARS) return { signals: [], pass: null, missing: "4-hour" };
-  const tech = snapshotTechnical(frames.m15.slice(-180));
+  const m15 = frames.m15 ? closedCandles(frames.m15, FRAME_SECONDS["15m"]) : null;
+  const h1 = frames.h1 ? closedCandles(frames.h1, FRAME_SECONDS["1h"]) : null;
+  const h4 = frames.h4 ? closedCandles(frames.h4, FRAME_SECONDS["4h"]) : null;
+  if (!m15 || m15.length < MIN_BARS) return { signals: [], pass: null, missing: "15-minute" };
+  if (!h1 || h1.length < MIN_BARS) return { signals: [], pass: null, missing: "1-hour" };
+  if (!h4 || h4.length < MIN_BARS) return { signals: [], pass: null, missing: "4-hour" };
+  const tech = snapshotTechnical(m15.slice(-180));
   const found = candleSetups(token, tech, researchScore, allowShorts, ctx, FIFTEEN_MIN_ATR);
-  if (!found.length) return { signals: [], pass: `${token.symbol}: 15-minute chart is in, no setup yet`, missing: null };
-  const h1 = frameBias(frames.h1) ?? "range";
-  const h4 = frameBias(frames.h4) ?? "range";
+  if (!found.length) return { signals: [], pass: `${token.symbol}: 15-minute chart is in, no setup yet (${setupGap(tech)})`, missing: null };
+  const hourBias = frameBias(h1) ?? "range";
+  const fourBias = frameBias(h4) ?? "range";
   const kept: Signal[] = [];
   let pass: string | null = null;
   for (const signal of found) {
-    const check = backCheck(signal.side, h1, h4);
+    const check = backCheck(signal.side, hourBias, fourBias);
     if (!check.ok) {
       pass ??= `${token.symbol}: 15-minute ${signal.side} ${signal.reason}, but ${check.why}, so it waits`;
       continue;
     }
-    const wall = levelBlock(signal.side, signal.price, frames.h4, tech.atrPct ?? 0);
+    const wall = levelBlock(signal.side, signal.price, h4, tech.atrPct ?? 0);
     if (wall) {
       pass ??= `${token.symbol}: 15-minute ${signal.side} ${signal.reason}, but ${wall}, so it waits`;
       continue;

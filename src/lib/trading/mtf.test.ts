@@ -80,6 +80,35 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
     assert.match(decision.pass ?? "", /SOL: 15-minute long breakout, but the 4-hour trend is down, so it waits/);
   });
 
+  it("ignores a 15-minute bar that is still printing", () => {
+    const now = Date.now() / 1000;
+    const start = Math.floor(now / 900) * 900 - 900 * 29;
+    const forming: Candle[] = [];
+    for (let i = 0; i < 30; i++) {
+      forming.push({
+        time: start + i * 900,
+        open: 100,
+        high: 100.2,
+        low: 99.8,
+        close: 100,
+        volume: 1000,
+      });
+    }
+    const higher = trend(180, 0.002, 60, 3600);
+    const decision = frameEntrySignals(token, { m15: forming, h1: higher, h4: higher }, 70, true, ctx);
+    assert.equal(decision.missing, "15-minute");
+    assert.equal(decision.signals.length, 0);
+  });
+
+  it("says why the 15-minute chart has no setup instead of claiming the chart is missing", () => {
+    const quiet = trend(120, 0.00001, 100, 900);
+    const higher = trend(180, 0.002, 60, 3600);
+    const decision = frameEntrySignals(token, { m15: quiet, h1: higher, h4: higher }, 70, true, ctx);
+    assert.equal(decision.missing, null);
+    assert.equal(decision.signals.length, 0);
+    assert.match(decision.pass ?? "", /SOL: 15-minute chart is in, no setup yet \(/);
+  });
+
   it("holds a long that would run straight into 4-hour resistance", () => {
     const h4: Candle[] = [];
     for (let i = 0; i < 60; i++) {

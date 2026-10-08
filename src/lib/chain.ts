@@ -72,7 +72,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     id: "cronos",
     kicker: "Cronos",
     native: "CRO",
-    bookLabel: "CRO, ULTCAT, CRIMECAT, MERY, and PACK",
+    bookLabel: "CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI",
     walletBook: "CRO + USDC",
     swapHint: "WolfSwap and cro.trade",
     connectBlurb:
@@ -86,8 +86,8 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     needWallet: "Connect a Cronos wallet to trade.",
     needFunds: "priced CRO/USDC",
     scanning: "Scanning Cronos",
-    waitingTick: "Waiting for the first CRO, ULTCAT, CRIMECAT, MERY, and PACK tick.",
-    radar: "CRO, ULTCAT, CRIMECAT, MERY, and PACK. Empty rows mean the feeds missed this cycle — nothing is invented.",
+    waitingTick: "Waiting for the first CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI tick.",
+    radar: "CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. Empty rows mean the feeds missed this cycle — nothing is invented.",
     noSwaps:
       "No signed swaps yet. An armed bot sends the next 15-minute setup that passes the 1-hour and 4-hour check from the trading key. The row appears here with a Cronoscan link once that swap confirms.",
     bookArm:

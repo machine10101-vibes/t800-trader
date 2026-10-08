@@ -1,7 +1,7 @@
 import type { ChainId } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { foldCandles, tapeRead } from "@/lib/market/tape";
-import { isActiveBook, SOL_MINT } from "@/lib/market/universe";
+import { bookTokens, isActiveBook, SOL_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
 import type {
   BotConfig,
@@ -25,14 +25,14 @@ function canTake(out: ScoredCandidate[], item: ScoredCandidate, maxMeme: number,
   return true;
 }
 
-function pickFinalists(items: ScoredCandidate[], maxMeme = 2): ScoredCandidate[] {
+function pickFinalists(items: ScoredCandidate[], maxMeme = 2, maxWatch = 6): ScoredCandidate[] {
   const ranked = [...items].sort((a, b) => b.researchScore - a.researchScore);
   const watch = ranked.filter((c) => c.watchlist);
   const rest = ranked.filter((c) => !c.watchlist);
   const out: ScoredCandidate[] = [];
   for (const item of watch) {
     if (canTake(out, item, maxMeme, 0)) out.push(item);
-    if (out.length >= 6) break;
+    if (out.length >= maxWatch) break;
   }
   for (const item of rest) {
     if (out.length >= 8) break;
@@ -321,8 +321,9 @@ export async function runResearch(
   const scored = seed.map((c) => scoreCandidate(c, structureFor(c)));
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
-  const memeCap = chain === "cronos" ? 4 : config.allowMemes ? 2 : 0;
-  const finalists = pickFinalists(scored, memeCap);
+  const named = bookTokens(chain);
+  const memeCap = chain === "cronos" ? named.filter((token) => token.sector === "Meme").length : config.allowMemes ? 2 : 0;
+  const finalists = pickFinalists(scored, memeCap, Math.max(6, named.length));
   const research = finalists.map((c) => thesisFrom(c, market.regime));
 
   const value = {

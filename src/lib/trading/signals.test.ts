@@ -1,6 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical, solanaEntrySignals } from "./signals";
+import {
+  atrTradeable,
+  buildFlowSignals,
+  buildSignals,
+  candleSetups,
+  ema,
+  entrySignals,
+  FIFTEEN_MIN_ATR,
+  FOUR_HOUR_ATR,
+  rewardToRisk,
+  rsi,
+  snapshotTechnical,
+  solanaEntrySignals,
+} from "./signals";
 import { canOpen, cashConcentration, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
@@ -47,6 +60,55 @@ describe("indicators", () => {
     assert.equal(atrTradeable(0.2), false);
     assert.equal(atrTradeable(8), false);
     assert.equal(atrTradeable(1.4), true);
+  });
+
+  it("treats a thin single-print bar as a neutral close, not a weak one", () => {
+    const rows = candles(40);
+    const last = rows[rows.length - 1]!;
+    rows[rows.length - 1] = { ...last, open: last.close, high: last.close, low: last.close, close: last.close };
+    const snap = snapshotTechnical(rows);
+    assert.equal(snap.closeStrength, 0.5);
+  });
+
+  it("lets a 15-minute watchlist name continue without a volume spike", () => {
+    const flow = { buys: 50, sells: 50, buyers: 20, sellers: 20, volumeUsd: 1, priceChangePct: 0.1 };
+    const token = {
+      symbol: "CRO",
+      mint: "cro",
+      poolAddress: "pool",
+      sector: "L1",
+      watchlist: true,
+      flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
+    } as TokenCandidate;
+    const longTech = {
+      rsi14: 58,
+      ema9: 1.01,
+      ema21: 1,
+      vwap: 1,
+      atrPct: 0.8,
+      volumeZ: -0.8,
+      lastClose: 1.005,
+      extensionPct: 0.4,
+      closeStrength: 0.5,
+      priorHigh: 1.05,
+      priorLow: 0.98,
+      barsAboveEma9: 2,
+    } as TechnicalSnapshot;
+    const fifteen = candleSetups(token, longTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
+    assert.equal(fifteen.some((signal) => signal.side === "long" && signal.reason === "reclaim"), true);
+    assert.equal(candleSetups(token, longTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FOUR_HOUR_ATR).length, 0);
+    const shortTech = {
+      ...longTech,
+      rsi14: 42,
+      ema9: 0.99,
+      ema21: 1,
+      lastClose: 0.995,
+      extensionPct: -0.4,
+      barsAboveEma9: 0,
+      barsBelowEma9: 2,
+    } as TechnicalSnapshot;
+    const shorts = candleSetups(token, shortTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
+    assert.equal(shorts.some((signal) => signal.side === "short" && signal.reason === "reclaim"), true);
   });
 
   it("lets a liquid watchlist name continue when the 5m range is held", () => {

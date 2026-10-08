@@ -78,3 +78,10 @@ export function rollUp(candles: Candle[], seconds: number): Candle[] {
 export function frameKey(chain: ChainId, mint: string, frame: Frame): string {
   return `${chain}:${chain === "cronos" ? mint.toLowerCase() : mint}:${frame}`;
 }
+
+/** Drop the bar that is still printing. Setups read only closed candles. */
+export function closedCandles(candles: Candle[], seconds: number, nowSec = Date.now() / 1000): Candle[] {
+  const last = candles[candles.length - 1];
+  if (last && last.time + seconds > nowSec) return candles.slice(0, -1);
+  return candles;
+}

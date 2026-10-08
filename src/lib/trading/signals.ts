@@ -107,7 +107,11 @@ export function snapshotTechnical(candles: Candle[]): TechnicalSnapshot {
   const extensionPct = last && vw ? ((last - vw) / vw) * 100 : null;
   const bar = candles[candles.length - 1];
   const range = bar ? bar.high - bar.low : 0;
-  const closeStrength = bar && range > 0 ? (bar.close - bar.low) / range : null;
+  const atr = atrPct(candles, 14);
+  const typical = last && atr !== null ? (last * atr) / 100 : 0;
+  // Gecko 15-minute bars on thin Cronos pools are often a single print. That is not a weak close.
+  const closeStrength =
+    bar && range > 0 && typical > 0 && range >= typical * 0.2 ? (bar.close - bar.low) / range : bar ? 0.5 : null;
   const prior = candles.slice(-13, -1);
   const priorHigh = prior.length ? Math.max(...prior.map((c) => c.high)) : null;
   const priorLow = prior.length ? Math.min(...prior.map((c) => c.low)) : null;
@@ -134,7 +138,7 @@ export function snapshotTechnical(candles: Candle[]): TechnicalSnapshot {
     ema9: e9,
     ema21: e21,
     vwap: vw,
-    atrPct: atrPct(candles, 14),
+    atrPct: atr,
     volumeZ,
     lastClose: last,
     extensionPct,
@@ -356,6 +360,85 @@ export function solanaEntrySignals(
   return candleSetups(token, decision, researchScore, allowShorts, ctx, band).slice(0, 1);
 }
 
+/**
+ * 15-minute watchlist continuation. The 4-hour breakout rules need a volume spike and a
+ * firm close; Gecko Cronos 15-minute bars rarely print either, so a name holding its
+ * average with a mid RSI would never fire. The 1-hour and 4-hour back-check still has to pass.
+ */
+function fifteenWatchlist(
+  token: TokenCandidate,
+  tech: TechnicalSnapshot,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"],
+): Signal[] {
+  const stance = typeof ctx === "string" ? ctx : ctx.stance;
+  if (!token.watchlist) return [];
+  if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
+  if (!atrTradeable(tech.atrPct, FIFTEEN_MIN_ATR)) return [];
+  const price = tech.lastClose;
+  const atr = Math.max(tech.atrPct, 0.35);
+  const volZ = tech.volumeZ ?? 0;
+  const ext = tech.extensionPct ?? 0;
+  const close = tech.closeStrength ?? 0.5;
+  const heldLow = tech.priorLow === null || price >= tech.priorLow;
+  const underHigh = tech.priorHigh === null || price <= tech.priorHigh;
+  const base = {
+    mint: token.mint,
+    symbol: token.symbol,
+    poolAddress: token.poolAddress,
+    sector: token.sector,
+    price,
+    researchScore,
+    createdAt: new Date().toISOString(),
+  };
+  const out: Signal[] = [];
+  if (
+    stance !== "defensive" &&
+    tech.ema9 >= tech.ema21 * 0.999 &&
+    tech.rsi14 >= 48 &&
+    tech.rsi14 <= 68 &&
+    close >= 0.4 &&
+    ext < 3.5 &&
+    volZ > -1.2 &&
+    heldLow
+  ) {
+    const rr = withMinRR(clamp(atr * 1.05, 0.7, 2.8), clamp(atr * 1.9, 1.2, 5.2));
+    out.push({
+      ...base,
+      id: id("sig"),
+      side: "long",
+      reason: "reclaim",
+      confidence: clamp(62 + (tech.rsi14 - 50) * 0.3, 58, 84),
+      ...rr,
+      thesis: `${token.symbol} 15-minute EMA 9 is over 21, RSI ${tech.rsi14.toFixed(0)}, holding its range. Continuation long — the 1-hour and 4-hour still have to agree.`,
+    });
+  }
+  if (
+    allowShorts &&
+    stance !== "risk-on" &&
+    tech.ema9 <= tech.ema21 * 1.001 &&
+    tech.rsi14 >= 32 &&
+    tech.rsi14 <= 52 &&
+    close <= 0.6 &&
+    ext > -3.5 &&
+    volZ > -1.2 &&
+    underHigh
+  ) {
+    const rr = withMinRR(clamp(atr * 1.05, 0.7, 2.8), clamp(atr * 1.9, 1.2, 5.2));
+    out.push({
+      ...base,
+      id: id("sig"),
+      side: "short",
+      reason: "reclaim",
+      confidence: clamp(62 + (50 - tech.rsi14) * 0.3, 58, 84),
+      ...rr,
+      thesis: `${token.symbol} 15-minute EMA 9 is under 21, RSI ${tech.rsi14.toFixed(0)}, failing its range. Continuation short — the 1-hour and 4-hour still have to agree.`,
+    });
+  }
+  return out.filter((s) => rewardToRisk(s.stopPct, s.targetPct) >= 1.6);
+}
+
 /** Every long and short setup on one chart, best first, before any higher-frame check. */
 export function candleSetups(
   token: TokenCandidate,
@@ -367,9 +450,9 @@ export function candleSetups(
 ): Signal[] {
   if (!tech) return [];
   const found = buildSignals(token, tech, researchScore, allowShorts, ctx, band);
-  if (!allowShorts) return found;
-  const shorts = structuredShorts(token, tech, researchScore, ctx, band);
-  return [...found, ...shorts].sort((a, b) => b.confidence - a.confidence);
+  const shorts = allowShorts ? structuredShorts(token, tech, researchScore, ctx, band) : [];
+  const extra = band === FIFTEEN_MIN_ATR ? fifteenWatchlist(token, tech, researchScore, allowShorts, ctx) : [];
+  return [...found, ...shorts, ...extra].sort((a, b) => b.confidence - a.confidence);
 }
 
 /**

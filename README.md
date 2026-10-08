@@ -52,7 +52,7 @@ No configuration tested was profitable after fees in both windows. Mirrored shor
 
 ## Cronos
 
-The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, fee hurdle, and short setups. The book is CRO, ULTCAT, CRIMECAT, MERY, and PACK. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Practice can short every name on the book. Real money only buys and sells, because those venues are spot. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
+The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, fee hurdle, and short setups. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Practice can short every name on the book. Real money only buys and sells, because those venues are spot. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
 
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 

@@ -31,11 +31,11 @@ describe("skeletonBook", () => {
     }
   });
 
-  it("pins the five Cronos names the desk trades", () => {
+  it("pins the six Cronos names the desk trades", () => {
     const rows = skeletonBook("cronos");
     assert.deepEqual(
       rows.map((row) => row.symbol),
-      ["CRO", "ULTCAT", "CRIMECAT", "MERY", "PACK"],
+      ["CRO", "ULTCAT", "CRIMECAT", "MERY", "PACK", "ULTI"],
     );
     assert.deepEqual(
       rows.map((row) => row.mint),

@@ -42,6 +42,9 @@ export const MERY_POOL = "0xa51231984ff01f4933a9fa24e8fd143f18ae6772";
 /** Wolfies. The token ticker is PACK. */
 export const PACK_MINT = "0x0d0b4a6fc6e7f5635c2ff38de75af2e96d6d6804";
 export const PACK_POOL = "0x82234ae6d2df79e4d22ce05c63a703f3dbc32520";
+/** Ulti. The liquid pool is ULTI/WCRO on VVS. */
+export const ULTI_MINT = "0x074fa42e34c503ba83a6913d275a2fce5f94f1d5";
+export const ULTI_POOL = "0x78d2411b63d8188b536f43a03e1677b9b6a2660d";
 
 /** The only Solana names this desk trades. Jupiter's most-traded list is not on the book. */
 export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT, PUMP_MINT, ZEC_MINT, RAY_MINT] as const;
@@ -70,6 +73,7 @@ const CRONOS_BOOK: WatchToken[] = [
   { symbol: "CRIMECAT", name: "Crime Cat", mint: CRIMECAT_MINT, sector: "Meme", pool: CRIMECAT_POOL },
   { symbol: "MERY", name: "Mistery", mint: MERY_MINT, sector: "Meme", pool: MERY_POOL },
   { symbol: "PACK", name: "Wolfies", mint: PACK_MINT, sector: "Meme", pool: PACK_POOL },
+  { symbol: "ULTI", name: "Ulti", mint: ULTI_MINT, sector: "Meme", pool: ULTI_POOL },
 ];
 
 export function geckoNetwork(chain: ChainId = "solana"): string {

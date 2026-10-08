@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData } from "viem";
 import { CRO_TRADE_ROUTER, USDC, VVS_ROUTER, WCRO } from "./constants";
-import { ULTCAT_MINT } from "@/lib/market/universe";
+import { ULTCAT_MINT, ULTI_MINT } from "@/lib/market/universe";
 import { afterFee, buildCroTradeCall, cronosSwapPath, decideRoute } from "./route";
 
 describe("Cronos routes", () => {
@@ -11,6 +11,8 @@ describe("Cronos routes", () => {
     assert.deepEqual(cronosSwapPath(WCRO, "sell"), [WCRO, USDC]);
     assert.deepEqual(cronosSwapPath(ULTCAT_MINT, "buy"), [USDC, WCRO, ULTCAT_MINT]);
     assert.deepEqual(cronosSwapPath(ULTCAT_MINT, "sell"), [ULTCAT_MINT, WCRO, USDC]);
+    assert.deepEqual(cronosSwapPath(ULTI_MINT, "buy"), [USDC, WCRO, ULTI_MINT]);
+    assert.deepEqual(cronosSwapPath(ULTI_MINT, "sell"), [ULTI_MINT, WCRO, USDC]);
   });
 
   it("picks the venue that returns more after cro.trade's fee", () => {
