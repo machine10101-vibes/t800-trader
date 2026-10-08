@@ -54,7 +54,7 @@ const NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "risk", label: "Settings", kicker: "06" },
 ];
 
-function navFor(_chain: ChainId) {
+function navFor() {
   return NAV;
 }
 
@@ -469,8 +469,8 @@ function ChainDesk({
         return;
       }
       if (isDeskShortcutTarget(e.target)) return;
-      if (e.key >= "1" && e.key <= String(navFor(chain).length)) {
-        const next = navFor(chain)[Number(e.key) - 1];
+      if (e.key >= "1" && e.key <= String(navFor().length)) {
+        const next = navFor()[Number(e.key) - 1];
         if (next) {
           setTab(next.id);
           setThesis(null);
@@ -905,7 +905,7 @@ function ChainDesk({
       <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[200px_1fr]">
         <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
           <div className="flex flex-wrap gap-1 lg:block">
-          {navFor(chain).map((item) => (
+          {navFor().map((item) => (
             <button
               key={item.id}
               aria-label={item.label}
