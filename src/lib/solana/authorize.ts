@@ -6,6 +6,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { DEFAULT_ARM_FUNDS_USD, usdcToLoad } from "@/lib/deskSettings";
 import { USDC_MINT } from "@/lib/market/universe";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
@@ -24,25 +25,42 @@ export interface ArmPlan {
   usdcToBot: number;
 }
 
+export interface ArmFunds {
+  armFundsUsd?: number;
+  alreadyUsdc?: number;
+  alreadyNative?: number;
+}
+
 /**
  * One Jupiter swap spends a single mint, and only the owner can sign it.
- * Arming therefore moves a trading balance to a key this browser can sign with.
+ * Arming moves the chosen USDC size plus enough SOL for fees.
  */
-export function planAuthorization(sol: number, usdc: number): ArmPlan {
-  const usdcToBot = usdc > 0.5 ? round(usdc, 6) : 0;
-  let solToBot = sol > USER_KEEP_SOL ? round(sol - USER_KEEP_SOL, 9) : 0;
-  if (solToBot < BOT_MIN_SOL) {
-    const need = round(BOT_MIN_SOL - solToBot, 9);
-    const leftOnUser = round(sol - solToBot - need, 9);
-    if (leftOnUser >= 0.005) solToBot = round(solToBot + need, 9);
+export function planAuthorization(sol: number, usdc: number, funds: ArmFunds = {}): ArmPlan {
+  const want = funds.armFundsUsd ?? DEFAULT_ARM_FUNDS_USD;
+  const alreadyUsdc = funds.alreadyUsdc ?? 0;
+  const alreadySol = funds.alreadyNative ?? 0;
+  const usdcToBot = usdcToLoad(usdc, want, alreadyUsdc);
+  let solToBot = 0;
+  if (alreadySol < BOT_MIN_SOL) {
+    const need = round(BOT_MIN_SOL - alreadySol, 9);
+    const available = sol > USER_KEEP_SOL ? round(sol - USER_KEEP_SOL, 9) : 0;
+    solToBot = Math.min(available, Math.max(need, BOT_MIN_SOL));
+    if (solToBot < BOT_MIN_SOL) {
+      const extra = round(BOT_MIN_SOL - solToBot, 9);
+      const leftOnUser = round(sol - solToBot - extra, 9);
+      if (leftOnUser >= 0.005) solToBot = round(solToBot + extra, 9);
+    }
   }
-  if (solToBot < BOT_MIN_SOL) {
+  if (alreadySol + solToBot < BOT_MIN_SOL) {
     throw new Error("Need about 0.025 SOL in the wallet so arming can pay for swaps.");
   }
-  if (solToBot < 0.02 && usdcToBot === 0) {
+  if (alreadySol + solToBot < 0.02 && usdcToBot + alreadyUsdc < 0.5) {
     throw new Error("Need at least 0.04 SOL, or USDC plus 0.025 SOL, before arming can authorize swaps.");
   }
-  return { solToBot, usdcToBot };
+  if (alreadyUsdc + usdcToBot + 0.5 < want) {
+    throw new Error(`Need $${want} USDC to load this trading size. This wallet has $${usdc.toFixed(2)}.`);
+  }
+  return { solToBot: round(solToBot, 9), usdcToBot };
 }
 
 function round(n: number, digits: number): number {
@@ -263,22 +281,26 @@ export function planProfitWithdrawal(input: {
 let arming: Promise<ArmAuth> | null = null;
 
 /** Ask the connected wallet to sign the transaction that lets this browser send the swaps. */
-export function authorizeTrading(session: WalletSession): Promise<ArmAuth> {
+export function authorizeTrading(session: WalletSession, armFundsUsd: number = DEFAULT_ARM_FUNDS_USD): Promise<ArmAuth> {
   if (arming) return arming;
-  arming = authorizeTradingOnce(session).finally(() => {
+  arming = authorizeTradingOnce(session, armFundsUsd).finally(() => {
     arming = null;
   });
   return arming;
 }
 
-async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
+function tradingKeyCoversArm(held: TradingSnap | null, armFundsUsd: number): boolean {
+  return tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD) && (held?.usdc ?? 0) + 0.5 >= armFundsUsd;
+}
+
+async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number): Promise<ArmAuth> {
   const existing = tradingKeypair(session.address);
   if (existing) {
     const held = await readBalances(existing.publicKey.toBase58()).catch(() => null);
     if (!held) {
       throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
     }
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversArm(held, armFundsUsd)) {
       return {
         signature: "already-authorized",
         botAddress: existing.publicKey.toBase58(),
@@ -294,12 +316,12 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
   const userChain = await chainHoldings(owner);
   const sol = Number(userChain.lamports) / 1_000_000_000;
   const usdc = Number(userChain.usdc) / 1_000_000;
+  const held = await readBalances(botAddress).catch(() => null);
   let plan: ArmPlan;
   try {
-    plan = planAuthorization(sol, usdc);
+    plan = planAuthorization(sol, usdc, { armFundsUsd, alreadyUsdc: held?.usdc ?? 0, alreadyNative: held?.sol ?? 0 });
   } catch (error) {
-    const held = await readBalances(botAddress).catch(() => null);
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversArm(held, armFundsUsd)) {
       return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
     }
     throw error;
@@ -310,7 +332,8 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
   if (userChain.lamports < solLamports + USER_MIN_LAMPORTS) {
     solLamports = userChain.lamports > USER_MIN_LAMPORTS ? userChain.lamports - USER_MIN_LAMPORTS : 0n;
   }
-  const usdcUnits = plan.usdcToBot > 0 ? userChain.usdc : 0n;
+  const wantedUsdc = BigInt(Math.round(plan.usdcToBot * 1_000_000));
+  const usdcUnits = wantedUsdc > 0n ? (wantedUsdc < userChain.usdc ? wantedUsdc : userChain.usdc) : 0n;
   if (usdcUnits > 0n) {
     const botAta = associatedToken(bot.publicKey, usdcMint);
     const rent = (await accountExists(botAta)) ? 0n : ATA_RENT_LAMPORTS;

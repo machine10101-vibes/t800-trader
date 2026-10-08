@@ -1,7 +1,7 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
-import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
+import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -75,9 +75,30 @@ export function SettingsPanel({
           {chain === "cronos" ? "WolfSwap and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
+          {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
           {chain === "cronos" || !local.multipliers.length ? " · no extra size" : ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}`}
         </p>
       </div>
+
+      <Section
+        title="Trading money"
+        hint="Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
+      >
+        <Choice
+          label="Loaded when you arm"
+          hint="25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
+          value={local.armFundsUsd}
+          options={ARM_FUNDS_USD.map((n) => ({ value: n, label: `$${n}` }))}
+          onChange={(armFundsUsd) => set({ armFundsUsd, buySizeUsd: Math.min(local.buySizeUsd, armFundsUsd) })}
+        />
+        <Choice
+          label="Buy size per trade"
+          hint="What one buy spends. It cannot be larger than the armed bankroll."
+          value={local.buySizeUsd}
+          options={BUY_SIZE_USD.filter((n) => n <= local.armFundsUsd).map((n) => ({ value: n, label: `$${n}` }))}
+          onChange={(buySizeUsd) => set({ buySizeUsd })}
+        />
+      </Section>
 
       <Section title="Each buy" hint="These three are the main choices. The sell prices are a percent of what the buy cost.">
         <Field
@@ -650,6 +671,45 @@ function Field({
         />
       )}
     </label>
+  );
+}
+
+function Choice({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  options: { value: number; label: string }[];
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-3">
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="min-w-0">{label}</span>
+        <span className="num shrink-0 text-[var(--magenta)]">${value}</span>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => {
+          const on = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

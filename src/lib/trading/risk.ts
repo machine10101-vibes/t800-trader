@@ -110,24 +110,14 @@ export function sizePosition(args: {
   lossStreak?: number;
   dayUsed?: number;
 }): { qty: number; notional: number } {
-  const { equity, price, stopPct, config, regime, researchScore } = args;
+  const { equity, price, stopPct, config, regime } = args;
   if (price <= 0 || stopPct <= 0) return { qty: 0, notional: 0 };
 
-  let riskPct = config.maxRiskPerTradePct;
-  if (regime.stance === "defensive") riskPct *= 0.45;
-  if (regime.stance === "mixed") riskPct *= 0.75;
-  if (researchScore !== null && researchScore < 55) riskPct *= 0.7;
-  if (researchScore !== null && researchScore > 72) riskPct *= 1.1;
-  if ((args.confidence ?? 60) >= 78) riskPct *= 1.08;
-  if ((args.lossStreak ?? 0) >= 2) riskPct *= 0.55;
-  if ((args.dayUsed ?? 0) >= 0.7) riskPct *= 0.45;
-
-  const riskUsd = equity * (riskPct / 100);
-  const stopFrac = stopPct / 100;
   const capPct = sizeCapPct(equity, regime.stance);
-  const raw = riskUsd / stopFrac;
-  const floor = isMicroBook(equity) ? Math.min(equity * 0.45, equity * capPct) : 0;
-  const notional = Math.min(Math.max(raw, floor), equity * capPct);
+  const target = Math.max(MIN_TICKET_USD, config.buySizeUsd || 0);
+  const liveCap = config.maxLiveNotionalUsd > 0 ? config.maxLiveNotionalUsd : target;
+  const notional = Math.min(target, liveCap, equity * capPct);
+  if (notional < MIN_TICKET_USD) return { qty: 0, notional: 0 };
   const qty = notional / price;
   return { qty, notional };
 }

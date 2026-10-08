@@ -1,7 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { commitTicketCap, nextSettingsDraft } from "./deskSettings";
+import { commitTicketCap, nextSettingsDraft, normalizeArmFundsUsd, normalizeBuySizeUsd, usdcToLoad } from "./deskSettings";
 import { DEFAULT_CONFIG, normalizeConfig } from "./store";
+
+describe("arm funds and buy size", () => {
+  it("keeps only 25, 50, or 150 for the armed bankroll", () => {
+    assert.equal(normalizeArmFundsUsd(25), 25);
+    assert.equal(normalizeArmFundsUsd(150), 150);
+    assert.equal(normalizeArmFundsUsd(80), 50);
+    assert.equal(normalizeBuySizeUsd(25, 50), 25);
+    assert.equal(normalizeBuySizeUsd(50, 25), 25);
+    assert.equal(usdcToLoad(200, 50, 0), 50);
+    assert.equal(usdcToLoad(20, 50, 40), 10);
+    assert.equal(usdcToLoad(20, 50, 0), 20);
+  });
+});
 
 describe("settings draft", () => {
   it("keeps a $5 ticket cap while the saved book is still $250", () => {

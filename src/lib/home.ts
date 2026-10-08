@@ -74,7 +74,7 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">,
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts" | "armFundsUsd" | "buySizeUsd">,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
@@ -85,6 +85,7 @@ export function planRules(
       : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
     `Holds at most ${config.maxPositions} coins at once.`,
+    `Arms with $${config.armFundsUsd ?? 50} and spends $${config.buySizeUsd ?? 10} on each buy.`,
     config.lossStreakPause > 0
       ? `After ${config.lossStreakPause} losses in a row it rests for an hour.`
       : "It does not pause after a losing streak.",

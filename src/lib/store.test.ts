@@ -17,17 +17,17 @@ import {
 } from "./store";
 
 describe("store", () => {
-  it("reseeds an idle empty book once the live wallet is at least $3", () => {
-    const idle = emptyState({ ...DEFAULT_CONFIG, startingEquity: 0 });
+  it("reseeds an idle empty book to the chosen arm size", () => {
+    const idle = emptyState({ ...DEFAULT_CONFIG, startingEquity: 0, armFundsUsd: 50 });
     assert.equal(isIdleEmptyBook(idle), true);
 
-    const stillDust = seedFromLiveEquity(idle, 2);
-    assert.equal(stillDust.portfolio.cashUsd, 0);
+    const liveDust = seedFromLiveEquity({ ...idle, config: { ...idle.config, walletSwaps: true } }, 2);
+    assert.equal(liveDust.portfolio.cashUsd, 0);
 
-    const funded = seedFromLiveEquity(idle, 6);
-    assert.equal(funded.portfolio.cashUsd, 6);
-    assert.equal(funded.portfolio.equityUsd, 6);
-    assert.equal(funded.config.startingEquity, 6);
+    const paper = seedFromLiveEquity(idle, 2);
+    assert.equal(paper.portfolio.cashUsd, 50);
+    assert.equal(paper.config.startingEquity, 50);
+    assert.equal(paper.config.buySizeUsd, 10);
   });
 
   it("reopens the last wallet book after a refresh and drops the LIVE lock wall", async () => {
@@ -66,13 +66,13 @@ describe("store", () => {
     const funded = seedFromLiveEquity(idle, 6);
     assert.equal(funded.bot.running, true);
     assert.equal(funded.bot.startedAt, "2026-01-01T00:00:00.000Z");
-    assert.equal(funded.portfolio.equityUsd, 6);
+    assert.equal(funded.portfolio.equityUsd, funded.config.armFundsUsd);
 
-    const flat = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
+    const flat = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100, armFundsUsd: 25 });
     flat.bot.running = true;
     const adopted = freshBook(flat, 12);
     assert.equal(adopted.bot.running, true);
-    assert.equal(adopted.portfolio.equityUsd, 12);
+    assert.equal(adopted.portfolio.equityUsd, 25);
   });
 
   it("does not overwrite a book that already traded", () => {
@@ -85,14 +85,15 @@ describe("store", () => {
 
   it("adopts a live mark onto a flat book and leaves a traded or sub-$3 mark alone", () => {
     const flat = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
-    const adopted = freshBook(flat, 6);
-    assert.equal(adopted.portfolio.cashUsd, 6);
-    assert.equal(adopted.portfolio.equityUsd, 6);
-    assert.equal(adopted.config.startingEquity, 6);
+    const adopted = freshBook({ ...flat, config: { ...flat.config, armFundsUsd: 50 } }, 6);
+    assert.equal(adopted.portfolio.cashUsd, 50);
+    assert.equal(adopted.portfolio.equityUsd, 50);
+    assert.equal(adopted.config.startingEquity, 50);
 
-    const dusty = freshBook(flat, 2);
-    assert.equal(dusty, flat);
+    const dusty = freshBook({ ...flat, config: { ...flat.config, walletSwaps: true } }, 2);
     assert.equal(dusty.portfolio.cashUsd, 100);
+    const paperDust = freshBook(flat, 2);
+    assert.equal(paperDust.portfolio.cashUsd, paperDust.config.armFundsUsd);
 
     const traded = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
     traded.trades = [{ id: "t" } as never];
@@ -123,6 +124,8 @@ describe("store", () => {
     assert.deepEqual(normalizeConfig({ venues: [] }).venues, []);
     assert.equal(next.walletSwaps, false);
     assert.equal(next.executionMode, "paper");
+    assert.equal(next.armFundsUsd, 50);
+    assert.equal(next.buySizeUsd, 10);
     assert.equal(next.killSwitch, false);
     assert.equal(next.liveTradesRev, 1);
     assert.equal(normalizeConfig({ walletSwaps: true }).walletSwaps, false);

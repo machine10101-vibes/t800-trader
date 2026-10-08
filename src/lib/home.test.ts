@@ -76,6 +76,7 @@ describe("home", () => {
     assert.ok(rules.some((r) => r.includes("bet a price will fall")));
     assert.ok(!planRules({ ...solanaDefaults(), allowShorts: false }).some((r) => r.includes("bet a price will fall")));
     assert.ok(rules.some((r) => r.includes("never sold until it beats the fees")));
+    assert.ok(rules.some((r) => /Arms with \$50/.test(r) && /\$10 on each buy/.test(r)));
     assert.ok(!rules.some((r) => r.includes("loses faster")));
     assert.ok(planRules({ ...solanaDefaults(), multipliers: [5] }).some((r) => r.includes("5x")));
     const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");

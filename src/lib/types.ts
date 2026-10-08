@@ -293,6 +293,10 @@ export interface BotConfig {
   slippageBps: number;
   /** Hard cap on a single LIVE ticket, in USD. */
   maxLiveNotionalUsd: number;
+  /** USDC moved onto the trading key when the bot is armed. 25, 50, or 150. */
+  armFundsUsd: number;
+  /** Dollars one buy spends. Capped by the armed bankroll. */
+  buySizeUsd: number;
   /** Minimum native SOL before a LIVE buy is allowed. */
   minSolForFees: number;
   /** When on, new LIVE tickets are refused. Open signed tickets can still close. */

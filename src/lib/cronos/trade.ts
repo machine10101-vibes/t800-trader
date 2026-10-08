@@ -6,6 +6,7 @@ import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, type Hex } from 
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { cronos } from "viem/chains";
 import { sameMint } from "@/lib/chain";
+import { DEFAULT_ARM_FUNDS_USD } from "@/lib/deskSettings";
 import { planCronosArm } from "./arm";
 import { BOT_MIN_CRO, GAS_CRO, USDC, WCRO } from "./constants";
 import { buildCroTradeCall, buildWolfswapCall, croTradeMinOut, quoteCronos, type CronosRoute } from "./route";
@@ -258,13 +259,13 @@ export async function cronosBudget(session?: CronosSession | null): Promise<Wall
   }
 }
 
-export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> {
+export async function authorizeCronos(session: CronosSession, armFundsUsd: number = DEFAULT_ARM_FUNDS_USD): Promise<ArmAuth> {
   const existing = cronosTradingAccount(session.address);
   const before = existing ? await readCronosBalances(existing.address).catch(() => null) : null;
   if (existing && !before) {
     throw new Error("Could not read the trading account, so no more CRO or USDC was moved.");
   }
-  if (tradingKeyCoversSpend(before, BOT_MIN_CRO)) {
+  if (tradingKeyCoversSpend(before, BOT_MIN_CRO) && (before?.usdc ?? 0) + 0.5 >= armFundsUsd) {
     const signature = await signWithWallet(session, ARM_ALREADY_FUNDED);
     return {
       signature,
@@ -280,7 +281,11 @@ export async function authorizeCronos(session: CronosSession): Promise<ArmAuth> 
   const wcro = Math.max(live?.wcro ?? 0, session.wcro ?? 0);
   const usdc = Math.max(live?.usdc ?? 0, session.usdc);
   const posCro = Math.max(live?.posCro ?? 0, session.posCro ?? 0);
-  const plan = planCronosArm(cro, usdc, wcro, posCro);
+  const plan = planCronosArm(cro, usdc, wcro, posCro, {
+    armFundsUsd,
+    alreadyUsdc: before?.usdc ?? 0,
+    alreadyNative: (before?.sol ?? 0) + (before?.wcro ?? 0),
+  });
   let signature = "";
   if (plan.croToBot > 0) {
     signature = await userSend(session, account.address, units(plan.croToBot, 18));

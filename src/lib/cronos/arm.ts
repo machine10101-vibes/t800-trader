@@ -1,3 +1,4 @@
+import { DEFAULT_ARM_FUNDS_USD, usdcToLoad } from "@/lib/deskSettings";
 import { formatCro } from "./balance";
 import { BOT_MIN_CRO, USER_KEEP_CRO } from "./constants";
 
@@ -22,12 +23,24 @@ function keepOnWallet(cro: number): number {
  * Native CRO and wrapped CRO both count. Cronos POS CRO does not — WolfSwap
  * cannot spend it until it is sent to Cronos EVM.
  */
-export function planCronosArm(cro: number, usdc: number, wcro = 0, posCro = 0): CronosArmPlan {
-  const usdcToBot = usdc > 0.5 ? round(usdc, 6) : 0;
-  const wcroToBot = wcro > 0.000001 ? round(wcro, 6) : 0;
+export interface CronosArmFunds {
+  armFundsUsd?: number;
+  alreadyUsdc?: number;
+  alreadyNative?: number;
+}
+
+export function planCronosArm(cro: number, usdc: number, wcro = 0, posCro = 0, funds: CronosArmFunds = {}): CronosArmPlan {
+  const want = funds.armFundsUsd ?? DEFAULT_ARM_FUNDS_USD;
+  const alreadyUsdc = funds.alreadyUsdc ?? 0;
+  const alreadyCro = funds.alreadyNative ?? 0;
+  const usdcToBot = usdcToLoad(usdc, want, alreadyUsdc);
   const keep = keepOnWallet(Math.max(0, cro));
-  const croToBot = cro > keep ? round(cro - keep, 6) : 0;
-  if (croToBot < BOT_MIN_CRO && wcroToBot < BOT_MIN_CRO) {
+  const croAvailable = cro > keep ? round(cro - keep, 6) : 0;
+  const croNeed = Math.max(0, BOT_MIN_CRO - alreadyCro);
+  const croToBot = croNeed > 0 ? Math.min(croAvailable, croNeed) : 0;
+  const wcroNeed = Math.max(0, BOT_MIN_CRO - alreadyCro - croToBot);
+  const wcroToBot = wcroNeed > 0 && wcro > 0.000001 ? round(Math.min(wcro, wcroNeed), 6) : 0;
+  if (croToBot + alreadyCro < BOT_MIN_CRO && wcroToBot + alreadyCro < BOT_MIN_CRO) {
     const evm = cro + wcro;
     if (posCro > 0 && evm < 3) {
       throw new Error(
@@ -40,6 +53,9 @@ export function planCronosArm(cro: number, usdc: number, wcro = 0, posCro = 0): 
       );
     }
     throw new Error("Need about 3 CRO on Cronos EVM in this wallet so arming can pay for swaps.");
+  }
+  if (alreadyUsdc + usdcToBot + 0.5 < want) {
+    throw new Error(`Need $${want} USDC to load this trading size. This wallet has $${usdc.toFixed(2)}.`);
   }
   return { croToBot, wcroToBot, usdcToBot };
 }

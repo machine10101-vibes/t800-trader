@@ -42,24 +42,26 @@ const portfolio = (over: Partial<Portfolio> = {}): Portfolio => ({
 });
 
 describe("risk", () => {
-  it("sizes smaller in a defensive regime", () => {
-    const riskOn = sizePosition({
+  it("spends the chosen buy size and never more than the book can hold", () => {
+    const sized = sizePosition({
       equity: 10_000,
       price: 100,
       stopPct: 2,
-      config: DEFAULT_CONFIG,
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 25 },
       regime: regime("risk-on"),
       researchScore: 70,
     });
-    const def = sizePosition({
-      equity: 10_000,
+    assert.equal(sized.notional, 25);
+    const tight = sizePosition({
+      equity: 6,
       price: 100,
       stopPct: 2,
-      config: DEFAULT_CONFIG,
-      regime: regime("defensive"),
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 25 },
+      regime: regime("risk-on"),
       researchScore: 70,
     });
-    assert.ok(def.notional < riskOn.notional);
+    assert.ok(tight.notional <= 6 * cashConcentration(6));
+    assert.ok(tight.notional >= MIN_TICKET_USD);
   });
 
   it("blocks new risk after the daily loss limit", () => {
@@ -282,26 +284,17 @@ describe("risk", () => {
     assert.equal(reason, "Holding 2 coins, the most allowed at once");
   });
 
-  it("sizes down after a two-loss streak", () => {
-    const fresh = sizePosition({
-      equity: 10_000,
-      price: 100,
-      stopPct: 6,
-      config: DEFAULT_CONFIG,
-      regime: regime("risk-on"),
-      researchScore: 70,
-      lossStreak: 0,
-    });
+  it("keeps the chosen buy size after a two-loss streak", () => {
     const hurt = sizePosition({
       equity: 10_000,
       price: 100,
       stopPct: 6,
-      config: DEFAULT_CONFIG,
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 10 },
       regime: regime("risk-on"),
       researchScore: 70,
       lossStreak: 2,
     });
-    assert.ok(hurt.notional < fresh.notional);
+    assert.equal(hurt.notional, 10);
   });
 
   it("counts consecutive closed losses", () => {
