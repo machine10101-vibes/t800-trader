@@ -59,6 +59,8 @@ describe("paper", () => {
       cronosQuote: "cro",
     });
     assert.equal(stamped.positions[0]?.cronosQuote, "cro");
+    const closedCro = closePosition(stamped, stamped.positions[0]!.id, 110, "target", "sig2");
+    assert.equal(closedCro.trades[0]?.cronosQuote, "cro");
   });
 
   it("records a wallet signature on a signed fill", () => {

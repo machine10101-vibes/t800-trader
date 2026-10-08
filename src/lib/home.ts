@@ -100,6 +100,7 @@ export function planRules(
         ? "Every ticket spends CRO and sells back to CRO. CRO itself is skipped. Extra size is not used."
         : "Every ticket spends USDC and sells back to USDC. Extra size is not used.",
     );
+    rules.push("Every profitable Cronos close automatically sends 10% of the gain to the profit address in the coin that ticket spent.");
   } else if (config.solTradeMode === "margin") {
     rules.push(
       config.marginOnFourHour

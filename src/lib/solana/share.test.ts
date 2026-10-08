@@ -97,7 +97,7 @@ describe("sol profit share", () => {
     assert.equal(solProfitShares(next).length, 0);
   });
 
-  it("shares every Solana flatten winner and leaves Cronos cash alone", () => {
+  it("shares every Solana flatten winner", () => {
     let state = emptyState({ startingEquity: 1_000 });
     state = openPosition(state, signal({ mint: "mint-a", symbol: "AAA", price: 100 }), 1);
     state = openPosition(state, signal({ mint: "mint-b", symbol: "BBB", price: 50 }), 1);
@@ -106,14 +106,9 @@ describe("sol profit share", () => {
       positions: state.positions.map((pos) => ({ ...pos, markPrice: pos.entryPrice * 1.5 })),
     };
     const sol = applyControl(state, "flatten", "solana");
-    const cro = applyControl(state, "flatten", "cronos");
     const solWins = sol.trades.filter((row) => row.action === "close" && (row.pnlUsd ?? 0) > 0);
-    const croWins = cro.trades.filter((row) => row.action === "close" && (row.pnlUsd ?? 0) > 0);
     assert.equal(solWins.length, 2);
-    assert.equal(croWins.length, 2);
     assert.ok(solWins.every((row) => row.note.includes("Shared $")));
-    assert.ok(croWins.every((row) => !row.note.includes("Shared $")));
-    assert.ok(sol.portfolio.cashUsd < cro.portfolio.cashUsd);
     assert.ok(sol.portfolio.cashUsd > 0);
   });
 });

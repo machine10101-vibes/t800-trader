@@ -8,6 +8,7 @@ import { bookScreen, screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 import { emptyState, getActiveWallet, mutateState } from "@/lib/store";
+import { applyCronosProfitShares, cronosProfitShares, takeCronosProfitShare } from "@/lib/cronos/share";
 import { applySolProfitShares, solProfitShares, takeSolProfitShare } from "@/lib/solana/share";
 import { advise, studyTape } from "./learn";
 import {
@@ -65,9 +66,10 @@ async function marksForPositions(
   return marksForOpen(positions, quotes, prints);
 }
 
-async function afterSolClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
-  if (chain !== "solana") return state;
-  return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
+  if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("cronos") });
+  return state;
 }
 
 async function walletExit(
@@ -85,7 +87,7 @@ async function walletExit(
     }
     try {
       const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-      return afterSolClose(closePosition(state, pos.id, fill.price, reason, fill.signature), chain, true);
+      return afterWinningClose(closePosition(state, pos.id, fill.price, reason, fill.signature), chain, true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "wallet sell failed";
       if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
@@ -94,10 +96,10 @@ async function walletExit(
     }
   }
   if (state.config.walletSwaps && !pos.signature) {
-    if (pos.side === "short") return afterSolClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
+    if (pos.side === "short") return afterWinningClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
     return state;
   }
-  return afterSolClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
+  return afterWinningClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
 }
 
 export async function tickBot(
@@ -192,13 +194,13 @@ export async function tickBot(
             } else {
               try {
                 const fill = await executor(orderForPosition(pos, "scale", next.config.venues, fraction));
-                next = await afterSolClose(scaleOut(next, pos.id, fraction, fill.signature, fill.price), chain, true);
+                next = await afterWinningClose(scaleOut(next, pos.id, fraction, fill.signature, fill.price), chain, true);
               } catch (error) {
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
               }
             }
           } else if (!next.config.walletSwaps || (pos.side === "short" && !pos.signature)) {
-            next = await afterSolClose(scaleOut(next, pos.id, fraction), chain, false);
+            next = await afterWinningClose(scaleOut(next, pos.id, fraction), chain, false);
           }
         }
       }
@@ -614,7 +616,12 @@ export function applyControl(
   }
   if (action === "flatten") {
     const flat = pushEquity(flattenBook(state, "manual"));
-    const shared = chain === "solana" ? applySolProfitShares(flat, solProfitShares(flat)) : flat;
+    const shared =
+      chain === "solana"
+        ? applySolProfitShares(flat, solProfitShares(flat))
+        : chain === "cronos"
+          ? applyCronosProfitShares(flat, cronosProfitShares(flat))
+          : flat;
     return {
       ...shared,
       bot: { ...shared.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },

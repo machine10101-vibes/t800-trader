@@ -237,6 +237,8 @@ export interface Trade {
   note: string;
   /** Solana signature for a wallet swap. Missing means the row is simulated. */
   signature?: string;
+  /** Cronos quote this close sold back to. A later Settings change does not flip the share coin. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface BotConfig {

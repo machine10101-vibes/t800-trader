@@ -401,6 +401,73 @@ export async function reclaimCronos(ownerAddress: string, keepCro = 0): Promise<
   return last;
 }
 
+const PROFIT_SHARE_TO = "0x12f16C725A03fEB31D2EA89FB5D5AF292a663f04" as `0x${string}`;
+
+/**
+ * Send 10% of a winning Cronos close from the trading key to the profit address.
+ * A USDC ticket sends USDC. A CRO ticket sends CRO (native, then WCRO if needed).
+ */
+export async function sendCronosProfitShare(
+  ownerAddress: string,
+  shareUsd: number,
+  quote: CronosQuote = "usdc",
+  croPriceUsd = 0,
+): Promise<string | null> {
+  if (!(shareUsd >= 0.01)) return null;
+  const account = cronosTradingAccount(ownerAddress);
+  if (!account) throw new Error("Arm the bot before a profit share can be sent.");
+  const dest = PROFIT_SHARE_TO;
+  let held = await readCronosBalances(account.address);
+  if (quote === "usdc") {
+    if (held.usdc < shareUsd) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      held = await readCronosBalances(account.address);
+    }
+    const usdc = Math.min(held.usdc, shareUsd);
+    if (!(usdc >= 0.01)) throw new Error("The trading key does not have the 10% USDC profit share yet.");
+    const data = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [dest, units(usdc, 6)],
+    });
+    return sendFrom(account, { to: USDC, data });
+  }
+  const price = croPriceUsd > 0 ? croPriceUsd : held.solPriceUsd || 0;
+  if (!(price > 0)) throw new Error("Need a CRO price to send the 10% profit share.");
+  const needCro = shareUsd / price;
+  if (held.sol + (held.wcro ?? 0) + 1e-6 < needCro) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    held = await readCronosBalances(account.address);
+  }
+  const extraGas = 0.15;
+  const nativeOnly = Math.max(0, held.sol - GAS_CRO);
+  let nativeCro = 0;
+  let wcro = 0;
+  if (nativeOnly + 1e-9 >= needCro) {
+    nativeCro = needCro;
+  } else {
+    nativeCro = Math.max(0, held.sol - GAS_CRO - extraGas);
+    wcro = Math.min(held.wcro ?? 0, Math.max(0, needCro - nativeCro));
+  }
+  if (nativeCro * price + wcro * price < 0.01) {
+    throw new Error("The trading key does not have the 10% CRO profit share yet.");
+  }
+  let last: string | null = null;
+  if (wcro > 0.0001) {
+    const data = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [dest, units(wcro, 18)],
+    });
+    last = await sendFrom(account, { to: WCRO, data });
+  }
+  if (nativeCro > 0.0001) {
+    last = await sendFrom(account, { to: dest, value: units(nativeCro, 18) });
+  }
+  if (!last) throw new Error("Could not send the 10% profit share");
+  return last;
+}
+
 export async function sendCronosProfit(
   ownerAddress: string,
   principalUsd: number,
