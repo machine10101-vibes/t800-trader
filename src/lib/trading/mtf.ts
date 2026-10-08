@@ -70,7 +70,7 @@ export function frameEntrySignals(
   if (!frames.h4 || frames.h4.length < MIN_BARS) return { signals: [], pass: null, missing: "4-hour" };
   const tech = snapshotTechnical(frames.m15.slice(-180));
   const found = candleSetups(token, tech, researchScore, allowShorts, ctx, FIFTEEN_MIN_ATR);
-  if (!found.length) return { signals: [], pass: `${token.symbol}: no 15-minute setup yet`, missing: null };
+  if (!found.length) return { signals: [], pass: `${token.symbol}: 15-minute chart is in, no setup yet`, missing: null };
   const h1 = frameBias(frames.h1) ?? "range";
   const h4 = frameBias(frames.h4) ?? "range";
   const kept: Signal[] = [];

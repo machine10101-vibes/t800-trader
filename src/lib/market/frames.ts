@@ -27,11 +27,29 @@ export function jupiterInterval(frame: Frame): string {
 }
 
 /**
- * Cronos reads two Gecko series per coin and rolls the rest up, so five coins cost ten calls a refresh, not twenty.
- * 1000 five-minute bars cover about three days (333 fifteen-minute bars); 1000 hourly bars cover about forty days.
+ * One native series fills the rest. Cronos 15-minute (1000 bars) covers the 1-hour and 4-hour back-check.
+ * Solana 15-minute (300 bars) covers the 1-hour; the 4-hour still needs its own Jupiter read.
  */
-export function cronosSource(frame: Frame): Frame {
-  return frame === "5m" || frame === "15m" ? "5m" : "1h";
+export function sourceFrame(chain: ChainId, frame: Frame): Frame {
+  if (frame === "5m") return "5m";
+  if (chain === "cronos") return "15m";
+  return frame === "1h" ? "15m" : frame;
+}
+
+/** Longer frames built from a shorter series. A thin roll-up is still better than an empty chart. */
+export function derivedFrames(rows: Candle[], source: Frame): Partial<Record<Frame, Candle[]>> {
+  const out: Partial<Record<Frame, Candle[]>> = { [source]: rows };
+  if (source === "5m") {
+    out["15m"] = rollUp(rows, FRAME_SECONDS["15m"]);
+    out["1h"] = rollUp(rows, FRAME_SECONDS["1h"]);
+    out["4h"] = rollUp(rows, FRAME_SECONDS["4h"]);
+  } else if (source === "15m") {
+    out["1h"] = rollUp(rows, FRAME_SECONDS["1h"]);
+    out["4h"] = rollUp(rows, FRAME_SECONDS["4h"]);
+  } else if (source === "1h") {
+    out["4h"] = rollUp(rows, FRAME_SECONDS["4h"]);
+  }
+  return out;
 }
 
 export function geckoFrameUrl(network: string, address: string, kind: "pools" | "tokens", frame: Frame): string {

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { analyzeChart, clusterLevels, findPivots, frameBias } from "./analysis";
-import { rollUp } from "./frames";
+import { derivedFrames, rollUp, sourceFrame } from "./frames";
 import type { Candle } from "../types";
 
 function zigzag(legs: number[], barsPerLeg = 6): Candle[] {
@@ -63,5 +63,26 @@ describe("frame roll-up", () => {
     assert.equal(fifteen.length, 2);
     assert.deepEqual(fifteen[0], { time: 0, open: 10, high: 14, low: 9, close: 13, volume: 15 });
     assert.equal(fifteen[1].time, 900);
+  });
+
+  it("fills the 1-hour and 4-hour from one 15-minute series so Cronos only needs one read", () => {
+    const fifteen: Candle[] = Array.from({ length: 1000 }, (_, i) => ({
+      time: i * 900,
+      open: 1,
+      high: 1.1,
+      low: 0.9,
+      close: 1,
+      volume: 2,
+    }));
+    const filled = derivedFrames(fifteen, "15m");
+    assert.equal(filled["15m"]?.length, 1000);
+    assert.equal(filled["1h"]?.length, 250);
+    assert.equal(filled["4h"]?.length, 63);
+    assert.ok((filled["1h"]?.length ?? 0) >= 30);
+    assert.ok((filled["4h"]?.length ?? 0) >= 30);
+    assert.equal(sourceFrame("cronos", "15m"), "15m");
+    assert.equal(sourceFrame("cronos", "4h"), "15m");
+    assert.equal(sourceFrame("solana", "1h"), "15m");
+    assert.equal(sourceFrame("solana", "4h"), "4h");
   });
 });

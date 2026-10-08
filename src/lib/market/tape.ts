@@ -110,9 +110,9 @@ export function cashExit(side: "long" | "short", m15: number): boolean {
   return side !== "short" && tapeInCash(m15);
 }
 
-/** A 15-minute setup that the live 15m pool tape then vetoed. */
+/** The 15-minute chart is in. This name just has no setup on it yet. */
 export function solanaPass(symbol: string, m15: number): string {
-  return `${symbol}: no 15-minute setup yet (${m15.toFixed(2)}% in 15 minutes)`;
+  return `${symbol}: 15-minute chart is in, no setup yet (${m15.toFixed(2)}% in 15 minutes)`;
 }
 
 export function tickPass(symbol: string, m15: number): string {

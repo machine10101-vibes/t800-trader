@@ -27,7 +27,7 @@ import {
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { getActiveWallet, listLocalBooks, readLastWallet, resumeSavedBook } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { cachedFrameChart, prefetchDecisionCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
+import { cachedFrameChart, prefetchFrameCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
 import { frameBias, type Bias } from "@/lib/market/analysis";
 import { bookTokens } from "@/lib/market/universe";
@@ -268,10 +268,10 @@ function ChainDesk({
     // Hidden Cronos still mounted. Its unpaced Gecko charts 429 the shared
     // feed and leave Solana waiting on pool prints.
     if (!active && chain === "cronos") return;
-    void prefetchDecisionCharts(chain);
+    void prefetchFrameCharts(chain);
     const id = window.setInterval(() => {
       if (!active && chain === "cronos") return;
-      void prefetchDecisionCharts(chain);
+      void prefetchFrameCharts(chain);
     }, 60_000);
     return () => window.clearInterval(id);
   }, [active, chain]);
@@ -1459,16 +1459,18 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
 
 type FrameBars = Partial<Record<Frame, Candle[]>>;
 
-function useFrameCharts(mints: string[], chain: ChainId): Record<string, FrameBars> {
+function useFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): Record<string, FrameBars> {
   const key = mints.join("|");
+  const extraKey = extra.join("|");
   const [bars, setBars] = useState<Record<string, FrameBars>>({});
   useEffect(() => {
     if (!key) return;
     const ids = key.split("|").filter(Boolean);
+    const more = extraKey.split("|").filter((frame): frame is Frame => frame === "5m");
     let live = true;
     const paint = () => {
       if (!live) return;
-      requestFrameCharts(ids, chain);
+      requestFrameCharts(ids, chain, more);
       setBars((cur) => {
         let changed = false;
         const next = { ...cur };
@@ -1489,7 +1491,7 @@ function useFrameCharts(mints: string[], chain: ChainId): Record<string, FrameBa
       live = false;
       clearInterval(id);
     };
-  }, [chain, key]);
+  }, [chain, extraKey, key]);
   return bars;
 }
 
@@ -1630,7 +1632,7 @@ function Overview({
   const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => sameMint(r.candidate.mint, focusMint ?? "")) ?? desk.research[0] ?? null;
   const book = bookTokens(chain);
-  const bars = useFrameCharts(book.map((token) => token.mint), chain);
+  const bars = useFrameCharts(book.map((token) => token.mint), chain, [focusFrame, chartFrame, gridFrame]);
   const openToken = (mint: string) => {
     onFocus(mint);
     if (book.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) setChartMint(mint);
