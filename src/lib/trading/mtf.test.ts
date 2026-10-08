@@ -119,6 +119,20 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
     assert.match(decision.pass ?? "", /SOL: 15-minute chart is in, no setup yet \(/);
   });
 
+  it("treats a short 4-hour tape as ranging so a new book name can still back-check the 1-hour", () => {
+    const thinFour = trend(12, 0.002, 60, 14_400);
+    const decision = frameEntrySignals(
+      token,
+      { m15: breakout15m, h1: trend(180, 0.002, 60, 3600), h4: thinFour },
+      70,
+      true,
+      ctx,
+    );
+    assert.equal(decision.missing, null);
+    assert.equal(decision.signals.length, 1);
+    assert.match(decision.signals[0].thesis, /Back-check passed: 1-hour up, 4-hour ranging/);
+  });
+
   it("holds a long that would run straight into 4-hour resistance", () => {
     const h4: Candle[] = [];
     for (let i = 0; i < 60; i++) {

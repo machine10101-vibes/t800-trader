@@ -15,6 +15,8 @@ export interface BackCheck {
 }
 
 const MIN_BARS = 30;
+/** A new pool can have a 15-minute and 1-hour tape before thirty 4-hour bars exist. */
+const MIN_FOUR_HOUR_BARS = 8;
 
 function biasWord(bias: Bias): string {
   return bias === "range" ? "ranging" : bias;
@@ -81,12 +83,13 @@ export function frameEntrySignals(
   const h4 = frames.h4 ? closedCandles(frames.h4, FRAME_SECONDS["4h"]) : null;
   if (!m15 || m15.length < MIN_BARS) return { signals: [], pass: null, missing: "15-minute" };
   if (!h1 || h1.length < MIN_BARS) return { signals: [], pass: null, missing: "1-hour" };
-  if (!h4 || h4.length < MIN_BARS) return { signals: [], pass: null, missing: "4-hour" };
+  if (!h4 || h4.length < MIN_FOUR_HOUR_BARS) return { signals: [], pass: null, missing: "4-hour" };
   const tech = snapshotTechnical(m15.slice(-180));
   const found = candleSetups(token, tech, researchScore, allowShorts, ctx, FIFTEEN_MIN_ATR);
   if (!found.length) return { signals: [], pass: `${token.symbol}: 15-minute chart is in, no setup yet (${setupGap(tech)})`, missing: null };
   const hourBias = frameBias(h1) ?? "range";
-  const fourBias = frameBias(h4) ?? "range";
+  const fourReady = h4.length >= MIN_BARS;
+  const fourBias = fourReady ? (frameBias(h4) ?? "range") : "range";
   const kept: Signal[] = [];
   let pass: string | null = null;
   for (const signal of found) {
@@ -95,7 +98,7 @@ export function frameEntrySignals(
       pass ??= `${token.symbol}: 15-minute ${signal.side} ${signal.reason}, but ${check.why}, so it waits`;
       continue;
     }
-    const wall = levelBlock(signal.side, signal.price, h4, tech.atrPct ?? 0);
+    const wall = fourReady ? levelBlock(signal.side, signal.price, h4, tech.atrPct ?? 0) : null;
     if (wall) {
       pass ??= `${token.symbol}: 15-minute ${signal.side} ${signal.reason}, but ${wall}, so it waits`;
       continue;
