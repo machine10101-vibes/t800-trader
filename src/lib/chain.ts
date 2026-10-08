@@ -65,8 +65,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     settingsMultiplier:
       "5x and 10x are SOL only, long or short, from a $5 order. Jupiter will not open a brand-new position under $10, so a $5 order is raised to $10 when the trading key has it. Zebec, Pump, ZEC, and Ray are a spot buy and a spot sell. A stronger SOL signal uses 10x when both are on.",
     settingsFive: "SOL only. Posts at least $5 and takes five times that exposure.",
-    settingsTen:
-      "Used when the signal is a breakout or confidence is 66 or higher. Ten times the collateral, so a smaller adverse move liquidates it.",
+    settingsTen: "SOL only. Puts up at least $5 and takes ten times that much. An even smaller drop can wipe it out.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live SOL and USDC mark.",
   },
   cronos: {
@@ -99,9 +98,9 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     explorerName: "Cronoscan",
     settingsWallet:
       "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap and cro.trade and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Real-money shorts are not sent.",
-    settingsMultiplier: "5x and 10x are SOL only. Cronos tickets are a spot buy and a spot sell.",
-    settingsFive: "Does not apply on Cronos. 5x is a SOL perpetual.",
-    settingsTen: "Does not apply on Cronos. 10x is a SOL perpetual.",
+    settingsMultiplier: "Every Cronos ticket is a normal buy and a normal sell. Extra size is not used.",
+    settingsFive: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
+    settingsTen: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live CRO and USDC mark.",
   },
 };

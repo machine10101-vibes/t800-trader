@@ -45,7 +45,7 @@ export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | 
     return `Venue ${venueLabel(venueForDex(c.dex))} is off`;
   }
   if (!isActiveBook(c.mint, c.chain ?? "solana") && isForeignOrWrapped(c.symbol, c.name)) {
-    return "Wrapped or non-Solana-native asset";
+    return (c.chain ?? "solana") === "cronos" ? "Wrapped or non-Cronos-native asset" : "Wrapped or non-Solana-native asset";
   }
   return null;
 }

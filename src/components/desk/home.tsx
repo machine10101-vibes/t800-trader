@@ -1,5 +1,6 @@
 "use client";
 
+import type { ChainId } from "@/lib/chain";
 import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
@@ -19,6 +20,7 @@ function toneClass(n: number): string {
 
 export function Home({
   desk,
+  chain = "solana",
   balanceUsd,
   busy,
   closingId,
@@ -30,6 +32,7 @@ export function Home({
   onMore,
 }: {
   desk: DeskPayload;
+  chain?: ChainId;
   balanceUsd: number;
   busy: boolean;
   closingId: string | null;
@@ -221,7 +224,7 @@ export function Home({
         <section className="neon p-5 sm:p-6">
           <h3 className="text-lg font-medium">How the bot trades</h3>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
-            {planRules(desk.config).map((rule) => (
+            {planRules(desk.config, chain).map((rule) => (
               <li key={rule} className="flex gap-2">
                 <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--magenta)]" />
                 <span>{rule}</span>
@@ -229,7 +232,9 @@ export function Home({
             ))}
           </ul>
           <p className="mt-4 text-xs leading-5 text-[var(--faint)]">
-            No bot can promise a profit. In 120-day replays with fees these rules stayed close to flat. Practice first, and only use money you can afford to lose.
+            {chain === "cronos"
+              ? "No bot can promise a profit. These Cronos rules have not been replayed. Practice first, and only use money you can afford to lose."
+              : "No bot can promise a profit. In 120-day replays with fees these rules stayed close to flat. Practice first, and only use money you can afford to lose."}
           </p>
           <button type="button" onClick={onMore} className="mt-3 text-sm text-[var(--magenta)] underline-offset-4 hover:underline">
             Change settings

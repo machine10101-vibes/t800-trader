@@ -1,3 +1,4 @@
+import type { ChainId } from "@/lib/chain";
 import { feeHurdlePct } from "@/lib/trading/fees";
 import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
@@ -72,7 +73,10 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 }
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
-export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">): string[] {
+export function planRules(
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">,
+  chain: ChainId = "solana",
+): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
   const rules = [
     "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
@@ -87,9 +91,17 @@ export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitP
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
   if (config.allowShorts) {
-    rules.push("It can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real-money bets against the price are SOL only.");
+    rules.push(
+      chain === "cronos"
+        ? "Practice can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real money only buys and sells."
+        : "It can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real-money bets against the price are SOL only.",
+    );
   }
-  if (config.multipliers.length) rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
+  if (chain === "cronos") {
+    rules.push("Every ticket is a normal buy and a normal sell. Extra size is not used.");
+  } else if (config.multipliers.length) {
+    rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
+  }
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
   return rules;
 }

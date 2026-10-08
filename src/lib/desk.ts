@@ -106,7 +106,7 @@ export async function buildDesk(force = false, chain: ChainId = "solana"): Promi
     bot: studied.bot,
     config: studied.config,
     equityCurve: studied.equityCurve,
-    whatCouldBeWrong: wrongAbout(research.regime, research.research),
+    whatCouldBeWrong: wrongAbout(research.regime, research.research, chain),
     tapeDots: research.candidates.slice(0, 24).map((c) => ({
       mint: c.mint,
       symbol: c.symbol,

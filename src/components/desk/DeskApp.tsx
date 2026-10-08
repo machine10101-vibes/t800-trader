@@ -1007,6 +1007,7 @@ function ChainDesk({
               {tab === "home" ? (
                 <Home
                   desk={desk}
+                  chain={chain}
                   balanceUsd={
                     desk.config.walletSwaps
                       ? trading?.equityUsd || cronosHeld?.usd || shownWallet.equityUsd

@@ -78,6 +78,10 @@ describe("home", () => {
     assert.ok(rules.some((r) => r.includes("never sold until it beats the fees")));
     assert.ok(!rules.some((r) => r.includes("loses faster")));
     assert.ok(planRules({ ...solanaDefaults(), multipliers: [5] }).some((r) => r.includes("5x")));
+    const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");
+    assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x")));
+    assert.ok(cronos.some((r) => r.includes("Real money only buys and sells")));
+    assert.ok(cronos.some((r) => r.includes("normal buy and a normal sell")));
   });
 
   it("sums closed results and words every exit", () => {

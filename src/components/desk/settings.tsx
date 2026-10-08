@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChainId } from "@/lib/chain";
+import { CHAIN_COPY, type ChainId } from "@/lib/chain";
 import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
@@ -75,7 +75,7 @@ export function SettingsPanel({
           {chain === "cronos" ? "WolfSwap and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
-          {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : " · no extra size"}
+          {chain === "cronos" || !local.multipliers.length ? " · no extra size" : ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}`}
         </p>
       </div>
 
@@ -167,33 +167,34 @@ export function SettingsPanel({
         />
       </Section>
 
-      <Section
-        title="Bigger buys"
-        hint={
-          chain === "cronos"
-            ? "Cronos is a normal buy and a normal sell. 5x and 10x are SOL only."
-            : "SOL only, and off by default. In 120-day replays, 5x and 10x lost more than plain buys every time. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it."
-        }
-      >
-        <Toggle
-          label="5 times the money"
-          hint="SOL only. Puts up at least $5 and takes five times that much. A small drop can wipe it out."
-          checked={local.multipliers.includes(5)}
-          onChange={(on) => {
-            const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
-            set({ multipliers: next });
-          }}
-        />
-        <Toggle
-          label="10 times the money"
-          hint="SOL only. Puts up at least $5 and takes ten times that much. An even smaller drop can wipe it out."
-          checked={local.multipliers.includes(10)}
-          onChange={(on) => {
-            const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
-            set({ multipliers: next });
-          }}
-        />
-      </Section>
+      {chain === "cronos" ? (
+        <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
+          <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
+            A buy spends USDC on WolfSwap or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos.
+          </p>
+        </Section>
+      ) : (
+        <Section title="Bigger buys" hint={CHAIN_COPY.solana.settingsMultiplier}>
+          <Toggle
+            label="5 times the money"
+            hint={CHAIN_COPY.solana.settingsFive}
+            checked={local.multipliers.includes(5)}
+            onChange={(on) => {
+              const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
+              set({ multipliers: next });
+            }}
+          />
+          <Toggle
+            label="10 times the money"
+            hint={CHAIN_COPY.solana.settingsTen}
+            checked={local.multipliers.includes(10)}
+            onChange={(on) => {
+              const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
+              set({ multipliers: next });
+            }}
+          />
+        </Section>
+      )}
 
       {chain === "cronos" ? (
         <Section

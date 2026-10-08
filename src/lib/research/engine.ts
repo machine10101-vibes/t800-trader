@@ -43,18 +43,23 @@ function pickFinalists(items: ScoredCandidate[], maxMeme = 2): ScoredCandidate[]
 
 function catalystsFor(c: ScoredCandidate): Catalyst[] {
   const list: Catalyst[] = [];
+  const cronos = c.chain === "cronos";
   if (c.watchlist) {
     list.push({
       window: "30d",
       title: "Ongoing venue usage",
       status: "confirmed",
-      detail: "Watchlist protocol with live Solana pools. Near-term catalyst is continued fee/volume share, not a rumor.",
+      detail: cronos
+        ? "Named book token with live Cronos pools. Near-term catalyst is continued fee and volume, not a rumor."
+        : "Watchlist protocol with live Solana pools. Near-term catalyst is continued fee/volume share, not a rumor.",
     });
     list.push({
       window: "1-3m",
-      title: "Ecosystem flow if SOL beta holds",
+      title: cronos ? "Ecosystem flow if CRO stays bid" : "Ecosystem flow if SOL beta holds",
       status: "speculative",
-      detail: "If SOL stays bid, liquid ecosystem names usually re-rate together. This is beta, not a unique unlock.",
+      detail: cronos
+        ? "If CRO stays bid, liquid Cronos names usually re-rate together. This is beta, not a unique unlock."
+        : "If SOL stays bid, liquid ecosystem names usually re-rate together. This is beta, not a unique unlock.",
     });
   } else {
     list.push({
@@ -117,7 +122,11 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
 
   const fundamental = [
     `Pool on ${venueLabel(venueForDex(c.dex))} (${c.dex}), quoted vs ${c.quoteSymbol}.`,
-    c.watchlist ? "Mapped to a known Solana protocol on the internal watchlist." : "Not on the conservative watchlist — treat as tape-first.",
+    c.watchlist
+      ? c.chain === "cronos"
+        ? "Mapped to a named Cronos token on this book."
+        : "Mapped to a known Solana protocol on the internal watchlist."
+      : "Not on the conservative watchlist — treat as tape-first.",
     `24h unique takers ${ (c.flows.h24.buyers + c.flows.h24.sellers).toLocaleString() }.`,
     mc ? `Reported market cap ${usd(mc)}.` : "Market cap not published by GeckoTerminal for this pool.",
     c.apyPct && c.apyPct > 0
@@ -148,15 +157,18 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
 
   const relative =
     volMc !== null
-      ? `Volume/MC ${(volMc * 100).toFixed(2)}%. Compare only against other Solana ${c.sector} names, not against BTC. High turnover can mean healthy flow or a mercenary crowd — pair it with unique takers and reserve depth.`
+      ? `Volume/MC ${(volMc * 100).toFixed(2)}%. Compare only against other ${c.chain === "cronos" ? "Cronos" : "Solana"} ${c.sector} names, not against BTC. High turnover can mean healthy flow or a mercenary crowd — pair it with unique takers and reserve depth.`
       : `Market cap missing, so MC/Revenue and MC/TVL are not computed. Fallback: reserves ${usd(c.liquidityUsd)} vs 24h volume ${usd(c.volume24hUsd)}.`;
 
   const competitive = c.watchlist
-    ? `${c.name} competes with other Solana ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
+    ? `${c.name} competes with other ${c.chain === "cronos" ? "Cronos" : "Solana"} ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
     : `${c.symbol} has no demonstrated moat in this dataset. Competitors are every other launch with deeper liquidity or a more credible float.`;
 
   const bull = `${c.symbol} 15m stays green, the 5m holds its short average, and reserves stay near ${usd(c.liquidityUsd)}. Regime is ${regime.stance}. ${path}`;
-  const base = `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still open 5x or 10x when the 5m is not red.`;
+  const base =
+    c.chain === "cronos"
+      ? `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still take a small continuation when the 5m is not red.`
+      : `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still open 5x or 10x when the 5m is not red.`;
   const bear = `The 15m stays red, or reserves fall under $${Math.max(80_000, c.liquidityUsd * 0.45).toFixed(0)}. No new long. An open ticket scratches when the 5m and the 15m both flip.`;
 
   return {
@@ -194,7 +206,7 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
       "Pool reserves and 5m/1h volume",
       "Buy/sell and buyer/seller mix",
       "5m RSI / EMA stack / VWAP extension",
-      "SOL beta and BTC dominance",
+      c.chain === "cronos" ? "CRO tape and BTC dominance" : "SOL beta and BTC dominance",
       "Any verified unlock or fee-switch announcement (not social rumors)",
     ],
     sources: [
@@ -344,7 +356,9 @@ function collapseMints(rows: TokenCandidate[]): TokenCandidate[] {
   return [...best.values()];
 }
 
-export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): string[] {
+export function wrongAbout(regime: MarketRegime, research: ResearchThesis[], chain: ChainId = "solana"): string[] {
+  const l1 = chain === "cronos" ? "CRO" : "SOL";
+  const venues = chain === "cronos" ? "Cronos" : "Solana";
   return [
     "Public pool tape can be wash-traded, incentive-driven, or spoofed. Unique taker counts are not unique humans.",
     "GeckoTerminal market cap and FDV are venue-reported. They can be stale, circular, or missing — we do not fabricate replacements.",
@@ -355,8 +369,8 @@ export function wrongAbout(regime: MarketRegime, research: ResearchThesis[]): st
       : "Quiet sentiment can still hide thin books — overlooked is not the same as underpriced.",
     research.some((r) => r.sector === "Meme")
       ? "Meme finalists can print research scores from activity alone. Activity is not value accrual."
-      : "Excluding memes does not make remaining tokens 'fundamentals'. Many Solana venues do not route value to the token.",
+      : `Excluding memes does not make remaining tokens 'fundamentals'. Many ${venues} venues do not route value to the token.`,
     "PAPER fills assume mid-price plus a small slip. LIVE swap impact and fees are worse, and a kill switch does not unwind already-signed tickets.",
-    "SOL beta can invert in a session. The desk can be right on a pool and still lose if the L1 dumps.",
+    `${l1} can dump in a session. The desk can be right on a pool and still lose if the L1 dumps.`,
   ];
 }
