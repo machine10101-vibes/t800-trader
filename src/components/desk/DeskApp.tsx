@@ -1358,6 +1358,7 @@ function Header({
     nativePriceUsd: solPx || wallet.solPriceUsd,
     trading: trading && trading.usdc != null && trading.sol != null ? { usdc: trading.usdc, sol: trading.sol } : null,
     wallet,
+    preferWallet: !trading,
   });
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
