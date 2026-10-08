@@ -2,9 +2,11 @@
 
 import type { ChainId } from "@/lib/chain";
 import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
+import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
+import { TokenLogo } from "./TokenLogo";
 
 const pageStartedAt = Date.now();
 
@@ -140,7 +142,7 @@ export function Home({
         {statusNow.length ? (
           <div className={`mt-4 grid gap-3 ${statusNow.length > 1 ? "lg:grid-cols-2" : ""}`}>
             {statusNow.map((group) => (
-              <ActivityList key={group.kind} title={group.title} tone={group.kind === "target" ? "mint" : group.kind === "limit" ? "amber" : "crimson"} items={group.items} />
+              <ActivityList key={group.kind} title={group.title} tone={group.kind === "target" ? "mint" : group.kind === "limit" ? "amber" : "crimson"} items={group.items} chain={chain} />
             ))}
           </div>
         ) : null}
@@ -160,7 +162,10 @@ export function Home({
                 <li key={p.id} className="rounded-2xl border border-[var(--line)] bg-black/20 p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <button type="button" onClick={() => onOpenPosition(p.id)} className="text-left">
-                      <span className="text-lg font-medium">{p.symbol}</span>
+                      <span className="inline-flex items-center gap-2 text-lg font-medium">
+                        <TokenLogo symbol={p.symbol} mint={p.mint} chain={chain} size="md" />
+                        {p.symbol}
+                      </span>
                       <span className="ml-2 text-xs text-[var(--faint)]">
                         {p.side === "long" ? "buy" : "sell"}
                         {(p.leverage ?? 1) > 1 ? ` · ${p.leverage}x` : ""}
@@ -213,7 +218,8 @@ export function Home({
             <ul className="mt-3 divide-y divide-[var(--line)]">
               {recent.map((t) => (
                 <li key={t.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                  <span className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
                     <span className="font-medium">{t.symbol}</span>
                     <span className="ml-2 text-[var(--muted)]">{exitWords(t.reason)}</span>
                   </span>
@@ -255,10 +261,12 @@ function ActivityList({
   title,
   tone,
   items,
+  chain,
 }: {
   title: string;
   tone: "mint" | "amber" | "crimson";
   items: ActivityItem[];
+  chain: ChainId;
 }) {
   const dot = tone === "mint" ? "bg-[var(--mint)]" : tone === "amber" ? "bg-[var(--amber)]" : "bg-[var(--crimson)]";
   const titleColor = tone === "mint" ? "text-[var(--mint)]" : tone === "amber" ? "text-[var(--amber)]" : "text-[var(--crimson)]";
@@ -269,9 +277,15 @@ function ActivityList({
         <h4 className={`text-sm font-medium ${titleColor}`}>{title}</h4>
       </div>
       <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
-        {items.map((item) => (
-          <li key={item.text}>{item.text}</li>
-        ))}
+        {items.map((item) => {
+          const mark = leadingTokenSymbol(item.text);
+          return (
+            <li key={item.text} className="flex items-start gap-2">
+              {mark ? <TokenLogo symbol={mark} chain={chain} size="xs" className="mt-1" /> : null}
+              <span>{item.text}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

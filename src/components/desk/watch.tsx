@@ -9,6 +9,7 @@ import { pct, shortAddress, usd } from "@/lib/utils";
 import { rMultiple } from "@/lib/trading/risk";
 import { useEffect, useState, type ReactNode } from "react";
 import { Label, Pill, Spark, Stat, Tone } from "./bits";
+import { TokenLogo } from "./TokenLogo";
 
 export function WatchScreen({
   address,
@@ -138,7 +139,8 @@ export function WatchScreen({
                     return (
                       <div key={position.id} className="rounded-2xl border border-[var(--line)] p-3">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="font-medium">
+                          <div className="flex items-center gap-2 font-medium">
+                            <TokenLogo symbol={position.symbol} mint={position.mint} chain={chain} size="sm" />
                             {position.symbol} <span className="text-[11px] text-[var(--faint)]">{position.side}</span>
                           </div>
                           <Tone value={pnlUsd}>{usd(pnlUsd)}</Tone>
@@ -170,7 +172,12 @@ export function WatchScreen({
                       const pnlUsd = position.qty * position.entryPrice * (pnlPct / 100);
                       return (
                         <tr key={position.id} className="border-t border-[var(--line)]">
-                          <td className="py-3 font-medium">{position.symbol}</td>
+                          <td className="py-3 font-medium">
+                            <span className="inline-flex items-center gap-2">
+                              <TokenLogo symbol={position.symbol} mint={position.mint} chain={chain} size="sm" />
+                              {position.symbol}
+                            </span>
+                          </td>
                           <td>{position.side}</td>
                           <td className="num">{position.entryPrice}</td>
                           <td className="num">{position.markPrice}</td>

@@ -1,9 +1,36 @@
 "use client";
 
+import { tapeLabel, type ChainId } from "@/lib/chain";
 import { analyzeChart, type Bias } from "@/lib/market/analysis";
+import { tokenLogoUrl } from "@/lib/market/logos";
 import type { Candle, TapeDot } from "@/lib/types";
 import { priceFmt, usd } from "@/lib/utils";
 import { useMemo, useState } from "react";
+import { TokenLogo } from "./TokenLogo";
+
+export interface ChartToken {
+  symbol: string;
+  mint?: string;
+  chain?: ChainId;
+}
+
+function ChartBadge({ token, compact = false }: { token?: ChartToken | null; compact?: boolean }) {
+  if (!token?.symbol) return null;
+  return (
+    <div className={`chart-badge ${compact ? "chart-badge-compact" : ""}`.trim()} aria-hidden>
+      <TokenLogo
+        symbol={token.symbol}
+        mint={token.mint}
+        chain={token.chain}
+        size={compact ? "sm" : "md"}
+        className="token-logo-on-chart"
+      />
+      {compact ? null : (
+        <span className="pr-0.5 text-sm font-medium tracking-wide text-[var(--text)]">{tapeLabel(token.symbol)}</span>
+      )}
+    </div>
+  );
+}
 
 function rollingEma(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = values.map(() => null);
@@ -40,14 +67,18 @@ export function CandleChart({
   candles,
   layers = ALL_LAYERS,
   emptyLabel = "Waiting on the 4-hour chart",
+  token,
+  compactMark = false,
 }: {
   candles: Candle[];
   layers?: ChartLayers;
   emptyLabel?: string;
+  token?: ChartToken | null;
+  compactMark?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (candles.length < 1) {
-    return <EmptyPlot label={emptyLabel} waiting />;
+    return <EmptyPlot label={emptyLabel} waiting token={token} />;
   }
   const w = 520;
   const h = 168;
@@ -87,6 +118,7 @@ export function CandleChart({
   };
   return (
     <div className="relative h-full w-full">
+      <ChartBadge token={token} compact={compactMark} />
       {hot ? (
         <div className="chart-readout num">
           <span>{new Date(hot.time * 1000).toLocaleTimeString()}</span>
@@ -207,16 +239,20 @@ export function AnalysisChart({
   trade = null,
   emptyLabel = "Waiting on the 4-hour chart",
   title = "4H",
+  token,
 }: {
   candles: Candle[];
   layers?: TaLayers;
   trade?: ChartTrade | null;
   emptyLabel?: string;
   title?: string;
+  token?: ChartToken | null;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const read = useMemo(() => (candles.length >= 30 ? analyzeChart(candles.slice(-180)) : null), [candles]);
-  if (candles.length < 30 || !read) return <EmptyPlot label={candles.length ? `${emptyLabel} (${candles.length} bars so far)` : emptyLabel} waiting />;
+  if (candles.length < 30 || !read) {
+    return <EmptyPlot label={candles.length ? `${emptyLabel} (${candles.length} bars so far)` : emptyLabel} waiting token={token} />;
+  }
   const all = candles.slice(-180);
   const offset = Math.max(0, all.length - 120);
   const slice = all.slice(offset);
@@ -286,6 +322,7 @@ export function AnalysisChart({
   );
   return (
     <div className="relative h-full w-full">
+      <ChartBadge token={token} />
       {hot ? (
         <div className="chart-readout num">
           <span>{new Date(hot.time * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
@@ -613,7 +650,17 @@ export function ScatterTape({ dots, onPick }: { dots: TapeDot[]; onPick?: (mint:
             >
               <circle cx={sx(d.score)} cy={sy(d.change24h)} r={radius + 7} fill={color} opacity={active ? 0.22 : 0.1} />
               <circle cx={sx(d.score)} cy={sy(d.change24h)} r={radius} fill={color} opacity={hotMint && !active ? 0.35 : 0.88} />
-              <text x={sx(d.score) + 9} y={sy(d.change24h) - 8} className="num" fill={active ? "var(--text)" : "var(--chart-label)"} fontSize={active ? 12 : 10}>
+              {tokenLogoUrl({ mint: d.mint, symbol: d.symbol }) ? (
+                <image
+                  href={tokenLogoUrl({ mint: d.mint, symbol: d.symbol }) ?? ""}
+                  x={sx(d.score) - 7}
+                  y={sy(d.change24h) - 7}
+                  width="14"
+                  height="14"
+                  clipPath="inset(0% round 50%)"
+                />
+              ) : null}
+              <text x={sx(d.score) + 10} y={sy(d.change24h) - 8} className="num" fill={active ? "var(--text)" : "var(--chart-label)"} fontSize={active ? 12 : 10}>
                 {d.symbol}
               </text>
               <title>
@@ -724,16 +771,18 @@ export function VolumeBars({ candles }: { candles: Candle[] }) {
   );
 }
 
-function EmptyPlot({ label, waiting = false }: { label: string; waiting?: boolean }) {
+function EmptyPlot({ label, waiting = false, token }: { label: string; waiting?: boolean; token?: ChartToken | null }) {
   if (!waiting) {
     return (
-      <div className="grid h-full min-h-[88px] place-items-center px-3 text-center text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
+      <div className="relative grid h-full min-h-[88px] place-items-center px-3 text-center text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
+        <ChartBadge token={token} compact />
         {label}
       </div>
     );
   }
   return (
-    <div className="flex h-full min-h-[88px] flex-col justify-end px-2 pb-2">
+    <div className="relative flex h-full min-h-[88px] flex-col justify-end px-2 pb-2">
+      <ChartBadge token={token} compact />
       <div className="skel h-16 w-full" />
       <div className="mt-2 text-center text-[11px] tracking-[0.12em] text-[var(--muted)]">{label}</div>
     </div>
