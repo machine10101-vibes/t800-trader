@@ -45,6 +45,15 @@ export function normalizeMarginOnFourHour(value: unknown): boolean {
   return typeof value === "boolean" ? value : false;
 }
 
+export const CRONOS_QUOTES = ["usdc", "cro"] as const;
+export type CronosQuote = (typeof CRONOS_QUOTES)[number];
+export const DEFAULT_CRONOS_QUOTE: CronosQuote = "usdc";
+
+/** Older Cronos books that never stored a quote stay on USDC. */
+export function normalizeCronosQuote(value: unknown): CronosQuote {
+  return value === "cro" || value === "usdc" ? value : DEFAULT_CRONOS_QUOTE;
+}
+
 /** Margin or both with an empty list still posts a SOL 5x or 10x. */
 export function multipliersForMode(mode: SolTradeMode, multipliers: readonly number[]): number[] {
   if (mode === "spot") return [...multipliers];

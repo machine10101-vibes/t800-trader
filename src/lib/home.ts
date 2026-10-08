@@ -74,7 +74,7 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour">,
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour" | "cronosQuote">,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
@@ -95,7 +95,11 @@ export function planRules(
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
   if (chain === "cronos") {
-    rules.push("Every ticket is a normal buy and a normal sell. Extra size is not used.");
+    rules.push(
+      config.cronosQuote === "cro"
+        ? "Every ticket spends CRO and sells back to CRO. CRO itself is skipped. Extra size is not used."
+        : "Every ticket spends USDC and sells back to USDC. Extra size is not used.",
+    );
   } else if (config.solTradeMode === "margin") {
     rules.push(
       config.marginOnFourHour

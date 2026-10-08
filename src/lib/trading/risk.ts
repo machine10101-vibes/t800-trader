@@ -124,6 +124,12 @@ export interface WalletBudget {
   usdc: number;
   sol: number;
   solPriceUsd: number;
+  wcro?: number;
+}
+
+export interface PayableOpts {
+  quote?: "usdc" | "cro";
+  feeReserve?: number;
 }
 
 /**
@@ -163,20 +169,23 @@ export function marginCashUsd(budget: WalletBudget): number {
   return Math.max(usdc, solLeg);
 }
 
-/** One Jupiter swap spends either USDC or SOL, never a mix of the two. */
-export function payableUsd(budget: WalletBudget): number {
+/** One Jupiter swap spends either USDC or SOL, never a mix of the two. Cronos CRO mode spends CRO only. */
+export function payableUsd(budget: WalletBudget, opts?: PayableOpts): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
-  const solLeg = Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
-  return Math.max(Math.max(0, budget.usdc), solLeg);
+  const reserve = opts?.feeReserve ?? SOL_FEE_RESERVE;
+  const nativeLeg = Math.max(0, budget.sol - reserve) * px;
+  const wrapped = Math.max(0, budget.wcro ?? 0) * px;
+  if (opts?.quote === "cro") return nativeLeg + wrapped;
+  return Math.max(Math.max(0, budget.usdc), nativeLeg);
 }
 
 export function walletMarkUsd(budget: WalletBudget): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
-  return Math.max(0, budget.usdc) + Math.max(0, budget.sol) * px;
+  return Math.max(0, budget.usdc) + (Math.max(0, budget.sol) + Math.max(0, budget.wcro ?? 0)) * px;
 }
 
-export function spendableUsd(budget: WalletBudget): number {
-  return payableUsd(budget);
+export function spendableUsd(budget: WalletBudget, opts?: PayableOpts): number {
+  return payableUsd(budget, opts);
 }
 
 /**
@@ -189,11 +198,12 @@ export function walletRiskBook(
   trades: Trade[],
   budget: WalletBudget | null | undefined,
   walletSwaps: boolean,
+  opts?: PayableOpts,
 ): { portfolio: Portfolio; positions: Position[]; trades: Trade[] } {
   if (!walletSwaps || !budget) return { portfolio, positions, trades };
   const livePositions = positions.filter((p) => Boolean(p.signature));
   const liveTrades = trades.filter((t) => Boolean(t.signature));
-  const cashUsd = payableUsd(budget);
+  const cashUsd = payableUsd(budget, opts);
   const signedValue = livePositions.reduce((acc, p) => acc + positionEquity(p), 0);
   const equityUsd = walletMarkUsd(budget) + signedValue;
   const hasChainFill = liveTrades.length > 0;

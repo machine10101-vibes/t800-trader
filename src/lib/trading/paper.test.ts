@@ -46,6 +46,21 @@ describe("paper", () => {
     assert.ok(next.portfolio.cashUsd >= 0);
   });
 
+  it("stamps the Cronos quote from the book so a later setting change does not flip the sell", () => {
+    const usdc = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 }), signal({ price: 100 }), 1);
+    assert.equal(usdc.positions[0]?.cronosQuote, "usdc");
+    const cro = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100, cronosQuote: "cro" }), signal({ price: 100 }), 1);
+    assert.equal(cro.positions[0]?.cronosQuote, "cro");
+    const stamped = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100, cronosQuote: "usdc" }), signal({ price: 100 }), 1, "risk-on", {
+      signature: "sig",
+      qty: 1,
+      price: 100,
+      tokenDecimals: 18,
+      cronosQuote: "cro",
+    });
+    assert.equal(stamped.positions[0]?.cronosQuote, "cro");
+  });
+
   it("records a wallet signature on a signed fill", () => {
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 });
     const next = openPosition(state, signal({ price: 100 }), 1, "risk-on", {

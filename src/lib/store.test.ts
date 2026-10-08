@@ -128,6 +128,8 @@ describe("store", () => {
     assert.equal(next.executionMode, "paper");
     assert.equal(next.armFundsUsd, 50);
     assert.equal(next.buySizeUsd, 10);
+    assert.equal(next.cronosQuote, "usdc");
+    assert.equal(normalizeConfig({ cronosQuote: "cro" }).cronosQuote, "cro");
     assert.equal(next.killSwitch, false);
     assert.equal(next.liveTradesRev, 1);
     assert.equal(normalizeConfig({ walletSwaps: true }).walletSwaps, false);

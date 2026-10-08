@@ -116,6 +116,7 @@ export function openPosition(
     leverage: leverage > 1 ? leverage : undefined,
     collateralUsd: leverage > 1 ? collateral : undefined,
     positionPubkey: stamp?.positionPubkey,
+    cronosQuote: stamp?.cronosQuote ?? state.config.cronosQuote,
   };
 
   const trade: Trade = {

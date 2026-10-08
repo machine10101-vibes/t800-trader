@@ -666,6 +666,8 @@ describe("risk", () => {
 describe("walletRiskBook", () => {
   it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
     assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 19.6) < 1e-6);
+    assert.ok(Math.abs(spendableUsd({ usdc: 40, sol: 600, solPriceUsd: 0.1, wcro: 10 }, { quote: "cro", feeReserve: 0.5 }) - 60.95) < 1e-6);
+    assert.equal(spendableUsd({ usdc: 40, sol: 1, solPriceUsd: 0.1 }, { quote: "cro", feeReserve: 0.5 }), 0.05);
     const perp = solPerpPostableUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 });
     assert.ok(perp >= 10, `0.13 SOL should still post a 5x or 10x, got ${perp}`);
     assert.equal(solPerpPostableUsd({ usdc: 12, sol: 0.02, solPriceUsd: 200 }), 12);

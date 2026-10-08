@@ -15,6 +15,14 @@ describe("Cronos routes", () => {
     assert.deepEqual(cronosSwapPath(ULTI_MINT, "sell"), [ULTI_MINT, WCRO, USDC]);
   });
 
+  it("spends WCRO and returns WCRO when the quote is CRO", () => {
+    assert.deepEqual(cronosSwapPath(ULTCAT_MINT, "buy", "cro"), [WCRO, ULTCAT_MINT]);
+    assert.deepEqual(cronosSwapPath(ULTCAT_MINT, "sell", "cro"), [ULTCAT_MINT, WCRO]);
+    assert.deepEqual(cronosSwapPath(ULTI_MINT, "buy", "cro"), [WCRO, ULTI_MINT]);
+    assert.throws(() => cronosSwapPath(WCRO, "buy", "cro"), /cannot buy or sell CRO/);
+    assert.throws(() => cronosSwapPath(WCRO, "sell", "cro"), /cannot buy or sell CRO/);
+  });
+
   it("picks the venue that returns more after cro.trade's fee", () => {
     assert.equal(decideRoute(1000n, 1000n)?.venue, "wolfswap");
     assert.equal(decideRoute(1000n, null)?.venue, "wolfswap");

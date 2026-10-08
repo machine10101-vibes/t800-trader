@@ -1,6 +1,7 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
 import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
+import { GAS_CRO } from "@/lib/cronos/constants";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
@@ -262,18 +263,26 @@ export async function tickBot(
       const nativeMark = [...prices.entries()].find(([mint, price]) => price > 0 && sameMint(mint, nativeMint))?.[1] ?? 0;
       const priced =
         budget && !(budget.solPriceUsd > 0) && nativeMark > 0 ? { ...budget, solPriceUsd: nativeMark } : budget;
-      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps);
+      const payOpts =
+        chain === "cronos"
+          ? {
+              quote: next.config.cronosQuote,
+              feeReserve: next.config.cronosQuote === "cro" ? GAS_CRO : undefined,
+            }
+          : undefined;
+      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps, payOpts);
       const balanceUnread = Boolean(next.config.walletSwaps && next.bot.running && !budget);
       if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
         next = studyTape(next, research.candidates, market.regime.stance);
-        const spendable = priced ? payableUsd(priced) : 0;
+        const spendable = priced ? payableUsd(priced, payOpts) : 0;
         const marked = priced ? walletMarkUsd(priced) : 0;
         const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
+          const spend = chain === "cronos" && next.config.cronosQuote === "cro" ? "CRO" : chain === "cronos" ? "USDC or CRO" : "SOL or USDC";
           blocked.push(
-            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${chain === "cronos" ? "CRO" : "SOL"} or USDC before a swap is sent`,
+            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${spend} before a swap is sent`,
           );
         }
         const screen = bookScreen(next.config, chain);
@@ -282,6 +291,12 @@ export async function tickBot(
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
         for (const mint of bookMints(chain)) {
+          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(mint, WCRO_MINT) || watchMeta(mint, chain)?.symbol === "CRO")) {
+            if (!focus.some((token) => sameMint(token.mint, mint) || token.symbol === "CRO")) {
+              blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
+            }
+            continue;
+          }
           if (focus.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) continue;
           const symbol = watchMeta(mint, chain)?.symbol ?? "Asset";
           const live = byMint.get(mint) ?? research.candidates.find((token) => sameMint(token.mint, mint));
@@ -301,6 +316,10 @@ export async function tickBot(
         focus.forEach((token, i) => {
           if (token.priceAgreement === "split") {
             blocked.push(`${token.symbol}: price feeds disagree`);
+            return;
+          }
+          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(token.mint, WCRO_MINT) || token.symbol === "CRO")) {
+            blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
             return;
           }
           const frames = charts[i];
@@ -394,10 +413,11 @@ export async function tickBot(
           });
           if (gate) {
             const native = chain === "cronos" ? "CRO" : "SOL";
-            const why =
-              gate === "Insufficient cash" && next.config.walletSwaps
-                ? `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`
-                : gate;
+            const spend =
+              chain === "cronos" && next.config.cronosQuote === "cro"
+                ? `need at least $${MIN_TICKET_USD} in CRO after the fee reserve`
+                : `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`;
+            const why = gate === "Insufficient cash" && next.config.walletSwaps ? spend : gate;
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
           }
@@ -479,6 +499,7 @@ export async function tickBot(
                   venues: next.config.venues,
                   leverage: leverage > 1 ? leverage : undefined,
                   collateralUsd: leverage > 1 ? collateralUsd : undefined,
+                  cronosQuote: chain === "cronos" ? next.config.cronosQuote : undefined,
                 });
               } catch (error) {
                 const message = error instanceof Error ? error.message : "wallet swap failed";

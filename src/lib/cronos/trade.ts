@@ -6,10 +6,18 @@ import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, type Hex } from 
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { cronos } from "viem/chains";
 import { sameMint } from "@/lib/chain";
-import { DEFAULT_ARM_FUNDS_USD } from "@/lib/deskSettings";
+import { DEFAULT_ARM_FUNDS_USD, normalizeCronosQuote, type CronosQuote } from "@/lib/deskSettings";
 import { planCronosArm } from "./arm";
 import { BOT_MIN_CRO, GAS_CRO, USDC, WCRO } from "./constants";
-import { buildCroTradeCall, buildWolfswapCall, croTradeMinOut, quoteCronos, type CronosRoute } from "./route";
+import {
+  buildCroTradeCall,
+  buildWolfswapCall,
+  cronosQuoteDecimals,
+  croTradeMinOut,
+  isCronosNativeToken,
+  quoteCronos,
+  type CronosRoute,
+} from "./route";
 import {
   ARM_ALREADY_FUNDED,
   DISARM_RETURN,
@@ -196,6 +204,10 @@ async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeI
   return sendFrom(account, call);
 }
 
+function orderQuote(order: ChainOrder): CronosQuote {
+  return normalizeCronosQuote(order.cronosQuote);
+}
+
 async function settleCronos(session: CronosSession, order: ChainOrder): Promise<ChainFill> {
   const account = cronosTradingAccount(session.address);
   if (!account) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
@@ -206,19 +218,54 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   if (!mint.toLowerCase().startsWith("0x")) throw new Error("This ticket is not a Cronos token");
   const balances = await readCronosBalances(account.address);
   const mark = order.price || balances.solPriceUsd || 0;
+  const quote = orderQuote(order);
+  const croPrice = balances.solPriceUsd || 0;
 
   if (order.kind === "open") {
+    if (quote === "cro") {
+      if (isCronosNativeToken(mint)) throw new Error("This desk spends CRO, so it cannot buy CRO.");
+      if (!(croPrice > 0)) throw new Error("Need a CRO price to size this buy.");
+      const croNeed = order.notionalUsd / croPrice;
+      const nativeSpendable = Math.max(0, balances.sol - GAS_CRO);
+      const have = nativeSpendable + Math.max(0, balances.wcro);
+      if (!(have + 1e-6 >= croNeed)) {
+        throw new Error(
+          `Buying ${order.symbol} needs CRO in the trading key. This key has ${have.toFixed(3)} CRO.`,
+        );
+      }
+      const amountIn = units(croNeed, 18);
+      const wcroBal = await readTokenBalance(account.address, WCRO);
+      let nativeIn = false;
+      if (wcroBal < amountIn) {
+        const native = units(nativeSpendable, 18);
+        if (native >= amountIn) {
+          nativeIn = true;
+        } else if (wcroBal + native >= amountIn) {
+          const data = encodeFunctionData({ abi: depositAbi, functionName: "deposit" });
+          await sendFrom(account, { to: WCRO, data, value: amountIn - wcroBal });
+        } else {
+          throw new Error(
+            `Buying ${order.symbol} needs CRO in the trading key. This key has ${have.toFixed(3)} CRO.`,
+          );
+        }
+      }
+      const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "cro" });
+      const signature = await sendRoute(account, route, nativeIn);
+      const qty = Number(formatUnits(route.amountOut, 18));
+      const price = qty > 0 ? order.notionalUsd / qty : mark;
+      return { signature, qty, price, tokenDecimals: 18, cronosQuote: "cro" };
+    }
     if (!(balances.usdc + 1e-6 >= order.notionalUsd)) {
       throw new Error(
         `Buying ${order.symbol} needs USDC in the trading key. This key has ${balances.usdc.toFixed(2)} USDC.`,
       );
     }
     const amountIn = units(order.notionalUsd, 6);
-    const route = await quoteCronos({ token: mint, amountIn, side: "buy" });
+    const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "usdc" });
     const signature = await sendRoute(account, route, false);
     const qty = Number(formatUnits(route.amountOut, 18));
     const price = qty > 0 ? order.notionalUsd / qty : mark;
-    return { signature, qty, price, tokenDecimals: 18 };
+    return { signature, qty, price, tokenDecimals: 18, cronosQuote: "usdc" };
   }
 
   const want = units(order.qty, 18);
@@ -233,12 +280,13 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
     }
   }
   if (amountIn <= 0n) throw new Error("ALREADY_FLAT: trading key does not hold this token");
-  const route = await quoteCronos({ token: mint, amountIn, side: "sell" });
+  const route = await quoteCronos({ token: mint, amountIn, side: "sell", quote });
   const signature = await sendRoute(account, { ...route, amountIn }, nativeIn);
-  const usdcOut = Number(formatUnits(route.amountOut, 6));
+  const out = Number(formatUnits(route.amountOut, cronosQuoteDecimals(quote)));
   const qty = Number(formatUnits(amountIn, 18));
-  const price = qty > 0 ? usdcOut / qty : mark;
-  return { signature, qty, price, tokenDecimals: 18 };
+  const usdOut = quote === "cro" ? out * croPrice : out;
+  const price = qty > 0 ? usdOut / qty : mark;
+  return { signature, qty, price, tokenDecimals: 18, cronosQuote: quote };
 }
 
 export function cronosExecutor(session: CronosSession): ChainExecutor {
@@ -251,21 +299,32 @@ export async function cronosBudget(session?: CronosSession | null): Promise<Wall
   const address = account?.address ?? session.address;
   try {
     const live = await readCronosBalances(address);
-    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
+    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0, wcro: live.wcro };
   } catch (error) {
-    if (!account) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+    if (!account) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0, wcro: session.wcro };
     const message = error instanceof Error ? error.message : "balance read failed";
     throw new Error(`Could not read the CRO trading key, so no swap was sent. ${message}`);
   }
 }
 
-export async function authorizeCronos(session: CronosSession, armFundsUsd: number = DEFAULT_ARM_FUNDS_USD): Promise<ArmAuth> {
+export async function authorizeCronos(
+  session: CronosSession,
+  armFundsUsd: number = DEFAULT_ARM_FUNDS_USD,
+  opts?: { cronosQuote?: CronosQuote; croPriceUsd?: number },
+): Promise<ArmAuth> {
+  const quote = normalizeCronosQuote(opts?.cronosQuote);
   const existing = cronosTradingAccount(session.address);
   const before = existing ? await readCronosBalances(existing.address).catch(() => null) : null;
   if (existing && !before) {
     throw new Error("Could not read the trading account, so no more CRO or USDC was moved.");
   }
-  if (tradingKeyCoversSpend(before, BOT_MIN_CRO) && (before?.usdc ?? 0) + 0.5 >= armFundsUsd) {
+  const croPrice = opts?.croPriceUsd ?? before?.solPriceUsd ?? session.solPriceUsd ?? 0;
+  const alreadyCro = (before?.sol ?? 0) + (before?.wcro ?? 0);
+  const alreadyFunded =
+    quote === "cro"
+      ? Boolean(before && croPrice > 0 && before.sol >= BOT_MIN_CRO && alreadyCro + 0.01 >= armFundsUsd / croPrice + BOT_MIN_CRO)
+      : tradingKeyCoversSpend(before, BOT_MIN_CRO) && (before?.usdc ?? 0) + 0.5 >= armFundsUsd;
+  if (existing && alreadyFunded) {
     const signature = await signWithWallet(session, ARM_ALREADY_FUNDED);
     return {
       signature,
@@ -284,7 +343,9 @@ export async function authorizeCronos(session: CronosSession, armFundsUsd: numbe
   const plan = planCronosArm(cro, usdc, wcro, posCro, {
     armFundsUsd,
     alreadyUsdc: before?.usdc ?? 0,
-    alreadyNative: (before?.sol ?? 0) + (before?.wcro ?? 0),
+    alreadyNative: alreadyCro,
+    cronosQuote: quote,
+    croPriceUsd: live?.solPriceUsd ?? croPrice,
   });
   let signature = "";
   if (plan.croToBot > 0) {

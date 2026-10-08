@@ -85,7 +85,12 @@ describe("home", () => {
     );
     const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");
     assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x")));
-    assert.ok(cronos.some((r) => r.includes("normal buy and a normal sell")));
+    assert.ok(cronos.some((r) => r.includes("spends USDC") && r.includes("sells back to USDC")));
+    assert.ok(
+      planRules({ ...solanaDefaults(), cronosQuote: "cro" }, "cronos").some((r) =>
+        r.includes("spends CRO") && r.includes("CRO itself is skipped"),
+      ),
+    );
   });
 
   it("sums closed results and words every exit", () => {

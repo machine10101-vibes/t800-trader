@@ -76,7 +76,7 @@ export function SettingsPanel({
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
           {chain === "cronos"
-            ? " · no extra size"
+            ? ` · spends ${local.cronosQuote === "cro" ? "CRO" : "USDC"} · no extra size`
             : local.solTradeMode === "spot"
               ? " · spot swaps"
               : local.solTradeMode === "margin"
@@ -87,11 +87,32 @@ export function SettingsPanel({
 
       <Section
         title="Trading money"
-        hint="Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
+        hint={
+          chain === "cronos" && local.cronosQuote === "cro"
+            ? "Arming loads this much CRO, at the live CRO price, onto the trading key, plus a little for fees. Practice uses the same number as pretend money. Each buy spends the size you pick."
+            : "Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
+        }
       >
+        {chain === "cronos" ? (
+          <Pills
+            label="Spend on each buy"
+            hint="USDC buys with the stablecoin and sells back to USDC. CRO buys with wrapped CRO and sells back to CRO. Changing this does not flip an open ticket."
+            value={local.cronosQuote}
+            display={local.cronosQuote === "cro" ? "CRO" : "USDC"}
+            options={[
+              { value: "usdc" as const, label: "USDC" },
+              { value: "cro" as const, label: "CRO" },
+            ]}
+            onChange={(cronosQuote) => set({ cronosQuote })}
+          />
+        ) : null}
         <Choice
           label="Loaded when you arm"
-          hint="25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
+          hint={
+            chain === "cronos" && local.cronosQuote === "cro"
+              ? "25, 50, or 150 dollars of CRO. Real money moves that much CRO plus fee CRO. Practice starts a book of that size."
+              : "25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
+          }
           value={local.armFundsUsd}
           options={ARM_FUNDS_USD.map((n) => ({ value: n, label: `$${n}` }))}
           onChange={(armFundsUsd) => set({ armFundsUsd, buySizeUsd: Math.min(local.buySizeUsd, armFundsUsd) })}
@@ -196,7 +217,9 @@ export function SettingsPanel({
       {chain === "cronos" ? (
         <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
           <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
-            A buy spends USDC on WolfSwap or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos.
+            {local.cronosQuote === "cro"
+              ? "A buy spends CRO on WolfSwap or cro.trade. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
+              : "A buy spends USDC on WolfSwap or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos."}
           </p>
         </Section>
       ) : (
@@ -257,7 +280,11 @@ export function SettingsPanel({
       {chain === "cronos" ? (
         <Section
           title="Where it buys"
-          hint="Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
+          hint={
+            local.cronosQuote === "cro"
+              ? "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends CRO. A sell turns the coin back into CRO."
+              : "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
+          }
         >
           <Toggle
             label="WolfSwap"

@@ -7,9 +7,11 @@ import { normalizeMultipliers } from "@/lib/trading/leverage";
 import {
   DEFAULT_ARM_FUNDS_USD,
   DEFAULT_BUY_SIZE_USD,
+  DEFAULT_CRONOS_QUOTE,
   DEFAULT_SOL_TRADE_MODE,
   normalizeArmFundsUsd,
   normalizeBuySizeUsd,
+  normalizeCronosQuote,
   normalizeMarginOnFourHour,
   resolveSolTradeMode,
 } from "@/lib/deskSettings";
@@ -38,6 +40,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   maxLiveNotionalUsd: 250,
   armFundsUsd: DEFAULT_ARM_FUNDS_USD,
   buySizeUsd: DEFAULT_BUY_SIZE_USD,
+  cronosQuote: DEFAULT_CRONOS_QUOTE,
   minSolForFees: 0.02,
   killSwitch: false,
 };
@@ -97,6 +100,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     maxLiveNotionalUsd: clampNum(src.maxLiveNotionalUsd, DEFAULT_CONFIG.maxLiveNotionalUsd, 5, 10_000),
     armFundsUsd: normalizeArmFundsUsd(src.armFundsUsd),
     buySizeUsd: normalizeBuySizeUsd(src.buySizeUsd, normalizeArmFundsUsd(src.armFundsUsd)),
+    cronosQuote: normalizeCronosQuote(src.cronosQuote),
     minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
     killSwitch: asBool(src.killSwitch, false),
     strategyRev: clampNum(input?.strategyRev, 0, 0, 99, true),

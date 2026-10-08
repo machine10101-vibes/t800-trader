@@ -76,7 +76,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     walletBook: "CRO + USDC",
     swapHint: "WolfSwap and cro.trade",
     connectBlurb:
-      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the better one is sent. About 3 CRO on Cronos EVM is enough to arm.",
+      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. Settings picks USDC or CRO for each buy. WolfSwap and cro.trade are both quoted, and the better one is sent. About 3 CRO on Cronos EVM is enough to arm.",
     connectFallback: "Connect Cronos wallet",
     installHint: "Install the Crypto.com Onchain extension, then reload this page.",
     armBlurb:
@@ -98,7 +98,8 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     explorerName: "Cronoscan",
     settingsWallet:
       "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap and cro.trade and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
-    settingsMultiplier: "Every Cronos ticket is a normal buy and a normal sell. Extra size is not used.",
+    settingsMultiplier:
+      "Pick USDC or CRO in Trading money. A buy spends that coin on WolfSwap or cro.trade, and a sell returns the same coin. CRO itself is skipped when the desk spends CRO. Extra size is not used.",
     settingsFive: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsTen: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live CRO and USDC mark.",

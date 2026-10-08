@@ -169,5 +169,6 @@ export function orderForPosition(pos: Position, kind: "close" | "scale", venues?
     leverage: lev > 1 ? lev : undefined,
     collateralUsd: pos.collateralUsd,
     positionPubkey: pos.positionPubkey,
+    cronosQuote: pos.cronosQuote,
   };
 }

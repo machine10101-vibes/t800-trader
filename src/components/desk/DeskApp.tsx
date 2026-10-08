@@ -1141,7 +1141,7 @@ function LiveConfirmModal({
         <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
           {chain === "cronos"
-            ? "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus CRO fees. The bot only buys and sells."
+            ? "PAPER stays the default. LIVE spends real USDC or CRO from the trading key after you arm, whichever you pick in Settings. You can lose that money plus CRO fees. The bot only buys and sells."
             : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. The bot only buys and sells. A reload locks LIVE until you type LIVE again."}
         </p>
         <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">

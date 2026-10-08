@@ -6,6 +6,7 @@ import {
   nextSettingsDraft,
   normalizeArmFundsUsd,
   normalizeBuySizeUsd,
+  normalizeCronosQuote,
   normalizeMarginOnFourHour,
   resolveSolTradeMode,
   usdcToLoad,
@@ -36,6 +37,17 @@ describe("sol trade mode", () => {
     assert.deepEqual(multipliersForMode("spot", []), []);
     assert.deepEqual(multipliersForMode("margin", []), [5, 10]);
     assert.deepEqual(multipliersForMode("both", [10]), [10]);
+  });
+});
+
+describe("cronos quote", () => {
+  it("keeps USDC unless the book saved CRO", () => {
+    assert.equal(normalizeCronosQuote(undefined), "usdc");
+    assert.equal(normalizeCronosQuote("cro"), "cro");
+    assert.equal(normalizeCronosQuote("usdc"), "usdc");
+    assert.equal(normalizeCronosQuote("sol"), "usdc");
+    assert.equal(normalizeConfig({ cronosQuote: "cro" }).cronosQuote, "cro");
+    assert.equal(normalizeConfig({}).cronosQuote, "usdc");
   });
 });
 

@@ -218,6 +218,8 @@ export interface Position {
   collateralUsd?: number;
   /** Jupiter perp position account, required to close a 5x or 10x ticket. */
   positionPubkey?: string;
+  /** Cronos quote used to open this ticket. A later Settings change does not flip the sell. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface Trade {
@@ -307,6 +309,11 @@ export interface BotConfig {
   armFundsUsd: number;
   /** Dollars one buy spends. Capped by the armed bankroll. */
   buySizeUsd: number;
+  /**
+   * Cronos only. USDC buys with the stablecoin and sells back to USDC.
+   * CRO buys with wrapped CRO and sells back to CRO. Solana ignores this.
+   */
+  cronosQuote: "usdc" | "cro";
   /** Minimum native SOL before a LIVE buy is allowed. */
   minSolForFees: number;
   /** When on, new LIVE tickets are refused. Open signed tickets can still close. */
@@ -327,6 +334,8 @@ export interface ChainOrder {
   leverage?: number;
   collateralUsd?: number;
   positionPubkey?: string;
+  /** Cronos quote this ticket spends and returns. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface ChainFill {
@@ -337,6 +346,8 @@ export interface ChainFill {
   leverage?: number;
   collateralUsd?: number;
   positionPubkey?: string;
+  /** Cronos quote this fill spent or returned. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;

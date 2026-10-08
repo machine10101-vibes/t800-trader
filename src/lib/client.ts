@@ -82,7 +82,11 @@ async function cronosLive(session: DeskSession | null | undefined) {
     executor: cronos ? cronosExecutor(cronos) : undefined,
     maker: null as ReturnType<typeof makerDesk> | null,
     budget: () => cronosBudget(cronos),
-    authorize: (armFundsUsd?: number) => authorizeCronos(cronos as CronosSession, armFundsUsd ?? 50),
+    authorize: (armFundsUsd?: number, cronosQuote?: "usdc" | "cro") =>
+      authorizeCronos(cronos as CronosSession, armFundsUsd ?? 50, {
+        cronosQuote,
+        croPriceUsd: cronos?.solPriceUsd ?? 0,
+      }),
     confirmDisarm: () => confirmCronosDisarm(cronos as CronosSession),
     reclaim: (keep: number) => reclaimCronos(cronos?.address ?? "", keep),
     read: (address: string) => import("@/lib/cronos/wallet").then((mod) => mod.readCronosBalances(address)),
@@ -186,7 +190,7 @@ export async function controlBot(
   let auth: ArmAuth | null = null;
   if (action === "start" && session) {
     const state = await loadState(chain);
-    if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd);
+    if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd, state.config.cronosQuote);
     else if (state.config.walletSwaps) auth = await authorizeTrading(solana as WalletSession, state.config.armFundsUsd);
   }
 

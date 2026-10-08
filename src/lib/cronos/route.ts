@@ -64,9 +64,28 @@ export function afterFee(amount: bigint, feeBps: number): bigint {
   return (amount * BigInt(10_000 - bps)) / 10_000n;
 }
 
-/** USDC to the token, or the token back to USDC. CRO is WCRO. Memes hop through WCRO. */
-export function cronosSwapPath(token: `0x${string}`, side: "buy" | "sell"): `0x${string}`[] {
-  const cro = token.toLowerCase() === WCRO.toLowerCase();
+export function isCronosNativeToken(token: string): boolean {
+  return token.toLowerCase() === WCRO.toLowerCase();
+}
+
+export function cronosQuoteDecimals(quote: "usdc" | "cro" = "usdc"): number {
+  return quote === "cro" ? 18 : 6;
+}
+
+/**
+ * USDC to the token, or the token back to USDC. CRO is WCRO. Memes hop through WCRO.
+ * When the quote is CRO, a meme is WCRO in and WCRO out. CRO itself has no path.
+ */
+export function cronosSwapPath(
+  token: `0x${string}`,
+  side: "buy" | "sell",
+  quote: "usdc" | "cro" = "usdc",
+): `0x${string}`[] {
+  const cro = isCronosNativeToken(token);
+  if (quote === "cro") {
+    if (cro) throw new Error("This desk spends CRO, so it cannot buy or sell CRO.");
+    return side === "buy" ? [WCRO, token] : [token, WCRO];
+  }
   if (side === "buy") return cro ? [USDC, WCRO] : [USDC, WCRO, token];
   return cro ? [WCRO, USDC] : [token, WCRO, USDC];
 }
@@ -159,8 +178,9 @@ export async function quoteCronos(input: {
   token: `0x${string}`;
   amountIn: bigint;
   side: "buy" | "sell";
+  quote?: "usdc" | "cro";
 }): Promise<CronosRoute> {
-  const path = cronosSwapPath(input.token, input.side);
+  const path = cronosSwapPath(input.token, input.side, input.quote === "cro" ? "cro" : "usdc");
   const src = path[0];
   const dst = path[path.length - 1];
   if (!src || !dst) throw new Error("This ticket has no Cronos path");

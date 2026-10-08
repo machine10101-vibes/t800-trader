@@ -133,6 +133,8 @@ describe("multipliers", () => {
     assert.equal(solShort.notionalUsd, 100);
     assert.equal(solShort.leverage, 10);
     assert.equal(solShort.positionPubkey, "pos");
+    const croClose = orderForPosition(ticket({ cronosQuote: "cro", qty: 10, markPrice: 0.02 }), "close");
+    assert.equal(croClose.cronosQuote, "cro");
     const bag = orderForPosition(ticket({ qty: 5000, markPrice: 0.002, leverage: 5 }), "close");
     assert.equal(bag.qty, 1000);
     assert.ok(Math.abs(bag.notionalUsd - 2) < 1e-9);

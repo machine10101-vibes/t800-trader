@@ -57,6 +57,21 @@ describe("cronos arm", () => {
     assert.throws(() => planCronosArm(100, 10, 0, 0, { armFundsUsd: 50 }), /\$50 USDC/);
   });
 
+  it("loads CRO instead of USDC when the quote is CRO", () => {
+    const plan = planCronosArm(600, 0, 0, 0, { armFundsUsd: 50, cronosQuote: "cro", croPriceUsd: 0.1 });
+    assert.equal(plan.usdcToBot, 0);
+    assert.ok(plan.croToBot > 500);
+    assert.ok(plan.croToBot <= 501);
+  });
+
+  it("refuses a thin CRO wallet when the quote is CRO", () => {
+    assert.throws(
+      () => planCronosArm(20, 80, 0, 0, { armFundsUsd: 50, cronosQuote: "cro", croPriceUsd: 0.1 }),
+      /\$50 of CRO/,
+    );
+    assert.throws(() => planCronosArm(600, 0, 0, 0, { armFundsUsd: 50, cronosQuote: "cro" }), /Need a CRO price/);
+  });
+
   it("refuses a wallet that cannot pay Cronos gas", () => {
     assert.throws(() => planCronosArm(0.4, 0), /This Cronos EVM account has 0.400 CRO/);
     assert.throws(() => planCronosArm(0, 0), /Need about 3 CRO on Cronos EVM/);
