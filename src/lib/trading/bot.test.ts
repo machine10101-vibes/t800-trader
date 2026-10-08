@@ -58,6 +58,21 @@ describe("bot control", () => {
     assert.equal(flat.bot.running, false);
   });
 
+  it("takes 10% of Solana flatten winners and leaves a Cronos flatten whole", () => {
+    let state = emptyState({ ...config, startingEquity: 1_000 });
+    state = openPosition(state, signal({ mint: "mint-a", symbol: "AAA", price: 100 }), 1);
+    state = {
+      ...state,
+      positions: state.positions.map((pos) => ({ ...pos, markPrice: pos.entryPrice * 1.4 })),
+    };
+    const sol = applyControl(state, "flatten", "solana");
+    const cro = applyControl(state, "flatten", "cronos");
+    assert.equal(sol.positions.length, 0);
+    assert.match(sol.trades[0]!.note, /Shared \$/);
+    assert.ok(!cro.trades[0]!.note.includes("Shared $"));
+    assert.ok(sol.portfolio.cashUsd < cro.portfolio.cashUsd);
+  });
+
   it("kill switch flips the desk back to paper and stops the bot", () => {
     const started = applyControl(emptyState({ ...config, startingEquity: 1_000, executionMode: "live" }), "start");
     const killed = applyControl(started, "kill");

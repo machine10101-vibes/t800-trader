@@ -115,6 +115,9 @@ export function planRules(
   } else {
     rules.push("Every Solana ticket is a Jupiter spot swap. Extra size is off.");
   }
+  if (chain === "solana") {
+    rules.push("Every profitable Solana close automatically sends 10% of the gain to the profit address.");
+  }
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
   return rules;
 }

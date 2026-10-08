@@ -77,6 +77,7 @@ describe("home", () => {
     assert.ok(rules.some((r) => /Arms with \$50/.test(r) && /\$10 on each buy/.test(r)));
     assert.ok(!rules.some((r) => r.includes("loses faster")));
     assert.ok(rules.some((r) => r.includes("Jupiter spot swap")));
+    assert.ok(rules.some((r) => r.includes("10%") && r.includes("profit address")));
     assert.ok(planRules({ ...solanaDefaults(), solTradeMode: "both", multipliers: [5] }).some((r) => r.includes("5x")));
     assert.ok(
       planRules({ ...solanaDefaults(), solTradeMode: "margin", marginOnFourHour: true }).some((r) =>
@@ -84,7 +85,7 @@ describe("home", () => {
       ),
     );
     const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");
-    assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x")));
+    assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x") && !r.includes("profit address")));
     assert.ok(cronos.some((r) => r.includes("spends USDC") && r.includes("sells back to USDC")));
     assert.ok(
       planRules({ ...solanaDefaults(), cronosQuote: "cro" }, "cronos").some((r) =>

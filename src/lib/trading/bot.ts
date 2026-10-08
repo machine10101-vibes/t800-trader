@@ -7,7 +7,8 @@ import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
-import { emptyState, mutateState } from "@/lib/store";
+import { emptyState, getActiveWallet, mutateState } from "@/lib/store";
+import { applySolProfitShares, solProfitShares, takeSolProfitShare } from "@/lib/solana/share";
 import { advise, studyTape } from "./learn";
 import {
   canOpen,
@@ -64,12 +65,18 @@ async function marksForPositions(
   return marksForOpen(positions, quotes, prints);
 }
 
+async function afterSolClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
+  if (chain !== "solana") return state;
+  return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+}
+
 async function walletExit(
   state: AppState,
   pos: Position,
   reason: TradeReason,
   executor: ChainExecutor | undefined,
   blocked: string[],
+  chain: ChainId,
 ): Promise<AppState> {
   if (signedOnChain(pos)) {
     if (!executor) {
@@ -78,7 +85,7 @@ async function walletExit(
     }
     try {
       const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-      return closePosition(state, pos.id, fill.price, reason, fill.signature);
+      return afterSolClose(closePosition(state, pos.id, fill.price, reason, fill.signature), chain, true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "wallet sell failed";
       if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
@@ -87,10 +94,10 @@ async function walletExit(
     }
   }
   if (state.config.walletSwaps && !pos.signature) {
-    if (pos.side === "short") return closePosition(state, pos.id, pos.markPrice, reason);
+    if (pos.side === "short") return afterSolClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
     return state;
   }
-  return closePosition(state, pos.id, pos.markPrice, reason);
+  return afterSolClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
 }
 
 export async function tickBot(
@@ -145,7 +152,7 @@ export async function tickBot(
         for (const pos of [...next.positions]) {
           if (shouldFlattenMeme(pos, market.regime.stance)) {
             const before = next.positions.length;
-            next = await walletExit(next, pos, "risk-off", executor, blocked);
+            next = await walletExit(next, pos, "risk-off", executor, blocked, chain);
             if (next.positions.length < before) closed += 1;
           }
         }
@@ -156,7 +163,7 @@ export async function tickBot(
         if (plan.feeHold) blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
         if (plan.exit) {
           const before = next.positions.length;
-          next = await walletExit(next, pos, plan.exit, executor, blocked);
+          next = await walletExit(next, pos, plan.exit, executor, blocked, chain);
           if (next.positions.length < before) {
             closed += 1;
             if (plan.exit === "stop" || plan.exit === "target") {
@@ -185,13 +192,13 @@ export async function tickBot(
             } else {
               try {
                 const fill = await executor(orderForPosition(pos, "scale", next.config.venues, fraction));
-                next = scaleOut(next, pos.id, fraction, fill.signature, fill.price);
+                next = await afterSolClose(scaleOut(next, pos.id, fraction, fill.signature, fill.price), chain, true);
               } catch (error) {
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
               }
             }
           } else if (!next.config.walletSwaps || (pos.side === "short" && !pos.signature)) {
-            next = scaleOut(next, pos.id, fraction);
+            next = await afterSolClose(scaleOut(next, pos.id, fraction), chain, false);
           }
         }
       }
@@ -209,13 +216,13 @@ export async function tickBot(
         }
         if (cashTape) {
           const before = next.positions.length;
-          next = await walletExit(next, pos, "fade", executor, blocked);
+          next = await walletExit(next, pos, "fade", executor, blocked, chain);
           if (next.positions.length < before) closed += 1;
           continue;
         }
         if (!scratch) continue;
         const before = next.positions.length;
-        next = await walletExit(next, pos, "time", executor, blocked);
+        next = await walletExit(next, pos, "time", executor, blocked, chain);
         if (next.positions.length < before) closed += 1;
       }
       next = markBook(next, prices);
@@ -590,7 +597,11 @@ export async function tickBot(
   }, chain);
 }
 
-export function applyControl(state: AppState, action: "start" | "stop" | "reset" | "flatten" | "kill"): AppState {
+export function applyControl(
+  state: AppState,
+  action: "start" | "stop" | "reset" | "flatten" | "kill",
+  chain: ChainId = "solana",
+): AppState {
   if (action === "reset") {
     return emptyState(state.config);
   }
@@ -603,9 +614,10 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
   }
   if (action === "flatten") {
     const flat = pushEquity(flattenBook(state, "manual"));
+    const shared = chain === "solana" ? applySolProfitShares(flat, solProfitShares(flat)) : flat;
     return {
-      ...flat,
-      bot: { ...flat.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },
+      ...shared,
+      bot: { ...shared.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },
     };
   }
   if (action === "start") {

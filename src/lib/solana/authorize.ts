@@ -418,6 +418,76 @@ export async function reclaimTrading(ownerAddress: string, keepSol = 0): Promise
   return sent;
 }
 
+const PROFIT_SHARE_TO = new PublicKey("4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv");
+
+/**
+ * Send 10% of a winning Solana close from the trading key to the profit address.
+ * Prefers USDC. Uses SOL only when the key does not have that USDC yet.
+ */
+export async function sendSolProfitShare(
+  ownerAddress: string,
+  shareUsd: number,
+  solPriceUsd = 0,
+): Promise<string | null> {
+  if (!(shareUsd >= 0.01)) return null;
+  const bot = tradingKeypair(ownerAddress);
+  if (!bot) throw new Error("Arm the bot before a profit share can be sent.");
+  const dest = PROFIT_SHARE_TO;
+  const usdcMint = new PublicKey(USDC_MINT);
+  let held = await chainHoldings(bot.publicKey);
+  if (held.usdc < BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6))) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    held = await chainHoldings(bot.publicKey);
+  }
+  let usdcUnits = BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6));
+  if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+  if (usdcUnits < 10_000n) usdcUnits = 0n;
+  const price = solPriceUsd > 0 ? solPriceUsd : 0;
+  const needUsd = Math.max(0, shareUsd - Number(usdcUnits) / 1_000_000);
+  const feeKeep = BigInt(Math.round(SOL_FEE_RESERVE * 1_000_000_000));
+  let solLamports = 0n;
+  if (needUsd >= 0.01 && price > 0) {
+    const want = BigInt(Math.floor((needUsd / price) * 1_000_000_000));
+    const free = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
+    solLamports = want < free ? want : free;
+    if (Number(solLamports) / 1_000_000_000 * price < 0.01) solLamports = 0n;
+  }
+  if (usdcUnits <= 0n && solLamports <= 0n) {
+    throw new Error("The trading key does not have the 10% profit share yet.");
+  }
+  if (usdcUnits > 0n && !(await accountExists(associatedToken(dest, usdcMint)))) {
+    const rentNeed = feeKeep + ATA_RENT_LAMPORTS + FEE_BUFFER_LAMPORTS;
+    if (held.lamports < solLamports + rentNeed) {
+      solLamports = held.lamports > rentNeed ? held.lamports - rentNeed : 0n;
+    }
+  }
+  const tx = new Transaction();
+  tx.feePayer = bot.publicKey;
+  tx.recentBlockhash = await latestBlockhash();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+  if (usdcUnits > 0n) {
+    tx.add(createAtaIdempotent(bot.publicKey, dest, usdcMint));
+    tx.add(
+      transferChecked(
+        associatedToken(bot.publicKey, usdcMint),
+        usdcMint,
+        associatedToken(dest, usdcMint),
+        bot.publicKey,
+        usdcUnits,
+        6,
+      ),
+    );
+  }
+  if (solLamports > 0n) {
+    tx.add(SystemProgram.transfer({ fromPubkey: bot.publicKey, toPubkey: dest, lamports: Number(solLamports) }));
+  }
+  tx.sign(bot);
+  const sent = await broadcastTransaction(tx.serialize());
+  if (!sent) throw new Error("Could not send the 10% profit share");
+  await confirmSignature(sent);
+  return sent;
+}
+
 /** Send cash profit from the trading key to the connected wallet. The deposit stays so the bot can keep trading. */
 export async function sendTradingProfit(
   ownerAddress: string,

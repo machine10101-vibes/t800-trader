@@ -21,7 +21,8 @@ import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState
 import { applyControl, tickBot } from "@/lib/trading/bot";
 import { applyHandClose, isAlreadyFlat } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
-import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
+import { takeSolProfitShare } from "@/lib/solana/share";
+import type { AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd };
@@ -36,6 +37,11 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
   return solanaTradingSnapshot(owner);
 }
 
+async function afterSolClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
+  if (chain !== "solana") return state;
+  return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+}
+
 async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const state = await loadState(chain);
@@ -46,7 +52,7 @@ async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Pro
       if (!still || !signedOnChain(still)) return current;
       try {
         const fill = await executor(orderForPosition(still, "close", current.config.venues));
-        return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
+        return afterSolClose(pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature)), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (!isAlreadyFlat(message)) throw error;
@@ -197,7 +203,7 @@ export async function controlBot(
   await mutateState((state) => {
     const unsold = state.config.walletSwaps && state.positions.some((p) => signedOnChain(p));
     if ((action === "flatten" || action === "reset") && unsold) return state;
-    const controlled = applyControl(state, action);
+    const controlled = applyControl(state, action, chain);
     const next =
       chain === "cronos" && action === "start" && auth
         ? {
@@ -307,14 +313,14 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
         const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-        return applyHandClose(state, pos.id, fill.price, fill.signature);
+        return afterSolClose(applyHandClose(state, pos.id, fill.price, fill.signature), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Close failed";
         if (!isAlreadyFlat(message)) throw error;
         return applyHandClose(state, pos.id, pos.markPrice, undefined, `Closed ${pos.symbol} — the trading key was already flat`);
       }
     }
-    return applyHandClose(state, pos.id, pos.markPrice);
+    return afterSolClose(applyHandClose(state, pos.id, pos.markPrice), chain, false);
   }, chain);
   try {
     return await buildDesk(false, chain);
