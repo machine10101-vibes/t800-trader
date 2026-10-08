@@ -47,7 +47,7 @@ describe("live preflight", () => {
     assert.equal(preflightLiveSwap({ ...base, executionMode: "paper" }), "Not in LIVE mode");
     assert.match(preflightLiveSwap({ ...base, killSwitch: true }) ?? "", /Kill switch/);
     assert.match(preflightLiveSwap({ ...base, sessionArmed: false }) ?? "", /Re-confirm LIVE/);
-    assert.match(preflightLiveSwap({ ...base, signalSide: "short" }) ?? "", /perps/);
+    assert.match(preflightLiveSwap({ ...base, signalSide: "short" }) ?? "", /buys and sells/);
     assert.match(preflightLiveSwap({ ...base, sol: 0.001 }) ?? "", /SOL for fees/);
     assert.match(preflightLiveSwap({ ...base, notionalUsd: 80 }) ?? "", /exceeds live max/);
     assert.match(preflightLiveSwap({ ...base, usdc: 10 }) ?? "", /Need 25.00 USDC/);

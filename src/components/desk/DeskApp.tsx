@@ -1,11 +1,11 @@
 "use client";
 
-import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
+import { ALL_TA_LAYERS, AnalysisChart, CandleChart, EquityPath, ScatterTape, TaNotes, VolumeBars, type ChartLayers, type ChartTrade, type TaLayers } from "@/components/desk/charts";
 import { ExecutionLog } from "@/components/desk/executions";
 import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { CHAIN_COPY, tapeLabel, txUrl, type ChainId } from "@/lib/chain";
+import { CHAIN_COPY, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
 import {
   adoptLiveEquity,
   armButton,
@@ -25,12 +25,19 @@ import {
   withdrawTradingProfit,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
-import { listLocalBooks } from "@/lib/store";
+import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
+import { startDeskKeepalive } from "@/lib/deskKeepalive";
+import { getActiveWallet, listLocalBooks, loadState, readLastWallet, resumeSavedBook, saveState } from "@/lib/store";
+import { nextTickWaitMs } from "@/lib/trading/runtime";
 import { parseWalletAddress } from "@/lib/monitor";
-import { cachedDecisionChart, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
+import { cachedFrameChart, prefetchFrameCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
+import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
+import { frameBias, type Bias } from "@/lib/market/analysis";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
+import { croHoldings, formatCro, formatCroEvm } from "@/lib/cronos/balance";
+import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
@@ -44,14 +51,6 @@ import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 type Tab = "home" | "overview" | "radar" | "bot" | "book" | "risk";
 
 const NAV: { id: Tab; label: string; kicker: string }[] = [
-  { id: "overview", label: "Overview", kicker: "01" },
-  { id: "radar", label: "Radar", kicker: "02" },
-  { id: "bot", label: "Bot", kicker: "03" },
-  { id: "book", label: "Book", kicker: "04" },
-  { id: "risk", label: "Options", kicker: "05" },
-];
-
-const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "home", label: "Home", kicker: "01" },
   { id: "overview", label: "Charts", kicker: "02" },
   { id: "radar", label: "Coins", kicker: "03" },
@@ -60,19 +59,40 @@ const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "risk", label: "Settings", kicker: "06" },
 ];
 
-function navFor(chain: ChainId) {
-  return chain === "solana" ? SOLANA_NAV : NAV;
+function navFor() {
+  return NAV;
+}
+
+function previewDeskSession(chain: ChainId, address: string, equityUsd: number): DeskSession {
+  const base = { address, sol: 0, usdc: 0, solPriceUsd: null as number | null, equityUsd };
+  if (chain === "cronos") {
+    return { ...base, wcro: 0, posCro: 0, provider: { request: async () => [] } };
+  }
+  return {
+    ...base,
+    provider: {
+      connect: async () => ({ publicKey: { toBase58: () => address } }),
+    },
+  };
 }
 
 export function DeskApp() {
   const [view, setView] = useState<ChainId>("solana");
+  const [chainReady, setChainReady] = useState(false);
   const [running, setRunning] = useState<Record<ChainId, boolean>>({ solana: false, cronos: false });
   const markRunning = useCallback((chain: ChainId, next: boolean) => {
     setRunning((cur) => (cur[chain] === next ? cur : { ...cur, [chain]: next }));
   }, []);
   useEffect(() => {
+    setView(readDeskChain());
+    setChainReady(true);
+  }, []);
+  useEffect(() => {
+    if (!chainReady) return;
     document.documentElement.dataset.desk = view;
-  }, [view]);
+    writeDeskChain(view);
+  }, [chainReady, view]);
+  if (!chainReady) return null;
   return (
     <>
       <div hidden={view !== "solana"}>
@@ -111,7 +131,7 @@ function ChainDesk({
   onSwitch: (next: ChainId) => void;
 }) {
   const copy = CHAIN_COPY[chain];
-  const [tab, setTab] = useState<Tab>(chain === "solana" ? "home" : "overview");
+  const [tab, setTab] = useState<Tab>("home");
   const [wallet, setWallet] = useState<DeskSession | null>(null);
   const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -136,14 +156,29 @@ function ChainDesk({
   const [watchDraft, setWatchDraft] = useState("");
   const [watchError, setWatchError] = useState<string | null>(null);
   const [knownBooks, setKnownBooks] = useState<string[]>([]);
+  const [savedAddress, setSavedAddress] = useState<string | null>(null);
   const [liveConfirm, setLiveConfirm] = useState(false);
   const [armAfterLive, setArmAfterLive] = useState(false);
   const [pendingLiveConfig, setPendingLiveConfig] = useState<Partial<BotConfig> | null>(null);
+  const [runnerHost, setRunnerHost] = useState(false);
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const busyRef = useRef(false);
   const controlGen = useRef(0);
+  const runnerHostRef = useRef(false);
+  runnerHostRef.current = runnerHost;
+
+  const publishRunner = useCallback(async () => {
+    if (!runnerHostRef.current) return;
+    const address = walletRef.current?.address ?? getActiveWallet(chain);
+    if (!address) return;
+    try {
+      await publishDeskBook(chain, address, await loadState(chain));
+    } catch {
+      // The next poll retries. Arming in this tab still saved the book locally.
+    }
+  }, [chain]);
 
   const openWatch = useCallback((raw: string) => {
     const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
@@ -194,6 +229,7 @@ function ChainDesk({
       const session = await connectDesk(chain, trusted);
       const book = await attachWallet(session.address, session.equityUsd, chain);
       applyDesk(shellDesk(book));
+      setSavedAddress(session.address);
       setWallet(session);
       setBooting(false);
       try {
@@ -224,6 +260,7 @@ function ChainDesk({
     await disconnectDesk(chain, wallet);
     detachWallet(chain);
     setWallet(null);
+    setSavedAddress(null);
     setTrading(null);
     setDesk(null);
     setThesis(null);
@@ -245,7 +282,32 @@ function ChainDesk({
   }, [chain, connect]);
 
   useEffect(() => {
-    if (chain !== "solana") return;
+    // Hidden Cronos still mounted. Its unpaced Gecko charts 429 the shared
+    // feed and leave Solana waiting on pool prints.
+    if (!active && chain === "cronos") return;
+    void prefetchFrameCharts(chain);
+    const id = window.setInterval(() => {
+      if (!active && chain === "cronos") return;
+      void prefetchFrameCharts(chain);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [active, chain]);
+
+  useEffect(() => {
+    const last = readLastWallet(chain);
+    setSavedAddress(last);
+    if (!last) return;
+    let cancelled = false;
+    void resumeSavedBook(chain).then((book) => {
+      if (cancelled || !book) return;
+      applyDesk(shellDesk(book));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDesk, chain]);
+
+  useEffect(() => {
     const resume = () => {
       if (walletRef.current) return;
       if (document.visibilityState === "hidden") return;
@@ -257,14 +319,14 @@ function ChainDesk({
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("pageshow", resume);
     };
-  }, [chain, connect]);
+  }, [connect]);
 
   useEffect(() => {
-    if (chain !== "solana") return;
     let cancelled = false;
     const id = window.setInterval(() => {
       if (cancelled || walletRef.current) return;
-      if (!injectedSolanaAddress()) return;
+      const ready = chain === "cronos" ? cronosWalletInstalled() : Boolean(injectedSolanaAddress());
+      if (!ready) return;
       cancelled = true;
       window.clearInterval(id);
       void connect(true);
@@ -283,6 +345,7 @@ function ChainDesk({
       onDisconnect: () => {
         detachWallet(chain);
         setWallet(null);
+        setSavedAddress(null);
         setTrading(null);
         setDesk(null);
       },
@@ -296,6 +359,7 @@ function ChainDesk({
           const session = await refreshDesk(chain, { ...wallet, address });
           const book = await attachWallet(session.address, session.equityUsd, chain);
           applyDesk(shellDesk(book));
+          setSavedAddress(session.address);
           setWallet(session);
           setBooting(false);
         })();
@@ -362,17 +426,61 @@ function ChainDesk({
   positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
-    if (!walletRef.current) return;
+    let cancel = false;
+    const check = async () => {
+      const status = await detectDeskRunner();
+      if (!cancel) setRunnerHost(Boolean(status));
+    };
+    void check();
+    const id = window.setInterval(() => {
+      void check();
+    }, 8_000);
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!runnerHost) return;
+    let cancel = false;
+    const pull = async () => {
+      const book = await pullDeskBook(chain);
+      if (cancel || !book?.state) return;
+      try {
+        await attachWallet(book.wallet, Math.max(0, book.state.portfolio.equityUsd), chain);
+        await saveState(book.state, chain);
+        if (!busyRef.current) applyDesk(shellDesk(book.state), { keepError: true });
+      } catch {
+        // The runner keeps the book. The next poll retries.
+      }
+    };
+    void pull();
+    const id = window.setInterval(() => {
+      void pull();
+    }, 4_000);
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, [applyDesk, chain, runnerHost]);
+
+  useEffect(() => {
+    if (runnerHost) return;
+    if (!active && !desk?.bot.running) return;
+    if (!walletRef.current && !getActiveWallet(chain)) return;
     let cancel = false;
     let inflight = false;
     let timer = 0;
     const run = async () => {
-      const current = walletRef.current;
-      if (!current || cancel || inflight || busyRef.current) return false;
+      if (cancel || inflight || busyRef.current) return false;
+      if (!walletRef.current && !getActiveWallet(chain)) return false;
       inflight = true;
       const gen = controlGen.current;
       try {
-        const next = await controlBot("tick", current, chain);
+        // A saved book can tick before Phantom/Onchain returns. LIVE swaps
+        // wait for the session; the scan still updates lastTickAt.
+        const next = await controlBot("tick", walletRef.current, chain);
         // A start or stop click while this tick was in flight wins. Applying the
         // older book here would flip the button back.
         if (!cancel && !busyRef.current && gen === controlGen.current) applyDesk(next, { keepError: true });
@@ -384,10 +492,6 @@ function ChainDesk({
         inflight = false;
       }
     };
-    const delayMs = () => {
-      const configured = Math.max(4, scanSecondsRef.current) * 1000;
-      return positionOpenRef.current ? Math.min(configured, 4_000) : configured;
-    };
     const arm = (delay: number) => {
       timer = window.setTimeout(() => {
         void (async () => {
@@ -395,16 +499,26 @@ function ChainDesk({
           const started = Date.now();
           if (!busyRef.current) await run();
           if (cancel) return;
-          arm(Math.max(1_000, delayMs() - (Date.now() - started)));
+          arm(
+            nextTickWaitMs({
+              scanSeconds: scanSecondsRef.current,
+              openLivePosition: positionOpenRef.current,
+              usedMs: Date.now() - started,
+            }),
+          );
         })();
       }, delay);
     };
-    arm(300);
+    arm(active ? 300 : 1_200);
+    const stopKeep = startDeskKeepalive(() => {
+      if (!cancel && !busyRef.current) void run();
+    });
     return () => {
       cancel = true;
       window.clearTimeout(timer);
+      stopKeep();
     };
-  }, [applyDesk, chain, wallet?.address]);
+  }, [active, applyDesk, chain, desk?.bot.running, runnerHost, wallet?.address]);
 
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;
@@ -421,8 +535,8 @@ function ChainDesk({
         return;
       }
       if (isDeskShortcutTarget(e.target)) return;
-      if (e.key >= "1" && e.key <= String(navFor(chain).length)) {
-        const next = navFor(chain)[Number(e.key) - 1];
+      if (e.key >= "1" && e.key <= String(navFor().length)) {
+        const next = navFor()[Number(e.key) - 1];
         if (next) {
           setTab(next.id);
           setThesis(null);
@@ -493,9 +607,11 @@ function ChainDesk({
                 running: true,
                 lastError: null,
                 lastNote:
-                  cur.config.walletSwaps || isLiveSessionArmed()
-                    ? "Armed — approve the wallet if it asks."
-                    : "Armed — first tick incoming",
+                  chain === "cronos"
+                    ? "Approve the wallet signature to arm."
+                    : cur.config.walletSwaps || isLiveSessionArmed()
+                      ? "Armed — approve the wallet if it asks."
+                      : "Armed — first tick incoming",
               },
             }
           : cur,
@@ -505,7 +621,7 @@ function ChainDesk({
       if (action === "start" || action === "reset") {
         const session = await refreshDesk(chain, wallet);
         setWallet(session);
-        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD) {
+        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD && chain !== "cronos") {
           const funded = await tradingSnapshot(session.address, chain);
           if (!funded || funded.equityUsd < MIN_TRADE_USD) {
             const message = `Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`;
@@ -532,12 +648,17 @@ function ChainDesk({
     } catch (e) {
       const message = e instanceof Error ? e.message : "Control failed";
       setError(message);
-      if (action === "start") {
-        setDesk((cur) => (cur ? { ...cur, bot: { ...cur.bot, running: false, lastNote: message } } : cur));
+      if (action === "start" || action === "stop") {
+        setDesk((cur) =>
+          cur
+            ? { ...cur, bot: { ...cur.bot, running: action === "stop" ? true : false, lastNote: message } }
+            : cur,
+        );
       }
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -561,6 +682,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -583,6 +705,7 @@ function ChainDesk({
         setError(e instanceof Error ? e.message : "Config failed");
       } finally {
         setBusy(false);
+        void publishRunner();
       }
       return;
     }
@@ -593,6 +716,7 @@ function ChainDesk({
       setError(e instanceof Error ? e.message : "Config failed");
     } finally {
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -627,6 +751,7 @@ function ChainDesk({
       setError(e instanceof Error ? e.message : "Could not arm LIVE");
     } finally {
       setBusy(false);
+      void publishRunner();
     }
   };
 
@@ -646,6 +771,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setClosingId(null);
+      void publishRunner();
     }
   };
 
@@ -663,6 +789,7 @@ function ChainDesk({
     } finally {
       busyRef.current = false;
       setCancelling(false);
+      void publishRunner();
     }
   };
 
@@ -679,10 +806,27 @@ function ChainDesk({
 
   const detail = desk?.positions.find((position) => position.id === detailId) ?? null;
   const nativeRow = desk?.research.find((r) => r.ticker === copy.native);
-  const solPx = (chain === "solana" ? desk?.regime.sol.price : 0) || nativeRow?.price || wallet?.solPriceUsd || 0;
-  const solChg = chain === "solana" && desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
+  const solPx = desk?.regime.sol.price || nativeRow?.price || wallet?.solPriceUsd || 0;
+  const solChg = desk?.regime.sol.price ? desk.regime.sol.change24h : nativeRow?.candidate.flows.h24.priceChangePct;
+  const cronosHeld = chain === "cronos" && wallet ? croHoldings(wallet, solPx || 0) : null;
+  const cronosMark = cronosHeld?.usd ?? 0;
+  useEffect(() => {
+    if (!wallet || !desk || cronosMark < MIN_TRADE_USD) return;
+    if (desk.positions.length > 0 || desk.trades.length > 0) return;
+    if (desk.portfolio.equityUsd >= MIN_TRADE_USD) return;
+    let cancelled = false;
+    void attachWallet(wallet.address, cronosMark, chain).then(() => {
+      if (!cancelled) void refresh();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chain, cronosMark, desk, refresh, wallet]);
   const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : peerArmed;
   const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : peerArmed;
+  const shownWallet =
+    wallet ??
+    (savedAddress && desk ? previewDeskSession(chain, savedAddress, desk.portfolio.equityUsd) : null);
   const switchChain = (next: ChainId) => {
     setWatchAddress(null);
     onSwitch(next);
@@ -701,7 +845,7 @@ function ChainDesk({
     );
   }
 
-  if (!wallet) {
+  if (!shownWallet) {
     return (
       <div className="min-h-dvh overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
@@ -809,13 +953,13 @@ function ChainDesk({
     );
   }
 
-  const homeOnPhone = chain === "solana" && tab === "home";
+  const homeOnPhone = tab === "home";
 
   return (
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
         <Header
         desk={desk}
-        wallet={wallet}
+        wallet={shownWallet}
         clock={clock}
         solPx={solPx}
         solChg={solChg}
@@ -827,14 +971,14 @@ function ChainDesk({
         updatedAt={updatedAt}
         onDisconnect={() => void disconnect()}
         onRefresh={() => void refresh()}
-        onWatch={() => openWatch(wallet.address)}
+        onWatch={() => openWatch(shownWallet.address)}
         trading={trading}
       />
 
       <div className="mx-auto grid w-full min-w-0 max-w-[1500px] grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[200px_1fr]">
         <aside className="neon h-fit min-w-0 p-2 sm:p-3 lg:sticky lg:top-20">
           <div className="flex flex-wrap gap-1 lg:block">
-          {navFor(chain).map((item) => (
+          {navFor().map((item) => (
             <button
               key={item.id}
               aria-label={item.label}
@@ -891,10 +1035,22 @@ function ChainDesk({
           ) : null}
           <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
-              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
-              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC. ${
-                  desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
-                }`}
+              ? chain === "cronos"
+                ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
+                : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
+              : cronosHeld
+                ? cronosHeld.cro > 0 || cronosHeld.pos > 0 || shownWallet.usdc > 0
+                  ? cronosHeld.onPos
+                    ? `${formatCro(cronosHeld.pos)} is on Cronos POS. In the Onchain wallet, send it to Cronos EVM before Arm can move it.`
+                    : `${formatCro(cronosHeld.cro)} on Cronos EVM · ${shownWallet.usdc.toFixed(2)} USDC. Arm and disarm ask the Onchain extension to sign.`
+                  : "No CRO or USDC on this Cronos account. In the Onchain wallet, switch to Cronos EVM and choose the account that holds the CRO."
+                : !wallet
+                  ? desk?.bot.running
+                    ? "Wallet is reconnecting. The bot is still running."
+                    : "Wallet is reconnecting."
+                : `${shownWallet.sol.toFixed(3)} ${copy.native} · ${shownWallet.usdc.toFixed(2)} USDC. ${
+                    desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
+                  }`}
           </p>
           <button onClick={() => void disconnect()} className="mt-2 min-h-11 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
@@ -907,15 +1063,29 @@ function ChainDesk({
               {error}
             </div>
           ) : null}
+          {desk && !wallet ? (
+            <div className="rounded-[18px] border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm text-[var(--muted)]">
+              {desk.bot.running
+                ? "Wallet is reconnecting. The bot kept running through the refresh."
+                : "Wallet is reconnecting. Your book is still here."}
+            </div>
+          ) : null}
 
           {!desk ? (
-            <BootSkeleton address={wallet.address} />
+            <BootSkeleton address={shownWallet.address} />
           ) : (
             <div key={tab} className="tab-in">
               {tab === "home" ? (
                 <Home
                   desk={desk}
-                  balanceUsd={desk.config.walletSwaps ? trading?.equityUsd || wallet.equityUsd : desk.portfolio.equityUsd}
+                  chain={chain}
+                  balanceUsd={
+                    desk.config.walletSwaps
+                      ? trading?.equityUsd || cronosHeld?.usd || shownWallet.equityUsd
+                      : desk.positions.length === 0 && desk.trades.length === 0
+                        ? Math.max(desk.portfolio.equityUsd, cronosHeld?.usd ?? shownWallet.equityUsd)
+                        : desk.portfolio.equityUsd
+                  }
                   busy={busy}
                   closingId={closingId}
                   closeError={closeError}
@@ -924,12 +1094,13 @@ function ChainDesk({
                   onClose={(id) => void closePos(id)}
                   onOpenPosition={setDetailId}
                   onMore={() => setTab("risk")}
+                  runner={runnerHost}
                 />
               ) : null}
               {tab === "overview" ? (
                 <Overview
                   desk={desk}
-                  wallet={wallet}
+                  wallet={shownWallet}
                   trading={trading}
                   winRate={winRate}
                   focusMint={focusMint}
@@ -961,7 +1132,7 @@ function ChainDesk({
                 <Book
                   chain={chain}
                   desk={desk}
-                  wallet={wallet}
+                  wallet={shownWallet}
                   trading={trading}
                   winRate={winRate}
                   busy={busy}
@@ -981,7 +1152,7 @@ function ChainDesk({
             <div className="cmd hidden sm:block">
               {chain === "solana"
                 ? "1–6 pages · Space start or stop · R refresh · F sell everything · Esc close"
-                : "1–5 tabs · Space arm · R refresh · F flatten · Esc thesis"}
+                : "1–6 pages · Space arm · R refresh · F flatten · Esc close"}
             </div>
           ) : null}
         </main>
@@ -999,6 +1170,7 @@ function ChainDesk({
       ) : null}
       {liveConfirm ? (
         <LiveConfirmModal
+          chain={chain}
           busy={busy}
           onCancel={() => {
             setLiveConfirm(false);
@@ -1022,10 +1194,12 @@ function ChainDesk({
 }
 
 function LiveConfirmModal({
+  chain,
   busy,
   onCancel,
   onConfirm,
 }: {
+  chain: ChainId;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1036,10 +1210,11 @@ function LiveConfirmModal({
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
       <div className="neon w-full max-w-lg p-6">
-        <h2 className="text-xl font-medium">Enable LIVE Jupiter swaps</h2>
+        <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus
-          SOL fees. A SOL short is a Jupiter perpetual. Other tokens stay in practice. A reload locks LIVE until you type LIVE again.
+          {chain === "cronos"
+            ? "PAPER stays the default. LIVE spends real USDC or CRO from the trading key after you arm, whichever you pick in Settings. You can lose that money plus CRO fees. The bot only buys and sells."
+            : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. The bot only buys and sells. A reload locks LIVE until you type LIVE again."}
         </p>
         <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">
           <input type="checkbox" className="mt-1" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
@@ -1139,10 +1314,25 @@ function Header({
   onDisconnect: () => void;
   onRefresh: () => void;
   onWatch: () => void;
-  trading: { equityUsd: number } | null;
+  trading: { equityUsd: number; sol?: number } | null;
 }) {
   const armed = Boolean(desk?.bot.running);
-  const equity = usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
+  const croEvm = trading && chain === "cronos" ? (trading.sol ?? 0) : holdings?.cro ?? 0;
+  const equity = holdings ? formatCroEvm(croEvm) : usd(trading ? trading.equityUsd : wallet.equityUsd);
+  const equityNote = holdings
+    ? trading
+      ? trading.equityUsd > 0
+        ? usd(trading.equityUsd)
+        : null
+      : holdings.onPos
+        ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.`
+        : holdings.usd > 0
+          ? usd(holdings.usd)
+          : holdings.cro === 0
+            ? "No CRO on Cronos EVM"
+            : null
+    : null;
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
@@ -1179,8 +1369,12 @@ function Header({
               Watch
             </button>
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
-            <Pill tone={desk?.config.walletSwaps ? (desk.liveSessionArmed ? "mint" : "magenta") : "default"}>
-              {desk?.config.walletSwaps ? (desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
+            <Pill
+              tone={
+                desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "mint" : "magenta") : "default"
+              }
+            >
+              {desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
             </Pill>
             <Pill tone={armed ? "mint" : "default"}>
               <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
@@ -1189,6 +1383,7 @@ function Header({
             <div className="text-right">
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
               <div className="num">{equity}</div>
+              {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
             </div>
             <button onClick={onDisconnect} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Disconnect
@@ -1214,6 +1409,7 @@ function Header({
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
             <div className="num text-xs">{equity}</div>
+            {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
           </div>
           <button onClick={onRefresh} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Refresh
@@ -1258,7 +1454,8 @@ function shownFills<T extends { signature?: string }>(rows: T[], walletSwaps: bo
 }
 
 function sideText(side: string, leverage?: number): string {
-  return leverage && leverage > 1 ? `${side} ${leverage}x` : side;
+  const label = side === "short" ? "sell" : "buy";
+  return leverage && leverage > 1 ? `${label} ${leverage}x` : label;
 }
 
 function rowPnl(position: Position): number {
@@ -1333,36 +1530,111 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
   );
 }
 
-function useDecisionCharts(mints: string[], chain: ChainId): Record<string, Candle[]> {
+type FrameBars = Partial<Record<Frame, Candle[]>>;
+
+function useFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): Record<string, FrameBars> {
   const key = mints.join("|");
-  const [bars, setBars] = useState<Record<string, Candle[]>>({});
+  const extraKey = extra.join("|");
+  const [bars, setBars] = useState<Record<string, FrameBars>>({});
   useEffect(() => {
     if (!key) return;
     const ids = key.split("|").filter(Boolean);
+    const more = extraKey.split("|").filter((frame): frame is Frame => frame === "5m");
     let live = true;
     const paint = () => {
       if (!live) return;
-      requestDecisionCharts(ids, chain);
+      requestFrameCharts(ids, chain, more);
       setBars((cur) => {
         let changed = false;
         const next = { ...cur };
         for (const mint of ids) {
-          const rows = cachedDecisionChart(mint, chain);
-          if (!rows?.length || next[mint] === rows) continue;
-          next[mint] = rows;
-          changed = true;
+          for (const frame of FRAMES) {
+            const rows = cachedFrameChart(mint, chain, frame);
+            if (!rows?.length || next[mint]?.[frame] === rows) continue;
+            next[mint] = { ...next[mint], [frame]: rows };
+            changed = true;
+          }
         }
         return changed ? next : cur;
       });
     };
     paint();
-    const id = setInterval(paint, 2_000);
+    const id = setInterval(paint, 500);
     return () => {
       live = false;
       clearInterval(id);
     };
-  }, [chain, key]);
+  }, [chain, extraKey, key]);
   return bars;
+}
+
+function FrameTabs({ value, onChange, label }: { value: Frame; onChange: (frame: Frame) => void; label: string }) {
+  return (
+    <span role="tablist" aria-label={label} className="flex gap-1">
+      {FRAMES.map((frame) => (
+        <button
+          key={frame}
+          type="button"
+          role="tab"
+          aria-selected={value === frame}
+          data-on={value === frame}
+          onClick={(event) => {
+            event.stopPropagation();
+            onChange(frame);
+          }}
+          className="filter-chip num"
+        >
+          {frame}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+const BIAS_WORD: Record<Bias, string> = { up: "Up", down: "Down", range: "Range" };
+const BIAS_TONE: Record<Bias, "mint" | "crimson" | "amber"> = { up: "mint", down: "crimson", range: "amber" };
+
+/** What the bot sees on each frame for one coin: 15m finds the trade, 1h and 4h must agree. */
+function BotRead({ frames, call }: { frames: FrameBars; call: string }) {
+  const role: Record<Frame, string> = { "5m": "context", "15m": "entry", "1h": "back-check", "4h": "back-check" };
+  return (
+    <div className="mb-2 rounded-xl border border-[var(--line)] p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {FRAMES.map((frame) => {
+          const bias = frameBias(frames[frame]);
+          return (
+            <span key={frame} className="flex items-center gap-1 text-[11px]">
+              <span className="num uppercase tracking-[0.12em] text-[var(--faint)]">{frame}</span>
+              {bias ? <Pill tone={BIAS_TONE[bias]}>{BIAS_WORD[bias]}</Pill> : <Pill>loading</Pill>}
+              <span className="text-[10px] text-[var(--faint)]">{role[frame]}</span>
+            </span>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-xs leading-5 text-[var(--text)]">
+        <span className="text-[var(--faint)]">Bot: </span>
+        {call}
+      </p>
+    </div>
+  );
+}
+
+function TaToggles({ layers, onChange }: { layers: TaLayers; onChange: (next: TaLayers) => void }) {
+  const items: [keyof TaLayers, string, "magenta" | "ice" | "amber"][] = [
+    ["emas", "EMA 9/21/50", "magenta"],
+    ["vwap", "VWAP", "amber"],
+    ["levels", "Support / resistance", "ice"],
+    ["trendlines", "Trendlines", "ice"],
+    ["fib", "Fibonacci", "amber"],
+    ["swings", "Swings HH/HL", "magenta"],
+  ];
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {items.map(([id, label, tone]) => (
+        <LegendToggle key={id} on={layers[id]} tone={tone} label={label} onClick={() => onChange({ ...layers, [id]: !layers[id] })} />
+      ))}
+    </span>
+  );
 }
 
 function LegendToggle({
@@ -1420,6 +1692,10 @@ function Overview({
   busy: boolean;
 }) {
   const [layers, setLayers] = useState<ChartLayers>({ ema9: true, ema21: true, vwap: true });
+  const [taLayers, setTaLayers] = useState<TaLayers>(ALL_TA_LAYERS);
+  const [focusFrame, setFocusFrame] = useState<Frame>("4h");
+  const [chartFrame, setChartFrame] = useState<Frame>("4h");
+  const [gridFrame, setGridFrame] = useState<Frame>("15m");
   const [tapeFilter, setTapeFilter] = useState<"all" | "live" | "up" | "down">("all");
   const [noteOpen, setNoteOpen] = useState(false);
   const [chartMint, setChartMint] = useState<string | null>(null);
@@ -1427,9 +1703,9 @@ function Overview({
   const [priceDir, setPriceDir] = useState<"up" | "down" | null>(null);
   const lastPrice = useRef<number | null>(null);
   const copy = CHAIN_COPY[chain];
-  const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
+  const focus = desk.research.find((r) => sameMint(r.candidate.mint, focusMint ?? "")) ?? desk.research[0] ?? null;
   const book = bookTokens(chain);
-  const bars = useDecisionCharts(book.map((token) => token.mint), chain);
+  const bars = useFrameCharts(book.map((token) => token.mint), chain, [focusFrame, chartFrame, gridFrame]);
   const openToken = (mint: string) => {
     onFocus(mint);
     if (book.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) setChartMint(mint);
@@ -1456,10 +1732,18 @@ function Overview({
     book.find((token) => token.mint === focus?.candidate.mint || token.mint.toLowerCase() === focus?.candidate.mint.toLowerCase())?.mint ??
     focus?.candidate.mint ??
     null;
-  const focusCandles = focusMintKey ? (bars[focusMintKey] ?? []) : [];
+  const focusCandles = focusMintKey ? (bars[focusMintKey]?.[focusFrame] ?? []) : [];
   const chartToken = chartMint ? book.find((token) => token.mint === chartMint || token.mint.toLowerCase() === chartMint.toLowerCase()) : null;
-  const chartCandles = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? []) : [];
-  const chartEmpty = chain === "solana" ? "Waiting on the Jupiter 4-hour chart" : "Waiting on the 4-hour chart";
+  const chartFrames: FrameBars = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? {}) : {};
+  const chartCandles = chartFrames[chartFrame] ?? [];
+  const feed = chain === "solana" ? "Jupiter" : "GeckoTerminal";
+  const emptyFor = (frame: Frame) => `Waiting on the ${feed} ${FRAME_LABEL[frame]} chart`;
+  const chartEmpty = emptyFor(gridFrame);
+  const tradeOn = (mint: string | null | undefined): ChartTrade | null => {
+    if (!mint) return null;
+    const pos = desk.positions.find((row) => sameMint(row.mint, mint));
+    return pos ? { side: pos.side, entry: pos.entryPrice, stop: pos.stopPrice, target: pos.targetPrice } : null;
+  };
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
@@ -1479,15 +1763,22 @@ function Overview({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={chartToken ? `${tapeLabel(chartToken.symbol)} 4-hour chart` : "4-hour chart"}
-            className="neon w-full max-w-4xl p-4"
+            aria-label={chartToken ? `${tapeLabel(chartToken.symbol)} ${FRAME_LABEL[chartFrame]} chart` : "Chart"}
+            className="neon max-h-[94vh] w-full max-w-5xl overflow-y-auto p-4"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-2 flex items-start justify-between gap-3">
               <div>
                 <div className="text-lg font-medium">{chartToken ? tapeLabel(chartToken.symbol) : "Chart"}</div>
                 <p className="text-sm text-[var(--muted)]">
-                  {chain === "solana" ? "Jupiter 4-hour chart." : "4-hour chart."} The bot reads these bars before it buys or shorts.
+                  {feed} {FRAME_LABEL[chartFrame]} chart.{" "}
+                  {chartFrame === "15m"
+                    ? "The bot finds its buy setups on this chart."
+                    : chartFrame === "4h"
+                      ? "The bot's technical read is drawn on the chart. A 15-minute trade must not fight this trend."
+                      : chartFrame === "1h"
+                        ? "A 15-minute trade must not fight this trend."
+                        : "Short-term context for the 15-minute setup."}
                   {chartCandles.length ? ` ${chartCandles.length} bars.` : ""}
                 </p>
               </div>
@@ -1495,14 +1786,34 @@ function Overview({
                 Close
               </button>
             </div>
-            <div className="mb-2 flex gap-1.5">
-              <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
-              <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
-              <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+            <BotRead
+              frames={chartFrames}
+              call={chartToken ? (assetCall(chartToken.symbol, desk.signals, desk.bot.blocked ?? []) || "Waiting for the next check.") : "—"}
+            />
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <FrameTabs value={chartFrame} onChange={setChartFrame} label="Chart timeframe" />
+              {chartFrame === "4h" ? (
+                <TaToggles layers={taLayers} onChange={setTaLayers} />
+              ) : (
+                <span className="flex gap-1.5">
+                  <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+                  <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+                  <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                </span>
+              )}
             </div>
-            <div className="h-[420px]">
-              <CandleChart candles={chartCandles} layers={layers} emptyLabel={chartEmpty} />
-            </div>
+            {chartFrame === "4h" ? (
+              <>
+                <div className="h-[min(62vh,540px)]">
+                  <AnalysisChart candles={chartCandles} layers={taLayers} trade={tradeOn(chartToken?.mint)} emptyLabel={emptyFor("4h")} />
+                </div>
+                <TaNotes candles={chartCandles} />
+              </>
+            ) : (
+              <div className="h-[420px]">
+                <CandleChart candles={chartCandles} layers={layers} emptyLabel={emptyFor(chartFrame)} />
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -1510,7 +1821,7 @@ function Overview({
         <div className="grid lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)]">
           <div className="flex flex-col p-3">
               <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-                <span>{focus ? focus.ticker : "NO FINALIST"}</span>
+                <span>{focus ? focus.ticker : book[0] ? tapeLabel(book[0].symbol) : "Waiting"}</span>
                 <Pill tone="magenta">
                   <span className="pulse-dot bg-[var(--magenta)] text-[var(--magenta)]" />
                   Live
@@ -1527,17 +1838,19 @@ function Overview({
                   </span>
                 ) : null}
               </div>
-              {desk.research.length > 1 ? (
+              {book.length > 1 ? (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {desk.research.slice(0, 6).map((r) => (
+                  {book.map((token) => (
                     <button
-                      key={r.id}
-                      onClick={() => openToken(r.candidate.mint)}
+                      key={token.mint}
+                      onClick={() => openToken(token.mint)}
                       className={`rounded-full px-2 py-0.5 text-[11px] ${
-                        focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                        sameMint(token.mint, focus?.candidate.mint ?? focusMint ?? "")
+                          ? "bg-[var(--accent-soft)] text-[var(--magenta)]"
+                          : "text-[var(--faint)] hover:text-[var(--text)]"
                       }`}
                     >
-                      {r.ticker}
+                      {tapeLabel(token.symbol)}
                     </button>
                   ))}
                 </div>
@@ -1562,25 +1875,45 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="uppercase tracking-[0.16em]">
-                  {focusName ? `${tapeLabel(focusName)} 4h · open chart` : "4h chart"}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!focusMintKey) return;
+                    setChartFrame(focusFrame);
+                    openToken(focusMintKey);
+                  }}
+                  className="uppercase tracking-[0.16em]"
+                >
+                  {focusName ? `${tapeLabel(focusName)} ${focusFrame} · open chart` : `${focusFrame} chart`}
                 </button>
-                <span className="flex gap-1.5 tracking-normal normal-case">
-                  <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
-                  <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
-                  <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                <span className="flex flex-wrap gap-1.5 tracking-normal normal-case">
+                  <FrameTabs value={focusFrame} onChange={setFocusFrame} label="Main chart timeframe" />
+                  {focusFrame === "4h" ? null : (
+                    <>
+                      <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+                      <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+                      <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                    </>
+                  )}
                 </span>
               </div>
-              <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="block h-[280px] w-full text-left">
-                <CandleChart candles={focusCandles} layers={layers} emptyLabel={chartEmpty} />
-              </button>
+              <div className={`block w-full ${focusFrame === "4h" ? "h-[360px]" : "h-[280px]"}`}>
+                {focusFrame === "4h" ? (
+                  <AnalysisChart candles={focusCandles} layers={taLayers} trade={tradeOn(focusMintKey)} emptyLabel={emptyFor("4h")} />
+                ) : (
+                  <CandleChart candles={focusCandles} layers={layers} emptyLabel={emptyFor(focusFrame)} />
+                )}
+              </div>
             </div>
         </div>
       </section>
 
       <section className="neon p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-          <Label>4-hour charts</Label>
+          <span className="flex flex-wrap items-center gap-2">
+            <Label>{FRAME_LABEL[gridFrame]} charts</Label>
+            <FrameTabs value={gridFrame} onChange={setGridFrame} label="Coin chart timeframe" />
+          </span>
           <span className="text-[11px] text-[var(--faint)]">
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
           </span>
@@ -1609,7 +1942,7 @@ function Overview({
         </div>
         <div className={bookTokens(chain).length > 3 ? "tape-grid" : bookTokens(chain).length > 1 ? "grid gap-2 sm:grid-cols-2" : ""}>
           {bookTokens(chain).filter((token) => {
-            const tape = desk.tapes.find((row) => row.mint === token.mint);
+            const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
             const live = desk.signals.some((row) => row.symbol === token.symbol);
             if (tapeFilter === "live") return live;
             if (tapeFilter === "up") return (tape?.change15m ?? 0) > 0.05;
@@ -1617,13 +1950,15 @@ function Overview({
             return true;
           }).map((token) => {
             const symbol = token.symbol;
-            const tape = desk.tapes.find((row) => row.mint === token.mint);
+            const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
             const price =
               tape?.price ??
               token.priceUsd ??
-              (token.symbol === "SOL" && desk.regime.sol.price > 0 ? desk.regime.sol.price : undefined) ??
+              ((token.symbol === "SOL" || token.symbol === "CRO") && desk.regime.sol.price > 0
+                ? desk.regime.sol.price
+                : undefined) ??
               (token.symbol === "CRO" ? desk.research.find((row) => row.ticker === "CRO")?.price : undefined);
             const change5m = tape?.change5m ?? token.change5m;
             const selected = token.mint === (focus?.candidate.mint ?? focusTape?.mint);
@@ -1632,7 +1967,10 @@ function Overview({
                 key={token.mint}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => openToken(token.mint)}
+                onClick={() => {
+                  setChartFrame(gridFrame);
+                  openToken(token.mint);
+                }}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
@@ -1650,14 +1988,14 @@ function Overview({
                 </div>
                 <p className={`mb-1 line-clamp-2 px-1 text-xs leading-4 ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[112px]">
-                  <CandleChart candles={bars[token.mint] ?? []} layers={layers} emptyLabel={chartEmpty} />
+                  <CandleChart candles={bars[token.mint]?.[gridFrame] ?? []} layers={layers} emptyLabel={chartEmpty} />
                 </div>
               </button>
             );
           })}
         </div>
         {tapeFilter !== "all" && bookTokens(chain).every((token) => {
-          const tape = desk.tapes.find((row) => row.mint === token.mint);
+          const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
           const live = desk.signals.some((row) => row.symbol === token.symbol);
           if (tapeFilter === "live") return !live;
           if (tapeFilter === "up") return !((tape?.change15m ?? 0) > 0.05);
@@ -1788,46 +2126,80 @@ function Overview({
   );
 }
 
+function coinRows(desk: DeskPayload, chain: ChainId) {
+  return bookTokens(chain).map((token) => {
+    const research = desk.research.find((row) => sameMint(row.candidate.mint, token.mint));
+    const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
+    const signal = desk.signals.find((row) => row.symbol === token.symbol || sameMint(row.mint, token.mint));
+    const blocked = (desk.bot.blocked ?? []).find((line) => line.startsWith(`${token.symbol}:`));
+    const price = research?.price || tape?.price || token.priceUsd || 0;
+    return {
+      token,
+      research,
+      tape,
+      signal,
+      blocked,
+      call: assetCall(token.symbol, desk.signals, desk.bot.blocked ?? []),
+      price,
+    };
+  });
+}
+
 function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onOpen: (t: ResearchThesis) => void }) {
+  const coins = coinRows(desk, chain);
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-medium tracking-tight">Research radar</h2>
+        <h2 className="text-xl font-medium tracking-tight">Coins</h2>
         <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
       </div>
       <div className="space-y-3 md:hidden">
-        {desk.research.length === 0 ? (
-          <div className="neon p-4 text-sm text-[var(--muted)]">No live finalists this cycle.</div>
-        ) : (
-          desk.research.map((r) => (
-            <button key={r.id} type="button" onClick={() => onOpen(r)} className="radar-card neon block w-full p-4 text-left">
+        {coins.map((coin) => {
+          const r = coin.research;
+          return (
+            <button
+              key={coin.token.mint}
+              type="button"
+              onClick={() => r && onOpen(r)}
+              className="radar-card neon block w-full p-4 text-left"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{r.ticker}</div>
-                  <div className="text-[11px] text-[var(--faint)]">{r.asset} · {venueLabel(venueForDex(r.candidate.dex))}</div>
+                  <div className="font-medium">{tapeLabel(coin.token.symbol)}</div>
+                  <div className="text-[11px] text-[var(--faint)]">
+                    {coin.token.name}
+                    {r ? ` · ${venueLabel(venueForDex(r.candidate.dex))}` : ""}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <div className="text-right">
-                    <div className="num text-sm">{priceFmt(r.price)}</div>
-                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                    <div className="num text-sm">{coin.price ? priceFmt(coin.price) : "—"}</div>
+                    {r ? <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div> : null}
                   </div>
-                  <ScoreRing score={r.researchScore} />
+                  {r ? <ScoreRing score={r.researchScore} /> : null}
                 </div>
               </div>
-              <div className="mt-3">
-                <ScoreMeter score={r.researchScore} />
-              </div>
-              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r.coreThesis}</p>
-              <p className="mt-2 text-xs leading-5 text-[var(--text)]">{r.keyCatalyst}</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{r.biggestRisk}</p>
+              {r ? (
+                <div className="mt-3">
+                  <ScoreMeter score={r.researchScore} />
+                </div>
+              ) : null}
+              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r?.coreThesis ?? coin.call}</p>
+              {coin.tape ? (
+                <p className="mt-2 text-xs leading-5 text-[var(--text)]">
+                  5m <Tone value={coin.tape.change5m ?? 0} /> · 15m <Tone value={coin.tape.change15m} />
+                </p>
+              ) : null}
+              {coin.blocked ? <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{coin.blocked}</p> : null}
+              {r ? <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{r.biggestRisk}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--faint)]">
-                <span>{r.sector}</span>
-                <span>MC {usd(r.marketCap)}</span>
-                <span>{r.keyMetric}</span>
+                <span>{r?.sector ?? coin.token.sector}</span>
+                {r ? <span>MC {usd(r.marketCap)}</span> : null}
+                {r ? <span>{r.keyMetric}</span> : <span>Waiting on live tape</span>}
               </div>
             </button>
-          ))
-        )}
+          );
+        })}
       </div>
       <div className="neon desk-scroll hidden overflow-x-auto p-1 md:block">
         <table className="w-full min-w-[1080px] text-left text-sm">
@@ -1836,70 +2208,70 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
               <th className="px-4 py-3">Asset</th>
               <th>Ticker</th>
               <th>Price</th>
-              <th>APY</th>
+              <th>5m</th>
+              <th>15m</th>
               <th>Market cap</th>
-              <th>FDV</th>
               <th>Sector</th>
-              <th>Core thesis</th>
-              <th>Key catalyst</th>
-              <th>Biggest risk</th>
-              <th>Key metric</th>
+              <th>Status</th>
               <th>Score</th>
             </tr>
           </thead>
           <tbody>
-            {desk.research.length === 0 ? (
-              <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={12}>
-                  No live finalists this cycle.
-                </td>
-              </tr>
-            ) : (
-              desk.research.map((r) => (
+            {coins.map((coin) => {
+              const r = coin.research;
+              return (
                 <tr
-                  key={r.id}
-                  tabIndex={0}
-                  onClick={() => onOpen(r)}
+                  key={coin.token.mint}
+                  tabIndex={r ? 0 : undefined}
+                  onClick={() => r && onOpen(r)}
                   onKeyDown={(event) => {
+                    if (!r) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       onOpen(r);
                     }
                   }}
-                  className="radar-row cursor-pointer border-t border-[var(--line)]"
+                  className={`radar-row border-t border-[var(--line)] ${r ? "cursor-pointer" : ""}`}
                 >
-                  <td className="px-4 py-3 font-medium">{r.asset}</td>
+                  <td className="px-4 py-3 font-medium">{coin.token.name}</td>
                   <td className="num">
-                    {r.ticker}
-                    <span className="block text-[10px] font-sans text-[var(--faint)]">
-                      {venueLabel(venueForDex(r.candidate.dex))}
-                    </span>
+                    {tapeLabel(coin.token.symbol)}
+                    {r ? (
+                      <span className="block text-[10px] font-sans text-[var(--faint)]">
+                        {venueLabel(venueForDex(r.candidate.dex))}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="num">
-                    {priceFmt(r.price)}
-                    {r.candidate.priceAgreement === "split" ? (
+                    {coin.price ? priceFmt(coin.price) : "—"}
+                    {r?.candidate.priceAgreement === "split" ? (
                       <span className="block text-[10px] uppercase tracking-wide text-[var(--crimson)]">feeds split</span>
-                    ) : r.candidate.priceAgreement === "agree" ? (
+                    ) : r?.candidate.priceAgreement === "agree" ? (
                       <span className="block text-[10px] text-[var(--faint)]">
                         {r.candidate.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price")).length} feeds
                       </span>
                     ) : null}
                   </td>
-                  <td className="num">{r.candidate.apyPct ? `${r.candidate.apyPct.toFixed(2)}%` : "—"}</td>
-                  <td className="num">{usd(r.marketCap)}</td>
-                  <td className="num">{usd(r.fdv)}</td>
-                  <td>{r.sector}</td>
-                  <td className="max-w-[260px] truncate text-[var(--muted)]">{r.coreThesis}</td>
-                  <td className="max-w-[160px] truncate">{r.keyCatalyst}</td>
-                  <td className="max-w-[160px] truncate text-[var(--crimson)]">{r.biggestRisk}</td>
-                  <td className="num">{r.keyMetric}</td>
+                  <td className="num">{coin.tape?.change5m !== undefined ? <Tone value={coin.tape.change5m} /> : "—"}</td>
+                  <td className="num">{coin.tape ? <Tone value={coin.tape.change15m} /> : "—"}</td>
+                  <td className="num">{r ? usd(r.marketCap) : "—"}</td>
+                  <td>{r?.sector ?? coin.token.sector}</td>
+                  <td className="max-w-[320px] truncate text-[var(--muted)]">
+                    {coin.signal ? coin.signal.thesis : coin.blocked ?? r?.coreThesis ?? coin.call}
+                  </td>
                   <td className="pr-4">
-                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
-                    <ScoreMeter score={r.researchScore} />
+                    {r ? (
+                      <>
+                        <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                        <ScoreMeter score={r.researchScore} />
+                      </>
+                    ) : (
+                      <span className="text-[var(--faint)]">—</span>
+                    )}
                   </td>
                 </tr>
-              ))
-            )}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1937,6 +2309,12 @@ function BotView({
   const fills = shownFills(desk.trades, swaps);
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-medium tracking-tight">Bot log</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">
+          Every scan, skip, and fill for {CHAIN_COPY[chain].bookLabel}.
+        </p>
+      </div>
       <section className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -2095,7 +2473,7 @@ function BotView({
                   ))}
                 </ul>
               ) : (
-                <p>No long on this scan. A red 15-minute tape stays in cash.</p>
+                <p>No buy on this scan. A red 15-minute tape stays in cash.</p>
               )}
             </div>
           ) : (
@@ -2104,7 +2482,7 @@ function BotView({
                 <div key={s.id} className="rounded-2xl border border-[var(--line)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-medium">
-                      {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side}</Pill>
+                      {s.symbol} <Pill tone={s.side === "long" ? "mint" : "crimson"}>{s.side === "long" ? "buy" : "sell"}</Pill>
                     </div>
                     <span className="num text-[var(--magenta)]">{s.confidence.toFixed(0)}</span>
                   </div>
@@ -2122,31 +2500,31 @@ function BotView({
           )}
         </div>
         <div className="neon p-5">
-          <Label>Research bench</Label>
-          {desk.research.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No live finalists.</p>
-          ) : (
-            <div className="space-y-2">
-              {desk.research.map((r) => (
+          <Label>Coins this cycle</Label>
+          <div className="space-y-2">
+            {coinRows(desk, chain).map((coin) => {
+              const r = coin.research;
+              return (
                 <button
-                  key={r.id}
-                  onClick={() => onOpen(r)}
+                  key={coin.token.mint}
+                  onClick={() => r && onOpen(r)}
                   className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl px-2 py-2 text-left hover:bg-[var(--accent-wash)]"
                 >
                   <span className="min-w-0">
-                    {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
-                    {r.candidate.apyPct ? (
+                    {tapeLabel(coin.token.symbol)} <span className="text-[var(--muted)]">{r?.sector ?? coin.token.sector}</span>
+                    {r?.candidate.apyPct ? (
                       <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
                     ) : null}
-                    {r.candidate.priceAgreement === "split" ? (
+                    {r?.candidate.priceAgreement === "split" ? (
                       <span className="text-[var(--crimson)]"> split</span>
                     ) : null}
+                    <span className="block text-[11px] text-[var(--faint)]">{coin.signal ? coin.signal.thesis : coin.blocked ?? coin.call}</span>
                   </span>
-                  <span className="num shrink-0 text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
+                  <span className="num shrink-0 text-[var(--magenta)]">{r ? r.researchScore.toFixed(1) : "—"}</span>
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
       </section>
     </div>
@@ -2193,19 +2571,28 @@ function Book({
     ? bookStats(fills, { ...desk.portfolio, peakEquity: marked || desk.portfolio.equityUsd, equityUsd: marked || desk.portfolio.equityUsd }, [])
     : desk.stats;
   const profit = trading ? tradingProfitUsd(trading.equityUsd, desk.bot.swapPrincipalUsd) : 0;
+  const walletCro = chain === "cronos" ? croHoldings(wallet) : null;
   const signedCloses = fills.filter((trade) => trade.action === "close" && trade.pnlUsd !== null);
   const wins = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) > 0).length : desk.portfolio.winCount;
   const losses = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) <= 0).length : desk.portfolio.lossCount;
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-medium tracking-tight">History</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">
+          Open tickets and closed fills for {copy.bookLabel}.
+        </p>
+      </div>
       <div className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <Label>{swaps ? "LIVE Jupiter book" : "PAPER book"}</Label>
+            <Label>{swaps ? (chain === "cronos" ? "LIVE WolfSwap book" : "LIVE Jupiter book") : "PAPER book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
                 ? copy.bookArm
-                : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
+                : chain === "cronos"
+                  ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends WolfSwap or cro.trade swaps."
+                  : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto">
@@ -2224,11 +2611,21 @@ function Book({
         <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
           label={trading ? "Trading balance" : "Wallet mark"}
-          value={usd(trading ? trading.equityUsd : wallet.equityUsd)}
+          value={
+            trading
+              ? usd(trading.equityUsd)
+              : walletCro
+                ? formatCroEvm(walletCro.cro)
+                : usd(wallet.equityUsd)
+          }
           sub={
             trading
-              ? `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
-              : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
+              ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
+              : walletCro
+                ? walletCro.onPos
+                  ? `${formatCro(walletCro.pos)} on Cronos POS`
+                  : `${walletCro.usd > 0 ? usd(walletCro.usd) : "Price pending"} · ${wallet.usdc.toFixed(2)} USDC`
+                : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
           }
         />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />

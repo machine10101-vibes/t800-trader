@@ -21,7 +21,9 @@ import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState
 import { applyControl, tickBot } from "@/lib/trading/bot";
 import { applyHandClose, isAlreadyFlat } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
-import type { BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
+import { takeCronosProfitShare } from "@/lib/cronos/share";
+import { takeSolProfitShare } from "@/lib/solana/share";
+import type { AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd };
@@ -36,6 +38,12 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
   return solanaTradingSnapshot(owner);
 }
 
+async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
+  if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
+  return state;
+}
+
 async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const state = await loadState(chain);
@@ -46,7 +54,7 @@ async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Pro
       if (!still || !signedOnChain(still)) return current;
       try {
         const fill = await executor(orderForPosition(still, "close", current.config.venues));
-        return pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature));
+        return afterWinningClose(pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature)), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (!isAlreadyFlat(message)) throw error;
@@ -75,13 +83,19 @@ async function budgetFor(session?: WalletSession | null): Promise<WalletBudget |
 }
 
 async function cronosLive(session: DeskSession | null | undefined) {
-  const { authorizeCronos, cronosBudget, cronosExecutor, reclaimCronos, sendCronosProfit } = await import("@/lib/cronos/trade");
+  const { authorizeCronos, confirmCronosDisarm, cronosBudget, cronosExecutor, reclaimCronos, sendCronosProfit } =
+    await import("@/lib/cronos/trade");
   const cronos = session as CronosSession | null | undefined;
   return {
     executor: cronos ? cronosExecutor(cronos) : undefined,
     maker: null as ReturnType<typeof makerDesk> | null,
     budget: () => cronosBudget(cronos),
-    authorize: () => authorizeCronos(cronos as CronosSession),
+    authorize: (armFundsUsd?: number, cronosQuote?: "usdc" | "cro") =>
+      authorizeCronos(cronos as CronosSession, armFundsUsd ?? 50, {
+        cronosQuote,
+        croPriceUsd: cronos?.solPriceUsd ?? 0,
+      }),
+    confirmDisarm: () => confirmCronosDisarm(cronos as CronosSession),
     reclaim: (keep: number) => reclaimCronos(cronos?.address ?? "", keep),
     read: (address: string) => import("@/lib/cronos/wallet").then((mod) => mod.readCronosBalances(address)),
     hasKey: () => Boolean(cronos),
@@ -143,6 +157,9 @@ export async function controlBot(
     await tickBot(executor, funds, live ? maker : null, chain);
     return buildDesk(false, chain);
   }
+  if (action === "stop" && liveKit && session) {
+    await liveKit.confirmDisarm();
+  }
   if ((action === "stop" || action === "flatten" || action === "reset") && maker) {
     const resting = (await loadState(chain)).bot.resting;
     if (resting) await maker.cancel(resting.orderKey).catch(() => undefined);
@@ -181,13 +198,26 @@ export async function controlBot(
   let auth: ArmAuth | null = null;
   if (action === "start" && session) {
     const state = await loadState(chain);
-    if (state.config.walletSwaps) auth = liveKit ? await liveKit.authorize() : await authorizeTrading(solana as WalletSession);
+    if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd, state.config.cronosQuote);
+    else if (state.config.walletSwaps) auth = await authorizeTrading(solana as WalletSession, state.config.armFundsUsd);
   }
 
   await mutateState((state) => {
     const unsold = state.config.walletSwaps && state.positions.some((p) => signedOnChain(p));
     if ((action === "flatten" || action === "reset") && unsold) return state;
-    const next = applyControl(state, action);
+    const controlled = applyControl(state, action, chain);
+    const next =
+      chain === "cronos" && action === "start" && auth
+        ? {
+            ...controlled,
+            config: normalizeConfig({
+              ...controlled.config,
+              walletSwaps: true,
+              executionMode: "live",
+              killSwitch: false,
+            }),
+          }
+        : controlled;
     if (reclaimed && (action === "stop" || action === "flatten")) {
       const short = `${reclaimed.slice(0, 8)}…`;
       return {
@@ -285,14 +315,14 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
         const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-        return applyHandClose(state, pos.id, fill.price, fill.signature);
+        return afterWinningClose(applyHandClose(state, pos.id, fill.price, fill.signature), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Close failed";
         if (!isAlreadyFlat(message)) throw error;
         return applyHandClose(state, pos.id, pos.markPrice, undefined, `Closed ${pos.symbol} — the trading key was already flat`);
       }
     }
-    return applyHandClose(state, pos.id, pos.markPrice);
+    return afterWinningClose(applyHandClose(state, pos.id, pos.markPrice), chain, false);
   }, chain);
   try {
     return await buildDesk(false, chain);

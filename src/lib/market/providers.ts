@@ -2,9 +2,11 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, FRAMES, geckoFrameUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
-import { applyJupiterTape, loadJupiterTapes } from "./jupiterTape";
+import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
+import { paintRegime } from "./regime";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
 import {
@@ -27,6 +29,7 @@ import {
   geckoNetwork,
   isActiveBook,
   isQuote,
+  WCRO_MINT,
   isStable,
   SOL_MINT,
   SOL_USDC_POOLS,
@@ -111,6 +114,52 @@ function bookKey(mint: string): string {
 /** A missed GeckoTerminal read must not erase the last print on this chain. */
 function bookComplete(rows: TokenCandidate[], chain: ChainId): boolean {
   return coreBookMints(chain).every((mint) => rows.some((row) => sameMint(row.mint, mint)));
+}
+
+function quietFlows(): Record<Timeframe, FlowWindow> {
+  const quiet: FlowWindow = { buys: 0, sells: 0, buyers: 0, sellers: 0, volumeUsd: 0, priceChangePct: 0 };
+  return {
+    m5: { ...quiet },
+    m15: { ...quiet },
+    m30: { ...quiet },
+    h1: { ...quiet },
+    h6: { ...quiet },
+    h24: { ...quiet },
+  };
+}
+
+/** Pinned book rows so Jupiter can stamp prices when GeckoTerminal is cooling. */
+export function skeletonBook(chain: ChainId): TokenCandidate[] {
+  return bookTokens(chain).flatMap((token) => {
+    const pin = bookPools(chain).find((row) => sameMint(row.mint, token.mint))?.pool;
+    if (!pin) return [];
+    return [
+      {
+        id: token.mint,
+        chain,
+        symbol: token.symbol,
+        name: token.name,
+        mint: token.mint,
+        poolAddress: pin,
+        dex: chain === "cronos" ? "vvs" : "raydium",
+        quoteSymbol: chain === "cronos" || token.mint === SOL_MINT ? "USDC" : "SOL",
+        priceUsd: token.priceUsd ?? 0,
+        marketCapUsd: null,
+        fdvUsd: null,
+        liquidityUsd: 0,
+        volume24hUsd: 0,
+        poolCreatedAt: null,
+        ageHours: null,
+        sector: token.sector,
+        flows: quietFlows(),
+        watchlist: true,
+        sources: ["book"],
+        priceAgreement: "thin",
+        apyPct: null,
+        apySources: [],
+      },
+    ];
+  });
 }
 
 function fillActiveBook(rows: TokenCandidate[], chain: ChainId): TokenCandidate[] {
@@ -210,19 +259,29 @@ const GECKO_COOL_MS = 8_000;
 let geckoTail: Promise<void> = Promise.resolve();
 let geckoNotBefore = 0;
 
+function noteGeckoResult(error?: unknown): void {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
+  else geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
+}
+
+/** True while GeckoTerminal is in the 429 cool-down. Solana can scan from Jupiter instead. */
+export function geckoIsCooling(): boolean {
+  return geckoNotBefore > Date.now();
+}
+
 /** One GeckoTerminal call at a time. A 429 pauses the whole book so candles are not burned. */
 function paceGecko<T>(task: () => Promise<T>): Promise<T> {
   const run = geckoTail.then(async () => {
     const wait = geckoNotBefore - Date.now();
     if (wait > 0) await sleep(wait);
     try {
-      return await task();
+      const value = await task();
+      noteGeckoResult();
+      return value;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
+      noteGeckoResult(error);
       throw error;
-    } finally {
-      geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
     }
   });
   geckoTail = run.then(
@@ -334,6 +393,10 @@ async function watchlistPools(chain: ChainId): Promise<TokenCandidate[]> {
       if (snap?.rows.length) pools.push(...snap.rows);
       continue;
     }
+    if (geckoIsCooling()) {
+      if (snap?.rows.length) pools.push(...snap.rows);
+      continue;
+    }
     if (paced) await sleep(450);
     paced = true;
     const pin = pins.find((row) => sameMint(row.mint, token.mint))?.pool ?? token.pool;
@@ -419,16 +482,36 @@ function enqueueOhlcv<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
+function candlesFromOhlcv(json: {
+  data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+}): Candle[] {
+  const list = json.data?.attributes?.ohlcv_list ?? [];
+  return list
+    .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
+    .sort((a, b) => a.time - b.time);
+}
+
 async function readOhlcv(url: string): Promise<Candle[]> {
   const json = await paceGecko(() =>
     fetchJson<{
       data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
     }>(url, { timeoutMs: 8_000, retries: 0 }),
   );
-  const list = json.data?.attributes?.ohlcv_list ?? [];
-  return list
-    .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
-    .sort((a, b) => a.time - b.time);
+  return candlesFromOhlcv(json);
+}
+
+/** Cronos book charts skip the 2.1s Gecko queue so all five names paint on login. */
+async function readOhlcvDirect(url: string): Promise<Candle[]> {
+  try {
+    const json = await fetchJson<{
+      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+    }>(url, { timeoutMs: 8_000, retries: 1 });
+    noteGeckoResult();
+    return candlesFromOhlcv(json);
+  } catch (error) {
+    noteGeckoResult(error);
+    throw error;
+  }
 }
 
 async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
@@ -442,13 +525,14 @@ async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId
 }
 
 /** Native 4-hour bars from the pool the desk trades. The token series is only a fallback. */
-async function fetchChartOnce(poolAddress: string, chain: ChainId): Promise<Candle[]> {
+async function fetchChartOnce(poolAddress: string, chain: ChainId, opts?: { direct?: boolean }): Promise<Candle[]> {
+  const read = opts?.direct ? readOhlcvDirect : readOhlcv;
   const network = geckoNetwork(chain);
-  const poolRows = await readOhlcv(geckoHourlyChartUrl(network, poolAddress, "pools"));
+  const poolRows = await read(geckoHourlyChartUrl(network, poolAddress, "pools"));
   if (poolRows.length) return poolRows;
-  const mint = poolMint.get(poolAddress);
+  const mint = poolMint.get(poolAddress) ?? bookPools(chain).find((row) => row.pool.toLowerCase() === poolAddress.toLowerCase())?.mint;
   if (!mint) return poolRows;
-  return readOhlcv(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
+  return read(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
 }
 
 function staleCandles(poolAddress: string): Candle[] | null {
@@ -539,33 +623,55 @@ export async function fetchOhlcvFromPools(poolAddresses: string[], limit = 120):
 
 const REGIME_FEED = { timeoutMs: 3_500, retries: 1 };
 
-async function fetchRegime(): Promise<MarketRegime> {
+async function croMarkFallback(): Promise<{ price: number | null; change24h: number | null }> {
+  const [llama, gecko] = await Promise.allSettled([
+    fetchJson<{ coins?: Record<string, { price?: number }> }>(`https://coins.llama.fi/prices/current/cronos:${WCRO_MINT}`, REGIME_FEED),
+    fetchJson<{
+      data?: { attributes?: { token_prices?: Record<string, string> } };
+    }>(`https://api.geckoterminal.com/api/v2/simple/networks/cro/token_price/${WCRO_MINT}`, REGIME_FEED),
+  ]);
+  const llamaPx =
+    llama.status === "fulfilled" ? nullableNum(llama.value.coins?.[`cronos:${WCRO_MINT}`]?.price) : null;
+  const prices = gecko.status === "fulfilled" ? gecko.value.data?.attributes?.token_prices ?? {} : {};
+  const geckoPx = nullableNum(prices[WCRO_MINT] ?? prices[WCRO_MINT.toLowerCase()] ?? Object.values(prices)[0]);
+  return { price: llamaPx ?? geckoPx, change24h: null };
+}
+
+async function fetchRegime(chain: ChainId = "solana"): Promise<MarketRegime> {
+  const cronos = chain === "cronos";
+  const geckoIds = cronos ? "bitcoin,ethereum,crypto-com-chain" : "bitcoin,ethereum,solana";
+  const dexSlug = cronos ? "cronos" : "solana";
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
     fetchJson<CgSimple>(
-      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true",
+      `https://api.coingecko.com/api/v3/simple/price?ids=${geckoIds}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
       REGIME_FEED,
     ),
     fetchJson<CgGlobal>("https://api.coingecko.com/api/v3/global", REGIME_FEED),
     fetchJson<{ data: { value: string; value_classification: string }[] }>("https://api.alternative.me/fng/?limit=1", REGIME_FEED),
     fetchJson<{ name: string; gecko_id?: string; tvl: number }[]>("https://api.llama.fi/v2/chains", REGIME_FEED),
     fetchJson<{ total24h?: number; change_1d?: number }>(
-      "https://api.llama.fi/overview/dexs/solana?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true",
+      `https://api.llama.fi/overview/dexs/${dexSlug}?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true`,
       REGIME_FEED,
     ),
   ]);
 
   const px = prices.status === "fulfilled" ? prices.value : null;
-  const needFallback = !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(px?.solana?.usd);
-  const fallback = needFallback ? await liveMajors().catch(() => null) : null;
+  const l1Gecko = cronos ? px?.["crypto-com-chain"] : px?.solana;
+  const needFallback =
+    !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(l1Gecko?.usd);
+  const fallback = !cronos && needFallback ? await liveMajors().catch(() => null) : null;
+  const croFallback = cronos && needFallback ? await croMarkFallback().catch(() => null) : null;
   const g = global.status === "fulfilled" ? global.value.data : null;
   const fear = fng.status === "fulfilled" ? fng.value.data?.[0] : null;
   const chainList = chains.status === "fulfilled" ? chains.value : [];
-  const solChain = chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
+  const l1Chain = cronos
+    ? chainList.find((c) => c.name === "Cronos" || c.gecko_id === "crypto-com-chain" || c.gecko_id === "cronos")
+    : chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
   const btcPx = nullableNum(px?.bitcoin?.usd) ?? fallback?.btc.price ?? null;
   const ethPx = nullableNum(px?.ethereum?.usd) ?? fallback?.eth.price ?? null;
-  const solPx = nullableNum(px?.solana?.usd) ?? fallback?.sol.price ?? null;
+  const l1Px = nullableNum(l1Gecko?.usd) ?? (cronos ? croFallback?.price : fallback?.sol.price) ?? null;
   const btc = {
     price: btcPx ?? 0,
     change24h: btcPx === null ? 0 : num(px?.bitcoin?.usd_24h_change ?? fallback?.btc.change24h),
@@ -579,56 +685,24 @@ async function fetchRegime(): Promise<MarketRegime> {
     volume24h: num(px?.ethereum?.usd_24h_vol),
   };
   const sol = {
-    price: solPx ?? 0,
-    change24h: solPx === null ? 0 : num(px?.solana?.usd_24h_change ?? fallback?.sol.change24h),
-    marketCap: num(px?.solana?.usd_market_cap),
-    volume24h: num(px?.solana?.usd_24h_vol),
+    price: l1Px ?? 0,
+    change24h: l1Px === null ? 0 : num(l1Gecko?.usd_24h_change ?? (cronos ? croFallback?.change24h : fallback?.sol.change24h)),
+    marketCap: num(l1Gecko?.usd_market_cap),
+    volume24h: num(l1Gecko?.usd_24h_vol),
   };
 
-  const fearValue = fear ? num(fear.value) : null;
   const btcDom = nullableNum(g?.market_cap_percentage?.btc);
-  const solVsBtc = sol.change24h - btc.change24h;
-  const riskOn =
-    Boolean(btcPx && solPx) &&
-    btc.change24h > 0.4 &&
-    sol.change24h > 0 &&
-    (fearValue === null || fearValue >= 45) &&
-    (dex?.change_1d === undefined || dex.change_1d > -8);
-  const defensive =
-    Boolean(btcPx || solPx) &&
-    (btc.change24h < -2 || (fearValue !== null && fearValue < 30) || sol.change24h < -5);
-  const stance: MarketRegime["stance"] = !btcPx && !solPx ? "mixed" : defensive ? "defensive" : riskOn ? "risk-on" : "mixed";
-
-  const crowded: string[] = [];
-  const overlooked: string[] = [];
-  if (fearValue !== null && fearValue >= 70) crowded.push("High-beta memes (Fear & Greed in greed)");
-  else if (fearValue !== null) overlooked.push("Selective high-beta Solana names while sentiment is not euphoric");
-  if (btcPx && solPx && solVsBtc > 2) crowded.push("SOL beta / ecosystem rotation vs BTC");
-  else if (btcPx && solPx && solVsBtc < -2) overlooked.push("Solana beta vs BTC (SOL underperforming on the day)");
-  if (dex?.change_1d !== undefined && dex.change_1d > 15) crowded.push("Solana DEX volume chase");
-  else if (dex?.change_1d !== undefined) overlooked.push("Spot DEX flow that is not exploding day-over-day");
-  crowded.push("Paid Dexscreener boosts / launchpad tape");
-  overlooked.push("Fee-switch / LST / perps venues with measurable usage");
-
-  const stanceWhy =
-    !btcPx && !solPx
-      ? "BTC/SOL marks are missing this cycle. Stance is withheld — no fabricated tape."
-      : stance === "defensive"
-        ? "BTC or SOL is selling off, or sentiment is fearful — size down and demand cleaner setups."
-        : stance === "risk-on"
-          ? "BTC and SOL are green with non-panicked sentiment — short-term longs have a tailwind."
-          : "Tape is mixed. Prefer liquid names, tight risk, and fade only extreme extensions.";
-
-  const overview = [
-    `BTC ${btc.price ? `$${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)` : "n/a"}, ETH ${eth.price ? `$${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)` : "n/a"}, SOL ${sol.price ? `$${sol.price.toFixed(2)} (${sol.change24h.toFixed(2)}%)` : "n/a"}.`,
-    btcDom !== null ? `BTC dominance ${btcDom.toFixed(1)}%.` : "BTC dominance unavailable.",
-    fear ? `Fear & Greed ${fear.value} (${fear.value_classification}).` : "Fear & Greed unavailable.",
-    solChain ? `Solana DeFi TVL $${(solChain.tvl / 1e9).toFixed(2)}B.` : "Solana TVL unavailable.",
-    dex?.total24h
-      ? `Solana DEX volume 24h $${(dex.total24h / 1e9).toFixed(2)}B (${dex.change_1d !== undefined ? `${dex.change_1d.toFixed(1)}% d/d` : "d/d n/a"}).`
-      : "Solana DEX volume unavailable.",
-    stanceWhy,
-  ].join(" ");
+  const painted = paintRegime({
+    chain,
+    btc,
+    eth,
+    l1: sol,
+    btcDom,
+    fear: fear ? { value: num(fear.value), label: fear.value_classification } : null,
+    tvl: l1Chain?.tvl ?? null,
+    dexVolume24h: dex?.total24h ?? null,
+    dexChange1d: dex?.change_1d ?? null,
+  });
 
   return {
     asOf: new Date().toISOString(),
@@ -640,20 +714,10 @@ async function fetchRegime(): Promise<MarketRegime> {
     totalMarketCap: nullableNum(g?.total_market_cap?.usd),
     marketCapChange24h: nullableNum(g?.market_cap_change_percentage_24h_usd),
     fearGreed: fear ? { value: num(fear.value), label: fear.value_classification } : null,
-    solanaTvl: solChain?.tvl ?? null,
+    solanaTvl: l1Chain?.tvl ?? null,
     solanaDexVolume24h: dex?.total24h ?? null,
     solanaDexVolumeChange1d: dex?.change_1d ?? null,
-    stance,
-    stanceWhy,
-    crowded,
-    overlooked,
-    overview,
-    narratives:
-      stance === "risk-on"
-        ? ["SOL beta", "DEX flow", "Selective memes only with liquidity"]
-        : stance === "defensive"
-          ? ["Capital preservation", "SOL/USDC only", "Avoid illiquid launches"]
-          : ["Liquid majors", "Mean-reversion fades", "Research over tape-chasing"],
+    ...painted,
     yields: [],
   };
 }
@@ -784,7 +848,10 @@ function decisionKey(chain: ChainId, mint: string): string {
 /** The 4-hour series the bot reads before it trades. Solana comes from Jupiter. */
 export function cachedDecisionChart(mint: string, chain: ChainId = "solana"): Candle[] | null {
   const hit = decisionCache.get(decisionKey(chain, mint));
-  return hit?.rows.length ? hit.rows : null;
+  if (hit?.rows.length) return hit.rows;
+  if (chain !== "cronos") return null;
+  const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+  return pool ? cachedChart(pool) : null;
 }
 
 async function fetchJupiterDecision(mint: string): Promise<Candle[]> {
@@ -796,6 +863,10 @@ async function fetchJupiterDecision(mint: string): Promise<Candle[]> {
 }
 
 export async function loadDecisionChart(mint: string, chain: ChainId = "solana"): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    return pool ? loadCronosDecision(mint, pool, false) : [];
+  }
   const key = decisionKey(chain, mint);
   const hit = decisionCache.get(key);
   if (hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
@@ -809,16 +880,14 @@ export async function loadDecisionChart(mint: string, chain: ChainId = "solana")
 }
 
 async function readDecisionChart(mint: string, chain: ChainId, key: string, stale: Candle[]): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    return pool ? loadCronosDecision(mint, pool, false) : stale;
+  }
   const missedAt = decisionMiss.get(key);
   if (missedAt && Date.now() - missedAt < CANDLE_COOL_MS) return stale;
   try {
-    const rows =
-      chain === "solana"
-        ? await fetchJupiterDecision(mint)
-        : await (async () => {
-            const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
-            return pool ? fetchChartOnce(pool, chain) : [];
-          })();
+    const rows = await fetchJupiterDecision(mint);
     if (rows.length) {
       decisionCache.set(key, { at: Date.now(), rows });
       decisionMiss.delete(key);
@@ -832,12 +901,208 @@ async function readDecisionChart(mint: string, chain: ChainId, key: string, stal
   }
 }
 
-/** Start a Jupiter 4-hour read for every tradable mint. A fresh chart is left alone. */
+async function loadCronosDecision(mint: string, pool: string, force: boolean): Promise<Candle[]> {
+  const key = decisionKey("cronos", mint);
+  const hit = decisionCache.get(key);
+  if (!force && hit?.rows.length && Date.now() - hit.at < CHART_CANDLE_MS) return hit.rows;
+  const inflight = decisionInflight.get(key);
+  if (inflight) return inflight;
+  const run = (async () => {
+    const missedAt = decisionMiss.get(key);
+    const coolMs = hit?.rows.length ? CANDLE_COOL_MS : 2_000;
+    if (!force && geckoIsCooling()) return hit?.rows ?? [];
+    if (!force && missedAt && Date.now() - missedAt < coolMs) return hit?.rows ?? [];
+    try {
+      const rows = (await fetchChartOnce(pool, "cronos", { direct: true })).slice(-CHART_BARS);
+      if (rows.length) {
+        decisionCache.set(key, { at: Date.now(), rows });
+        chartCache.set(pool, { at: Date.now(), rows });
+        decisionMiss.delete(key);
+        return rows;
+      }
+      decisionMiss.set(key, Date.now());
+      return hit?.rows ?? [];
+    } catch {
+      decisionMiss.set(key, Date.now());
+      return hit?.rows ?? [];
+    }
+  })().finally(() => {
+    if (decisionInflight.get(key) === run) decisionInflight.delete(key);
+  });
+  decisionInflight.set(key, run);
+  return run;
+}
+
+async function prefetchCronosDecisionCharts(force = false): Promise<void> {
+  await Promise.all(bookPools("cronos").map(({ mint, pool }) => loadCronosDecision(mint, pool, force)));
+}
+
+/** Start a 4-hour read for every tradable mint. Cronos pulls the named book at once. */
 export function requestDecisionCharts(mints: string[], chain: ChainId): void {
+  if (chain === "cronos") {
+    void prefetchCronosDecisionCharts();
+    return;
+  }
   for (const mint of mints) {
     if (!mint) continue;
     void loadDecisionChart(mint, chain);
   }
+}
+
+/** Login and refresh start here. Solana reads Jupiter. Cronos does not wait on the wallet. */
+export function prefetchDecisionCharts(chain: ChainId): Promise<void> {
+  return prefetchFrameCharts(chain);
+}
+
+const frameCache = new Map<string, { at: number; rows: Candle[] }>();
+const frameMiss = new Map<string, number>();
+const frameInflight = new Map<string, Promise<void>>();
+
+function rememberFrames(chain: ChainId, mint: string, source: Frame, rows: Candle[]): void {
+  const at = Date.now();
+  const filled = derivedFrames(rows, source);
+  for (const frame of FRAMES) {
+    const series = filled[frame];
+    if (!series?.length) continue;
+    const key = frameKey(chain, mint, frame);
+    const hit = frameCache.get(key);
+    if (hit?.rows.length && hit.rows.length >= series.length && frame !== source) continue;
+    frameCache.set(key, { at, rows: series.slice(-1000) });
+  }
+  if (source === "4h" || (filled["4h"]?.length ?? 0) >= MIN_FOUR_HOUR_BARS) {
+    const four = (source === "4h" ? rows : filled["4h"]) ?? [];
+    if (four.length) {
+      const key = decisionKey(chain, mint);
+      const hit = decisionCache.get(key);
+      if (!hit?.rows.length || source === "4h") decisionCache.set(key, { at, rows: four.slice(-FRAME_BARS) });
+    }
+  }
+}
+
+function cachedRows(mint: string, chain: ChainId, frame: Frame): Candle[] | null {
+  if (frame === "4h") {
+    const decision = cachedDecisionChart(mint, chain);
+    if (decision?.length) return decision;
+  }
+  const hit = frameCache.get(frameKey(chain, mint, frame));
+  return hit?.rows.length ? hit.rows : null;
+}
+
+/** Native bars, or a longer frame rolled up from a shorter series already in memory. */
+export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Candle[] | null {
+  const direct = cachedRows(mint, chain, frame);
+  if (direct?.length) return direct;
+  if (frame === "15m") return derivedFrames(cachedRows(mint, chain, "5m") ?? [], "5m")["15m"] ?? null;
+  if (frame === "1h") {
+    const from15 = derivedFrames(cachedRows(mint, chain, "15m") ?? [], "15m")["1h"];
+    if (from15?.length) return from15;
+    return derivedFrames(cachedRows(mint, chain, "5m") ?? [], "5m")["1h"] ?? null;
+  }
+  if (frame === "4h") {
+    const from1 = derivedFrames(cachedRows(mint, chain, "1h") ?? [], "1h")["4h"];
+    if (from1 && enoughFrameBars("4h", from1.length)) return from1;
+    const from15 = derivedFrames(cachedRows(mint, chain, "15m") ?? [], "15m")["4h"];
+    if (from15 && enoughFrameBars("4h", from15.length)) return from15;
+  }
+  return null;
+}
+
+async function readFrameSource(mint: string, chain: ChainId, source: Frame): Promise<void> {
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    if (!pool) return;
+    const network = geckoNetwork(chain);
+    const read = source === "15m" || source === "4h" ? readOhlcvDirect : readOhlcv;
+    let rows = await read(geckoFrameUrl(network, pool, "pools", source));
+    if (!rows.length) rows = await read(geckoFrameUrl(network, mint, "tokens", source)).catch(() => rows);
+    if (!rows.length) throw new Error("empty");
+    rememberFrames(chain, mint, source, rows);
+    return;
+  }
+  const json = await fetchJson<{ candles?: unknown }>(jupiterChartUrl(mint, Date.now(), FRAME_BARS, jupiterInterval(source)), {
+    timeoutMs: 8_000,
+    retries: 1,
+  });
+  const rows = parseJupiterCandles(json.candles);
+  if (!rows.length) throw new Error("empty");
+  rememberFrames(chain, mint, source, rows);
+}
+
+function geckoWaitMs(): number {
+  return Math.max(0, geckoNotBefore - Date.now());
+}
+
+/** One native read fills every longer frame. An empty book waits for the feed instead of giving up. */
+export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame): Promise<Candle[]> {
+  const source = sourceFrame(chain, frame);
+  const have = cachedFrameChart(mint, chain, frame);
+  const sourceHit = frameCache.get(frameKey(chain, mint, source)) ?? (source === "4h" ? decisionCache.get(decisionKey(chain, mint)) : undefined);
+  const ttl = FRAME_REFRESH_MS[source] * (chain === "cronos" ? 1.4 : 1);
+  if (have && enoughFrameBars(frame, have.length) && sourceHit && Date.now() - sourceHit.at < ttl) return have;
+  const key = frameKey(chain, mint, source);
+  const missedAt = frameMiss.get(key);
+  const missCool = have?.length ? CANDLE_COOL_MS : 2_000;
+  if (missedAt && Date.now() - missedAt < missCool) {
+    if (have && enoughFrameBars(frame, have.length)) return have;
+    await sleep(missCool - (Date.now() - missedAt));
+    const retry = cachedFrameChart(mint, chain, frame);
+    if (retry && enoughFrameBars(frame, retry.length)) return retry;
+  }
+  if (chain === "cronos") {
+    const wait = geckoWaitMs();
+    if (wait > 0) {
+      if (have && enoughFrameBars(frame, have.length)) return have;
+      await sleep(Math.min(wait, 8_000));
+      const after = cachedFrameChart(mint, chain, frame);
+      if (after && enoughFrameBars(frame, after.length)) return after;
+    }
+  }
+  let run = frameInflight.get(key);
+  if (!run) {
+    run = readFrameSource(mint, chain, source)
+      .then(() => {
+        frameMiss.delete(key);
+      })
+      .catch(() => {
+        frameMiss.set(key, Date.now());
+      })
+      .finally(() => {
+        if (frameInflight.get(key) === run) frameInflight.delete(key);
+      });
+    frameInflight.set(key, run);
+  }
+  await run;
+  return cachedFrameChart(mint, chain, frame) ?? have ?? [];
+}
+
+/** 15-minute first. The 1-hour and 4-hour come from that series unless a longer native chart is already in. */
+export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
+  await loadFrameChart(mint, chain, "15m").catch(() => []);
+  const four = cachedFrameChart(mint, chain, "4h");
+  if (!four || !enoughFrameBars("4h", four.length)) await loadFrameChart(mint, chain, "4h").catch(() => []);
+  return {
+    "5m": cachedFrameChart(mint, chain, "5m") ?? [],
+    "15m": cachedFrameChart(mint, chain, "15m") ?? [],
+    "1h": cachedFrameChart(mint, chain, "1h") ?? [],
+    "4h": cachedFrameChart(mint, chain, "4h") ?? [],
+  };
+}
+
+const DECISION_FRAMES: Frame[] = ["15m", "4h"];
+
+/** Keep the 15-minute and 4-hour charts warm. The 1-hour is rolled up from the 15-minute. */
+export function requestFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): void {
+  const want = new Set<Frame>([...DECISION_FRAMES, ...extra.filter((frame) => frame === "5m")]);
+  for (const mint of mints) {
+    if (!mint) continue;
+    for (const frame of want) void loadFrameChart(mint, chain, frame);
+  }
+}
+
+/** Login and refresh start here. One 15-minute read per coin, plus Solana's native 4-hour. */
+export function prefetchFrameCharts(chain: ChainId): Promise<void> {
+  const mints = bookMints(chain);
+  return Promise.all(mints.map((mint) => loadFrameCharts(mint, chain).catch(() => undefined))).then(() => undefined);
 }
 
 /** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */
@@ -882,11 +1147,17 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
-  requestDecisionCharts(bookMints(chain), chain);
-  const watch = await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
-  const regimePromise = fetchRegime();
-  let merged = mergeCandidates([watch]).filter((candidate) => isActiveBook(candidate.mint, chain));
-  if (!bookComplete(merged, chain)) {
+  const chartsReady = prefetchFrameCharts(chain);
+  const tapesPromise: Promise<Map<string, JupiterTape>> =
+    chain === "solana" ? loadJupiterTapes(bookMints(chain)).catch(() => new Map()) : Promise.resolve(new Map());
+  const regimePromise = fetchRegime(chain);
+  const lastRows = [...markets[chain].lastBook.values()];
+  const lastComplete = bookComplete(lastRows, chain);
+  const skipGecko = geckoIsCooling() && (chain === "solana" || lastComplete);
+  const watch = skipGecko ? lastRows : await watchlistPools(chain).catch(() => [] as TokenCandidate[]);
+  let merged = mergeCandidates([watch.length ? watch : lastRows]).filter((candidate) => isActiveBook(candidate.mint, chain));
+  merged = fillActiveBook(merged, chain);
+  if (!bookComplete(merged, chain) && !geckoIsCooling()) {
     for (const mint of bookMints(chain)) {
       if (merged.some((candidate) => sameMint(candidate.mint, mint))) continue;
       const meta = watchMeta(mint, chain);
@@ -896,8 +1167,11 @@ async function loadMarketOnce(chain: ChainId): Promise<{
       const row = await pinnedPool(mint, meta.symbol, pin, chain);
       if (row) merged.push(row);
     }
+    merged = fillActiveBook(merged, chain);
   }
-  merged = fillActiveBook(merged, chain);
+  if (!bookComplete(merged, chain)) {
+    merged = fillActiveBook(mergeCandidates([merged, skeletonBook(chain)]), chain);
+  }
   const candleRows = uniqueBy(
     merged.filter((candidate) => candidate.poolAddress),
     (candidate) => candidate.mint,
@@ -908,16 +1182,19 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     chain,
     pinnedPools,
   );
-  const [regime, crossed] = await Promise.all([
+  const [regime, crossed, tapes] = await Promise.all([
     regimePromise,
-    crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] })),
+    chain === "solana"
+      ? crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] }))
+      : Promise.resolve({ candidates: merged, yields: [] as YieldQuote[] }),
+    tapesPromise,
+    chartsReady.catch(() => undefined),
   ]);
   let candidates = fillActiveBook(
     crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
     chain,
   );
   if (chain === "solana") {
-    const tapes = await loadJupiterTapes(candidates.map((candidate) => candidate.mint)).catch(() => new Map());
     candidates = candidates.map((candidate) => applyJupiterTape(candidate, tapes.get(candidate.mint) ?? null));
   }
   const stamped = withYields(regime, crossed.yields);

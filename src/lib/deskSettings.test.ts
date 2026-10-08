@@ -1,7 +1,55 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { commitTicketCap, nextSettingsDraft } from "./deskSettings";
+import {
+  commitTicketCap,
+  multipliersForMode,
+  nextSettingsDraft,
+  normalizeArmFundsUsd,
+  normalizeBuySizeUsd,
+  normalizeCronosQuote,
+  normalizeMarginOnFourHour,
+  resolveSolTradeMode,
+  usdcToLoad,
+} from "./deskSettings";
 import { DEFAULT_CONFIG, normalizeConfig } from "./store";
+
+describe("arm funds and buy size", () => {
+  it("keeps only 25, 50, or 150 for the armed bankroll", () => {
+    assert.equal(normalizeArmFundsUsd(25), 25);
+    assert.equal(normalizeArmFundsUsd(150), 150);
+    assert.equal(normalizeArmFundsUsd(80), 50);
+    assert.equal(normalizeBuySizeUsd(25, 50), 25);
+    assert.equal(normalizeBuySizeUsd(50, 25), 25);
+    assert.equal(usdcToLoad(200, 50, 0), 50);
+    assert.equal(usdcToLoad(20, 50, 40), 10);
+    assert.equal(usdcToLoad(20, 50, 0), 20);
+  });
+});
+
+describe("sol trade mode", () => {
+  it("infers both from older books that had 5x on, and keeps an explicit margin choice", () => {
+    assert.equal(resolveSolTradeMode({ multipliers: [5] }), "both");
+    assert.equal(resolveSolTradeMode({ multipliers: [] }), "spot");
+    assert.equal(resolveSolTradeMode({ solTradeMode: "margin", multipliers: [] }), "margin");
+    assert.equal(resolveSolTradeMode({ startingEquity: 6 }), "spot");
+    assert.equal(normalizeMarginOnFourHour(true), true);
+    assert.equal(normalizeMarginOnFourHour("yes"), false);
+    assert.deepEqual(multipliersForMode("spot", []), []);
+    assert.deepEqual(multipliersForMode("margin", []), [5, 10]);
+    assert.deepEqual(multipliersForMode("both", [10]), [10]);
+  });
+});
+
+describe("cronos quote", () => {
+  it("keeps USDC unless the book saved CRO", () => {
+    assert.equal(normalizeCronosQuote(undefined), "usdc");
+    assert.equal(normalizeCronosQuote("cro"), "cro");
+    assert.equal(normalizeCronosQuote("usdc"), "usdc");
+    assert.equal(normalizeCronosQuote("sol"), "usdc");
+    assert.equal(normalizeConfig({ cronosQuote: "cro" }).cronosQuote, "cro");
+    assert.equal(normalizeConfig({}).cronosQuote, "usdc");
+  });
+});
 
 describe("settings draft", () => {
   it("keeps a $5 ticket cap while the saved book is still $250", () => {

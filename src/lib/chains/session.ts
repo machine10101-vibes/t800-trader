@@ -9,6 +9,7 @@ import {
 } from "@/lib/solana/wallet";
 import {
   connectCronos,
+  detectedCronosWallet,
   disconnectCronos,
   listenCronos,
   refreshCronos,
@@ -49,14 +50,7 @@ export async function disconnectDesk(chain: ChainId, session?: DeskSession | nul
 }
 
 export function detectedDeskWallet(chain: ChainId): string | null {
-  if (chain === "cronos") {
-    if (typeof window === "undefined") return null;
-    const eth = (window as Window & { ethereum?: { isMetaMask?: boolean; isDefiWallet?: boolean; isCryptoCom?: boolean } }).ethereum;
-    if (!eth) return null;
-    if (eth.isDefiWallet || eth.isCryptoCom) return "Crypto.com";
-    if (eth.isMetaMask) return "MetaMask";
-    return "Ethereum wallet";
-  }
+  if (chain === "cronos") return detectedCronosWallet();
   return detectedWalletName();
 }
 

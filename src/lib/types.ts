@@ -176,6 +176,8 @@ export interface Signal {
   thesis: string;
   researchScore: number | null;
   createdAt: string;
+  /** Which chart produced the setup. Margin can wait for a 4-hour one. */
+  setupFrame?: "15m" | "4h";
 }
 
 export interface Position {
@@ -216,6 +218,8 @@ export interface Position {
   collateralUsd?: number;
   /** Jupiter perp position account, required to close a 5x or 10x ticket. */
   positionPubkey?: string;
+  /** Cronos quote used to open this ticket. A later Settings change does not flip the sell. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface Trade {
@@ -233,6 +237,8 @@ export interface Trade {
   note: string;
   /** Solana signature for a wallet swap. Missing means the row is simulated. */
   signature?: string;
+  /** Cronos quote this close sold back to. A later Settings change does not flip the share coin. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface BotConfig {
@@ -243,6 +249,7 @@ export interface BotConfig {
   minLiquidityUsd: number;
   minVolume24hUsd: number;
   minAgeHours: number;
+  /** Kept on saved books. New tickets only buy and sell. */
   allowShorts: boolean;
   allowMemes: boolean;
   scanSeconds: number;
@@ -281,6 +288,13 @@ export interface BotConfig {
    */
   multipliers: number[];
   /**
+   * Solana only. Spot is Jupiter swaps. Margin is a SOL 5x or 10x perp.
+   * Cronos ignores this and stays a spot buy and sell.
+   */
+  solTradeMode: "spot" | "margin" | "both";
+  /** When on, SOL margin waits for a 4-hour structure setup, not a 15-minute continuation. */
+  marginOnFourHour: boolean;
+  /**
    * Books saved before live swaps were the default have no rev and are switched on once.
    * After that, an explicit off stays off.
    */
@@ -293,6 +307,15 @@ export interface BotConfig {
   slippageBps: number;
   /** Hard cap on a single LIVE ticket, in USD. */
   maxLiveNotionalUsd: number;
+  /** USDC moved onto the trading key when the bot is armed. 25, 50, or 150. */
+  armFundsUsd: number;
+  /** Dollars one buy spends. Capped by the armed bankroll. */
+  buySizeUsd: number;
+  /**
+   * Cronos only. USDC buys with the stablecoin and sells back to USDC.
+   * CRO buys with wrapped CRO and sells back to CRO. Solana ignores this.
+   */
+  cronosQuote: "usdc" | "cro";
   /** Minimum native SOL before a LIVE buy is allowed. */
   minSolForFees: number;
   /** When on, new LIVE tickets are refused. Open signed tickets can still close. */
@@ -313,6 +336,8 @@ export interface ChainOrder {
   leverage?: number;
   collateralUsd?: number;
   positionPubkey?: string;
+  /** Cronos quote this ticket spends and returns. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export interface ChainFill {
@@ -323,6 +348,8 @@ export interface ChainFill {
   leverage?: number;
   collateralUsd?: number;
   positionPubkey?: string;
+  /** Cronos quote this fill spent or returned. */
+  cronosQuote?: "usdc" | "cro";
 }
 
 export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;
@@ -497,6 +524,6 @@ export interface DeskPayload {
   stats: BookStats;
   learning: LearningReport;
   generatedAt: string;
-  /** In-memory only. Reload clears it even if the saved book still says LIVE. */
+  /** True after LIVE is typed, or after a saved LIVE book is reopened. */
   liveSessionArmed: boolean;
 }

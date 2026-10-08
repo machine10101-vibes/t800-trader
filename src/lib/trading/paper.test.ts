@@ -29,7 +29,7 @@ describe("paper", () => {
     assert.equal(venueFeeBps("mint", "SOL"), 3);
     assert.equal(venueFeeBps("mint", "SOL", 5), 7);
     assert.equal(venueFeeBps("pumpMint", "PUMP"), 20);
-    assert.equal(venueFeeBps("0xabc", "CRO"), 0);
+    assert.equal(venueFeeBps("0xabc", "CRO"), 50);
     const state = emptyState({ ...DEFAULT_CONFIG, startingEquity: 1_000 });
     const opened = openPosition(state, signal({ symbol: "PUMP", mint: "pumpMint", price: 100 }), 1);
     assert.ok(Math.abs(opened.positions[0].entryPrice - 100 * (1 + 28 / 10_000)) < 1e-9);
@@ -44,6 +44,23 @@ describe("paper", () => {
     assert.ok(next.positions[0]!.notional <= 6 * 0.98);
     assert.ok(next.positions[0]!.notional >= 1);
     assert.ok(next.portfolio.cashUsd >= 0);
+  });
+
+  it("stamps the Cronos quote from the book so a later setting change does not flip the sell", () => {
+    const usdc = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100 }), signal({ price: 100 }), 1);
+    assert.equal(usdc.positions[0]?.cronosQuote, "usdc");
+    const cro = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100, cronosQuote: "cro" }), signal({ price: 100 }), 1);
+    assert.equal(cro.positions[0]?.cronosQuote, "cro");
+    const stamped = openPosition(emptyState({ ...DEFAULT_CONFIG, startingEquity: 100, cronosQuote: "usdc" }), signal({ price: 100 }), 1, "risk-on", {
+      signature: "sig",
+      qty: 1,
+      price: 100,
+      tokenDecimals: 18,
+      cronosQuote: "cro",
+    });
+    assert.equal(stamped.positions[0]?.cronosQuote, "cro");
+    const closedCro = closePosition(stamped, stamped.positions[0]!.id, 110, "target", "sig2");
+    assert.equal(closedCro.trades[0]?.cronosQuote, "cro");
   });
 
   it("records a wallet signature on a signed fill", () => {

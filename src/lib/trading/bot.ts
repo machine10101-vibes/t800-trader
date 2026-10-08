@@ -1,13 +1,15 @@
 import { sameMint, type ChainId } from "@/lib/chain";
+import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
+import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
 import { GAS_CRO } from "@/lib/cronos/constants";
-import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, cashExit, foldCandles, keepEntry, printClose, solanaKeepEntry, solanaPass, tapeInCash, tickHeadline, tickPass } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
-import { emptyState, mutateState } from "@/lib/store";
+import { emptyState, getActiveWallet, mutateState } from "@/lib/store";
+import { applyCronosProfitShares, cronosProfitShares, takeCronosProfitShare } from "@/lib/cronos/share";
+import { applySolProfitShares, solProfitShares, takeSolProfitShare } from "@/lib/solana/share";
 import { advise, studyTape } from "./learn";
 import {
   canOpen,
@@ -32,9 +34,9 @@ import {
   withUserBracket,
   type WalletBudget,
 } from "./risk";
-import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, recordCashSale, scaleOut, updateStop } from "./paper";
-import { entrySignals, snapshotTechnical, solanaEntrySignals } from "./signals";
-import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
+import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
+import { deskEntrySignals } from "./mtf";
+import { PERP_MIN_COLLATERAL_USD, leveragedTicket, orderForPosition, signedOnChain, tradeLeverage } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
@@ -64,12 +66,19 @@ async function marksForPositions(
   return marksForOpen(positions, quotes, prints);
 }
 
+async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
+  if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
+  if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
+  return state;
+}
+
 async function walletExit(
   state: AppState,
   pos: Position,
   reason: TradeReason,
   executor: ChainExecutor | undefined,
   blocked: string[],
+  chain: ChainId,
 ): Promise<AppState> {
   if (signedOnChain(pos)) {
     if (!executor) {
@@ -78,7 +87,7 @@ async function walletExit(
     }
     try {
       const fill = await executor(orderForPosition(pos, "close", state.config.venues));
-      return closePosition(state, pos.id, fill.price, reason, fill.signature);
+      return afterWinningClose(closePosition(state, pos.id, fill.price, reason, fill.signature), chain, true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "wallet sell failed";
       if (isAlreadyFlat(message)) return closePosition(state, pos.id, pos.markPrice, reason);
@@ -87,10 +96,10 @@ async function walletExit(
     }
   }
   if (state.config.walletSwaps && !pos.signature) {
-    if (pos.side === "short") return closePosition(state, pos.id, pos.markPrice, reason);
+    if (pos.side === "short") return afterWinningClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
     return state;
   }
-  return closePosition(state, pos.id, pos.markPrice, reason);
+  return afterWinningClose(closePosition(state, pos.id, pos.markPrice, reason), chain, false);
 }
 
 export async function tickBot(
@@ -139,14 +148,13 @@ export async function tickBot(
       }
       let closed = 0;
       let presetFilled = false;
-      let croAlreadyLive = false;
       const blocked: string[] = [];
 
       if (next.bot.running && market.regime.stance === "defensive") {
         for (const pos of [...next.positions]) {
           if (shouldFlattenMeme(pos, market.regime.stance)) {
             const before = next.positions.length;
-            next = await walletExit(next, pos, "risk-off", executor, blocked);
+            next = await walletExit(next, pos, "risk-off", executor, blocked, chain);
             if (next.positions.length < before) closed += 1;
           }
         }
@@ -157,7 +165,7 @@ export async function tickBot(
         if (plan.feeHold) blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
         if (plan.exit) {
           const before = next.positions.length;
-          next = await walletExit(next, pos, plan.exit, executor, blocked);
+          next = await walletExit(next, pos, plan.exit, executor, blocked, chain);
           if (next.positions.length < before) {
             closed += 1;
             if (plan.exit === "stop" || plan.exit === "target") {
@@ -186,41 +194,37 @@ export async function tickBot(
             } else {
               try {
                 const fill = await executor(orderForPosition(pos, "scale", next.config.venues, fraction));
-                next = scaleOut(next, pos.id, fraction, fill.signature, fill.price);
+                next = await afterWinningClose(scaleOut(next, pos.id, fraction, fill.signature, fill.price), chain, true);
               } catch (error) {
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
               }
             }
           } else if (!next.config.walletSwaps || (pos.side === "short" && !pos.signature)) {
-            next = scaleOut(next, pos.id, fraction);
+            next = await afterWinningClose(scaleOut(next, pos.id, fraction), chain, false);
           }
         }
-      }
-      if (next.bot.running) {
-        croAlreadyLive = next.positions.some((pos) => sameMint(pos.mint, WCRO_MINT) && Boolean(pos.signature));
       }
       if (next.bot.running) for (const pos of [...next.positions]) {
         const live = byMint.get(pos.mint) ?? [...byMint.values()].find((row) => sameMint(row.mint, pos.mint));
         const candles = cachedOhlcv(pos.poolAddress);
         const m15 = live ? live.flows.m15.priceChangePct : candleChangePct(candles ?? [], 15);
         const m5 = live ? live.flows.m5.priceChangePct : candleChangePct(candles ?? [], 5);
-        if (chain === "solana" && next.config.scratchEnabled === false) continue;
+        if (next.config.scratchEnabled === false) continue;
         const cashTape = m15 !== null && cashExit(pos.side, m15);
         const scratch = m5 !== null && m15 !== null && shouldScratch(pos, m5, m15);
-        if (chain === "solana" && favorableMovePct(pos) > 0 && !profitClearsFees(pos) && (cashTape || scratch)) {
+        if (favorableMovePct(pos) > 0 && !profitClearsFees(pos) && (cashTape || scratch)) {
           blocked.push(`${pos.symbol}: the gain does not beat the fee to open and the fee to close yet`);
           continue;
         }
         if (cashTape) {
           const before = next.positions.length;
-          next = await walletExit(next, pos, "fade", executor, blocked);
+          next = await walletExit(next, pos, "fade", executor, blocked, chain);
           if (next.positions.length < before) closed += 1;
           continue;
         }
-        if (next.config.scratchEnabled === false) continue;
         if (!scratch) continue;
         const before = next.positions.length;
-        next = await walletExit(next, pos, "time", executor, blocked);
+        next = await walletExit(next, pos, "time", executor, blocked, chain);
         if (next.positions.length < before) closed += 1;
       }
       next = markBook(next, prices);
@@ -264,68 +268,30 @@ export async function tickBot(
           blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
         }
       }
-      if (
-        chain === "cronos" &&
-        next.bot.running &&
-        next.config.walletSwaps &&
-        executor &&
-        budget &&
-        !croAlreadyLive
-      ) {
-        const cro = byMint.get(WCRO_MINT) ?? [...byMint.values()].find((row) => sameMint(row.mint, WCRO_MINT));
-        const price = cro?.priceUsd || budget.solPriceUsd || 0;
-        const qty = Math.max(0, budget.sol - GAS_CRO);
-        const flat = Boolean(cro && tapeInCash(cro.flows.m15.priceChangePct));
-        if (flat && price > 0 && qty * price >= MIN_TICKET_USD) {
-          try {
-            const fill = await executor({
-              kind: "close",
-              side: "long",
-              mint: WCRO_MINT,
-              symbol: "CRO",
-              notionalUsd: qty * price,
-              qty,
-              price,
-              venues: ["vvs"],
-              tokenDecimals: 18,
-            });
-            next = recordCashSale(next, {
-              mint: WCRO_MINT,
-              symbol: "CRO",
-              qty: fill.qty,
-              price: fill.price,
-              signature: fill.signature,
-              note: "CRO 15m is red, so the trading key sold CRO to USDC on VVS.",
-            });
-            closed += 1;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "wallet sell failed";
-            blocked.push(`CRO: ${message}`);
-          }
-        } else if (flat && budget.sol > GAS_CRO + 1) {
-          blocked.push(
-            price > 0
-              ? `CRO: trading key has ${qty.toFixed(3)} CRO, under the minimum sell`
-              : "CRO: price is missing, so the cash sell waits",
-          );
-        }
-      }
       const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
       const nativeMark = [...prices.entries()].find(([mint, price]) => price > 0 && sameMint(mint, nativeMint))?.[1] ?? 0;
       const priced =
         budget && !(budget.solPriceUsd > 0) && nativeMark > 0 ? { ...budget, solPriceUsd: nativeMark } : budget;
-      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps);
+      const payOpts =
+        chain === "cronos"
+          ? {
+              quote: next.config.cronosQuote,
+              feeReserve: next.config.cronosQuote === "cro" ? GAS_CRO : undefined,
+            }
+          : undefined;
+      const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps, payOpts);
       const balanceUnread = Boolean(next.config.walletSwaps && next.bot.running && !budget);
       if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
         next = studyTape(next, research.candidates, market.regime.stance);
-        const spendable = priced ? payableUsd(priced) : 0;
+        const spendable = priced ? payableUsd(priced, payOpts) : 0;
         const marked = priced ? walletMarkUsd(priced) : 0;
         const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
+          const spend = chain === "cronos" && next.config.cronosQuote === "cro" ? "CRO" : chain === "cronos" ? "USDC or CRO" : "SOL or USDC";
           blocked.push(
-            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${chain === "cronos" ? "CRO" : "SOL"} or USDC before a swap is sent`,
+            `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${spend} before a swap is sent`,
           );
         }
         const screen = bookScreen(next.config, chain);
@@ -334,6 +300,12 @@ export async function tickBot(
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
         for (const mint of bookMints(chain)) {
+          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(mint, WCRO_MINT) || watchMeta(mint, chain)?.symbol === "CRO")) {
+            if (!focus.some((token) => sameMint(token.mint, mint) || token.symbol === "CRO")) {
+              blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
+            }
+            continue;
+          }
           if (focus.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) continue;
           const symbol = watchMeta(mint, chain)?.symbol ?? "Asset";
           const live = byMint.get(mint) ?? research.candidates.find((token) => sameMint(token.mint, mint));
@@ -349,37 +321,40 @@ export async function tickBot(
           fearGreed: market.regime.fearGreed?.value ?? null,
           solChange: market.regime.sol.change24h,
         };
-        await Promise.all(focus.map((token) => loadDecisionChart(token.mint, chain).catch(() => [])));
-        for (const token of focus) {
+        const charts = await Promise.all(focus.map((token) => loadFrameCharts(token.mint, chain)));
+        focus.forEach((token, i) => {
           if (token.priceAgreement === "split") {
             blocked.push(`${token.symbol}: price feeds disagree`);
-            continue;
+            return;
           }
-          const decision = cachedDecisionChart(token.mint, chain);
-          const charted = decision && decision.length >= 30 ? snapshotTechnical(decision) : null;
-          if (chain === "solana" && !charted) {
-            blocked.push(`${token.symbol}: 4-hour chart has not loaded`);
-            continue;
+          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(token.mint, WCRO_MINT) || token.symbol === "CRO")) {
+            blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
+            return;
           }
-          const candles = cachedOhlcv(token.poolAddress);
-          const folded = candles ? foldCandles(candles, 5) : [];
-          const tech = charted ?? (folded.length >= 20 ? snapshotTechnical(folded) : null);
-          const found = (
-            chain === "solana"
-              ? solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx)
-              : entrySignals(token, tech, token.researchScore, next.config.allowShorts, tapeCtx)
-          ).filter((signal) =>
-            chain === "solana"
-              ? solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)
-              : keepEntry(signal.side, token.flows.m15.priceChangePct),
+          const frames = charts[i];
+          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const decision = deskEntrySignals(
+            token,
+            { m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
+            token.researchScore,
+            false,
+            tapeCtx,
+            { mode, marginOnFourHour: chain === "solana" && next.config.marginOnFourHour },
+          );
+          if (decision.missing) {
+            blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
+            return;
+          }
+          const found = decision.signals.filter(
+            (signal) =>
+              signal.side === "long" &&
+              (signal.setupFrame === "4h" ? true : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
           );
           signals.push(...found);
           if (!found.length) {
-            blocked.push(
-              chain === "solana" ? solanaPass(token.symbol, token.flows.m15.priceChangePct) : tickPass(token.symbol, token.flows.m15.priceChangePct),
-            );
+            blocked.push(decision.pass ?? solanaPass(token.symbol, token.flows.m15.priceChangePct));
           }
-        }
+        });
 
         signals.sort((a, b) => b.confidence - a.confidence);
         const shown: Signal[] = [];
@@ -444,14 +419,14 @@ export async function tickBot(
             trades: risk.trades,
             stance: market.regime.stance,
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
-            defensiveShorts: chain === "solana",
           });
           if (gate) {
             const native = chain === "cronos" ? "CRO" : "SOL";
-            const why =
-              gate === "Insufficient cash" && next.config.walletSwaps
-                ? `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`
-                : gate;
+            const spend =
+              chain === "cronos" && next.config.cronosQuote === "cro"
+                ? `need at least $${MIN_TICKET_USD} in CRO after the fee reserve`
+                : `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`;
+            const why = gate === "Insufficient cash" && next.config.walletSwaps ? spend : gate;
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
           }
@@ -471,20 +446,27 @@ export async function tickBot(
               })
             : { qty: 0, notional: 0 };
           const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
-          const wanted = multiplierFor(
-            next.config.multipliers,
-            Math.max(signal.confidence, learned.confidence),
-            learned.reason,
-            learned.symbol,
-            learned.mint,
-          );
+          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const wanted = tradeLeverage({
+            multipliers: next.config.multipliers,
+            confidence: Math.max(signal.confidence, learned.confidence),
+            reason: learned.reason,
+            symbol: learned.symbol,
+            mint: learned.mint,
+            mode,
+            marginOnFourHour: next.config.marginOnFourHour,
+            setupFrame: learned.setupFrame,
+          });
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
-          const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
+          if (learned.side === "short") {
+            blocked.push(`${learned.symbol}: this desk only buys and sells`);
+            continue;
+          }
           if (next.positions.some((pos) => sameMint(pos.mint, learned.mint))) {
             blocked.push(`${learned.symbol}: already in this mint`);
             continue;
           }
-          const wantedLev = liveShort && solPerp && wanted <= 1 ? 5 : wanted;
+          const wantedLev = wanted;
           const paying = wantedLev > 1 && solPerp && priced ? marginCashUsd(priced) : risk.portfolio.cashUsd;
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
           let leverage = ticket.leverage;
@@ -496,13 +478,7 @@ export async function tickBot(
             leverage = 1;
           }
           const qty = learned.price > 0 ? (collateralUsd * leverage) / learned.price : 0;
-          if (liveShort && solPerp && (ticket.spotFallback || leverage <= 1)) {
-            blocked.push(
-              `${learned.symbol}: a live short needs $${PERP_MIN_COLLATERAL_USD} of collateral for a Jupiter perp`,
-            );
-            continue;
-          }
-          if (ticket.spotFallback && learned.side !== "short") {
+          if (ticket.spotFallback) {
             blocked.push(
               `${learned.symbol}: ${wantedLev}x needs $${PERP_MIN_COLLATERAL_USD} on the trading key, so this ticket stays a spot buy`,
             );
@@ -532,6 +508,7 @@ export async function tickBot(
                   venues: next.config.venues,
                   leverage: leverage > 1 ? leverage : undefined,
                   collateralUsd: leverage > 1 ? collateralUsd : undefined,
+                  cronosQuote: chain === "cronos" ? next.config.cronosQuote : undefined,
                 });
               } catch (error) {
                 const message = error instanceof Error ? error.message : "wallet swap failed";
@@ -622,7 +599,11 @@ export async function tickBot(
   }, chain);
 }
 
-export function applyControl(state: AppState, action: "start" | "stop" | "reset" | "flatten" | "kill"): AppState {
+export function applyControl(
+  state: AppState,
+  action: "start" | "stop" | "reset" | "flatten" | "kill",
+  chain: ChainId = "solana",
+): AppState {
   if (action === "reset") {
     return emptyState(state.config);
   }
@@ -635,9 +616,15 @@ export function applyControl(state: AppState, action: "start" | "stop" | "reset"
   }
   if (action === "flatten") {
     const flat = pushEquity(flattenBook(state, "manual"));
+    const shared =
+      chain === "solana"
+        ? applySolProfitShares(flat, solProfitShares(flat))
+        : chain === "cronos"
+          ? applyCronosProfitShares(flat, cronosProfitShares(flat))
+          : flat;
     return {
-      ...flat,
-      bot: { ...flat.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },
+      ...shared,
+      bot: { ...shared.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },
     };
   }
   if (action === "start") {

@@ -1,6 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atrTradeable, buildFlowSignals, buildSignals, ema, entrySignals, rewardToRisk, rsi, snapshotTechnical, solanaEntrySignals } from "./signals";
+import {
+  atrTradeable,
+  buildFlowSignals,
+  buildSignals,
+  candleSetups,
+  ema,
+  entrySignals,
+  FIFTEEN_MIN_ATR,
+  FOUR_HOUR_ATR,
+  rewardToRisk,
+  rsi,
+  snapshotTechnical,
+  solanaEntrySignals,
+} from "./signals";
 import { canOpen, cashConcentration, sizePosition } from "./risk";
 import { DEFAULT_CONFIG } from "../store";
 import type { Candle, MarketRegime, TechnicalSnapshot, TokenCandidate } from "../types";
@@ -47,6 +60,55 @@ describe("indicators", () => {
     assert.equal(atrTradeable(0.2), false);
     assert.equal(atrTradeable(8), false);
     assert.equal(atrTradeable(1.4), true);
+  });
+
+  it("treats a thin single-print bar as a neutral close, not a weak one", () => {
+    const rows = candles(40);
+    const last = rows[rows.length - 1]!;
+    rows[rows.length - 1] = { ...last, open: last.close, high: last.close, low: last.close, close: last.close };
+    const snap = snapshotTechnical(rows);
+    assert.equal(snap.closeStrength, 0.5);
+  });
+
+  it("lets a 15-minute watchlist name continue without a volume spike", () => {
+    const flow = { buys: 50, sells: 50, buyers: 20, sellers: 20, volumeUsd: 1, priceChangePct: 0.1 };
+    const token = {
+      symbol: "CRO",
+      mint: "cro",
+      poolAddress: "pool",
+      sector: "L1",
+      watchlist: true,
+      flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
+    } as TokenCandidate;
+    const longTech = {
+      rsi14: 58,
+      ema9: 1.01,
+      ema21: 1,
+      vwap: 1,
+      atrPct: 0.8,
+      volumeZ: -0.8,
+      lastClose: 1.005,
+      extensionPct: 0.4,
+      closeStrength: 0.5,
+      priorHigh: 1.05,
+      priorLow: 0.98,
+      barsAboveEma9: 2,
+    } as TechnicalSnapshot;
+    const fifteen = candleSetups(token, longTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
+    assert.equal(fifteen.some((signal) => signal.side === "long" && signal.reason === "reclaim"), true);
+    assert.equal(candleSetups(token, longTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FOUR_HOUR_ATR).length, 0);
+    const shortTech = {
+      ...longTech,
+      rsi14: 42,
+      ema9: 0.99,
+      ema21: 1,
+      lastClose: 0.995,
+      extensionPct: -0.4,
+      barsAboveEma9: 0,
+      barsBelowEma9: 2,
+    } as TechnicalSnapshot;
+    const shorts = candleSetups(token, shortTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
+    assert.equal(shorts.some((signal) => signal.side === "short"), false);
   });
 
   it("lets a liquid watchlist name continue when the 5m range is held", () => {
@@ -325,7 +387,7 @@ describe("indicators", () => {
     assert.equal(buildFlowSignals(unprinted, 70, true, { stance: "mixed", fearGreed: 50, solChange: -1.2 }).length, 0);
   });
 
-  it("shorts a falling watchlist name and keeps a candle short", () => {
+  it("does not short a falling watchlist name", () => {
     const flow = (priceChangePct: number, buys = 40, sells = 60) => ({
       buys,
       sells,
@@ -353,9 +415,7 @@ describe("indicators", () => {
     assert.equal(buildFlowSignals(token, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).length, 0);
     assert.equal(buildFlowSignals(token, 70, true, { stance: "defensive", fearGreed: 40, solChange: -0.4 }).length, 0);
     const found = buildFlowSignals(token, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(found.length, 1);
-    assert.equal(found[0]?.side, "short");
-    assert.equal(found[0]?.reason, "fade");
+    assert.equal(found.some((signal) => signal.side === "short"), false);
     const climax = {
       ...token,
       priceUsd: 200,
@@ -383,8 +443,7 @@ describe("indicators", () => {
       barsAboveEma9: 4,
     } as TechnicalSnapshot;
     const kept = entrySignals(climax, tech, 60, true, { stance: "mixed", fearGreed: 50, solChange: 0.2 });
-    assert.equal(kept[0]?.side, "short");
-    assert.equal(kept[0]?.reason, "fade");
+    assert.equal(kept.some((signal) => signal.side === "short"), false);
     const zebec = buildFlowSignals({ ...token, symbol: "ZBCN", mint: "zbcn" }, 70, true, {
       stance: "mixed",
       fearGreed: 50,
@@ -403,8 +462,7 @@ describe("indicators", () => {
       },
     };
     const mildShort = buildFlowSignals(mild, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(mildShort.length, 1);
-    assert.equal(mildShort[0]?.side, "short");
+    assert.equal(mildShort.some((signal) => signal.side === "short"), false);
     const tooFlat = {
       ...mild,
       flows: { ...mild.flows, m15: flow(-0.1, 52, 48) },
@@ -441,7 +499,7 @@ describe("indicators", () => {
     const structured = buildSignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     assert.equal(structured[0]?.side, "long");
     const preferred = entrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(preferred[0]?.side, "short");
+    assert.equal(preferred[0]?.side, "long");
     const solana = solanaEntrySignals(both, techLong, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
     const shape = (rows: typeof structured) => rows.map((s) => `${s.side}:${s.reason}:${s.confidence}`);
     assert.deepEqual(shape(solana), shape(structured));
@@ -473,9 +531,7 @@ describe("indicators", () => {
       },
     };
     const rayShort = solanaEntrySignals(falling, down, 70, true, { stance: "mixed", fearGreed: 50, solChange: -0.4 });
-    assert.equal(rayShort[0]?.side, "short");
-    assert.equal(rayShort[0]?.reason, "breakout");
-    assert.equal(solanaEntrySignals(falling, down, 70, false, { stance: "mixed", fearGreed: 50, solChange: -0.4 }).some((s) => s.side === "short"), false);
+    assert.equal(rayShort.some((s) => s.side === "short"), false);
     const dip = {
       ...down,
       rsi14: 48,
@@ -504,12 +560,10 @@ describe("indicators", () => {
     } as TechnicalSnapshot;
     const grinding = { ...dipped, priceUsd: 97 };
     const cont = solanaEntrySignals(grinding, grind, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
-    assert.equal(cont[0]?.side, "short");
-    assert.equal(cont[0]?.reason, "reclaim");
+    assert.equal(cont.some((s) => s.side === "short"), false);
     const hot = { ...grind, rsi14: 82, ema9: 110, ema21: 100, barsBelowEma9: 0, barsAboveEma9: 3, lastClose: 108, priorLow: 90 } as TechnicalSnapshot;
     const ripped = solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, hot, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 });
-    assert.equal(ripped[0]?.side, "short");
-    assert.equal(ripped[0]?.reason, "reclaim");
+    assert.equal(ripped.some((s) => s.side === "short"), false);
     const warm = { ...hot, rsi14: 70 } as TechnicalSnapshot;
     assert.equal(solanaEntrySignals({ ...grinding, watchlist: false, priceUsd: 108 }, warm, 70, true, { stance: "mixed", fearGreed: 50, solChange: 0 }).some((s) => s.side === "short"), false);
   });

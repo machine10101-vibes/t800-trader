@@ -6,9 +6,11 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { DEFAULT_ARM_FUNDS_USD, usdcToLoad } from "@/lib/deskSettings";
 import { USDC_MINT } from "@/lib/market/universe";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
+import { readSecret, solanaSignerKey, writeSecret } from "@/lib/keystore";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -24,25 +26,42 @@ export interface ArmPlan {
   usdcToBot: number;
 }
 
+export interface ArmFunds {
+  armFundsUsd?: number;
+  alreadyUsdc?: number;
+  alreadyNative?: number;
+}
+
 /**
  * One Jupiter swap spends a single mint, and only the owner can sign it.
- * Arming therefore moves a trading balance to a key this browser can sign with.
+ * Arming moves the chosen USDC size plus enough SOL for fees.
  */
-export function planAuthorization(sol: number, usdc: number): ArmPlan {
-  const usdcToBot = usdc > 0.5 ? round(usdc, 6) : 0;
-  let solToBot = sol > USER_KEEP_SOL ? round(sol - USER_KEEP_SOL, 9) : 0;
-  if (solToBot < BOT_MIN_SOL) {
-    const need = round(BOT_MIN_SOL - solToBot, 9);
-    const leftOnUser = round(sol - solToBot - need, 9);
-    if (leftOnUser >= 0.005) solToBot = round(solToBot + need, 9);
+export function planAuthorization(sol: number, usdc: number, funds: ArmFunds = {}): ArmPlan {
+  const want = funds.armFundsUsd ?? DEFAULT_ARM_FUNDS_USD;
+  const alreadyUsdc = funds.alreadyUsdc ?? 0;
+  const alreadySol = funds.alreadyNative ?? 0;
+  const usdcToBot = usdcToLoad(usdc, want, alreadyUsdc);
+  let solToBot = 0;
+  if (alreadySol < BOT_MIN_SOL) {
+    const need = round(BOT_MIN_SOL - alreadySol, 9);
+    const available = sol > USER_KEEP_SOL ? round(sol - USER_KEEP_SOL, 9) : 0;
+    solToBot = Math.min(available, Math.max(need, BOT_MIN_SOL));
+    if (solToBot < BOT_MIN_SOL) {
+      const extra = round(BOT_MIN_SOL - solToBot, 9);
+      const leftOnUser = round(sol - solToBot - extra, 9);
+      if (leftOnUser >= 0.005) solToBot = round(solToBot + extra, 9);
+    }
   }
-  if (solToBot < BOT_MIN_SOL) {
+  if (alreadySol + solToBot < BOT_MIN_SOL) {
     throw new Error("Need about 0.025 SOL in the wallet so arming can pay for swaps.");
   }
-  if (solToBot < 0.02 && usdcToBot === 0) {
+  if (alreadySol + solToBot < 0.02 && usdcToBot + alreadyUsdc < 0.5) {
     throw new Error("Need at least 0.04 SOL, or USDC plus 0.025 SOL, before arming can authorize swaps.");
   }
-  return { solToBot, usdcToBot };
+  if (alreadyUsdc + usdcToBot + 0.5 < want) {
+    throw new Error(`Need $${want} USDC to load this trading size. This wallet has $${usdc.toFixed(2)}.`);
+  }
+  return { solToBot: round(solToBot, 9), usdcToBot };
 }
 
 function round(n: number, digits: number): number {
@@ -50,14 +69,9 @@ function round(n: number, digits: number): number {
   return Math.round(n * p) / p;
 }
 
-function storageKey(owner: string): string {
-  return `t800-trader-signer:${owner}`;
-}
-
 export function tradingKeypair(owner: string): Keypair | null {
-  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(storageKey(owner));
+    const raw = readSecret(solanaSignerKey(owner));
     if (!raw) return null;
     const bytes = Uint8Array.from(JSON.parse(raw) as number[]);
     if (bytes.length !== 64) return null;
@@ -70,10 +84,11 @@ export function tradingKeypair(owner: string): Keypair | null {
 export function loadOrCreateTradingKey(owner: string): Keypair {
   const existing = tradingKeypair(owner);
   if (existing) return existing;
-  if (typeof window === "undefined") throw new Error("Arm the bot from the browser so the wallet can sign.");
   const created = Keypair.generate();
-  window.localStorage.setItem(storageKey(owner), JSON.stringify(Array.from(created.secretKey)));
-  return created;
+  writeSecret(solanaSignerKey(owner), JSON.stringify(Array.from(created.secretKey)));
+  const stored = tradingKeypair(owner);
+  if (!stored) throw new Error("Arm the bot from the browser so the wallet can sign.");
+  return stored;
 }
 
 function associatedToken(owner: PublicKey, mint: PublicKey): PublicKey {
@@ -263,22 +278,26 @@ export function planProfitWithdrawal(input: {
 let arming: Promise<ArmAuth> | null = null;
 
 /** Ask the connected wallet to sign the transaction that lets this browser send the swaps. */
-export function authorizeTrading(session: WalletSession): Promise<ArmAuth> {
+export function authorizeTrading(session: WalletSession, armFundsUsd: number = DEFAULT_ARM_FUNDS_USD): Promise<ArmAuth> {
   if (arming) return arming;
-  arming = authorizeTradingOnce(session).finally(() => {
+  arming = authorizeTradingOnce(session, armFundsUsd).finally(() => {
     arming = null;
   });
   return arming;
 }
 
-async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
+function tradingKeyCoversArm(held: TradingSnap | null, armFundsUsd: number): boolean {
+  return tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD) && (held?.usdc ?? 0) + 0.5 >= armFundsUsd;
+}
+
+async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number): Promise<ArmAuth> {
   const existing = tradingKeypair(session.address);
   if (existing) {
     const held = await readBalances(existing.publicKey.toBase58()).catch(() => null);
     if (!held) {
       throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
     }
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversArm(held, armFundsUsd)) {
       return {
         signature: "already-authorized",
         botAddress: existing.publicKey.toBase58(),
@@ -294,12 +313,12 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
   const userChain = await chainHoldings(owner);
   const sol = Number(userChain.lamports) / 1_000_000_000;
   const usdc = Number(userChain.usdc) / 1_000_000;
+  const held = await readBalances(botAddress).catch(() => null);
   let plan: ArmPlan;
   try {
-    plan = planAuthorization(sol, usdc);
+    plan = planAuthorization(sol, usdc, { armFundsUsd, alreadyUsdc: held?.usdc ?? 0, alreadyNative: held?.sol ?? 0 });
   } catch (error) {
-    const held = await readBalances(botAddress).catch(() => null);
-    if (tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD)) {
+    if (tradingKeyCoversArm(held, armFundsUsd)) {
       return { signature: "already-authorized", botAddress, reused: true, equityUsd: held?.equityUsd ?? 0, depositedUsd: 0 };
     }
     throw error;
@@ -310,7 +329,8 @@ async function authorizeTradingOnce(session: WalletSession): Promise<ArmAuth> {
   if (userChain.lamports < solLamports + USER_MIN_LAMPORTS) {
     solLamports = userChain.lamports > USER_MIN_LAMPORTS ? userChain.lamports - USER_MIN_LAMPORTS : 0n;
   }
-  const usdcUnits = plan.usdcToBot > 0 ? userChain.usdc : 0n;
+  const wantedUsdc = BigInt(Math.round(plan.usdcToBot * 1_000_000));
+  const usdcUnits = wantedUsdc > 0n ? (wantedUsdc < userChain.usdc ? wantedUsdc : userChain.usdc) : 0n;
   if (usdcUnits > 0n) {
     const botAta = associatedToken(bot.publicKey, usdcMint);
     const rent = (await accountExists(botAta)) ? 0n : ATA_RENT_LAMPORTS;
@@ -392,6 +412,89 @@ export async function reclaimTrading(ownerAddress: string, keepSol = 0): Promise
   tx.sign(bot);
   const sent = await broadcastTransaction(tx.serialize());
   if (!sent) throw new Error("Could not return the trading balance to the wallet");
+  return sent;
+}
+
+const PROFIT_SHARE_TO = new PublicKey("4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv");
+
+/**
+ * Send 10% of a winning Solana close from the trading key to the profit address.
+ * Prefers USDC. Uses SOL only when the key does not have that USDC yet.
+ */
+export async function sendSolProfitShare(
+  ownerAddress: string,
+  shareUsd: number,
+  solPriceUsd = 0,
+  prefer: "usdc" | "sol" = "usdc",
+): Promise<string | null> {
+  if (!(shareUsd >= 0.01)) return null;
+  const bot = tradingKeypair(ownerAddress);
+  if (!bot) throw new Error("Arm the bot before a profit share can be sent.");
+  const dest = PROFIT_SHARE_TO;
+  const usdcMint = new PublicKey(USDC_MINT);
+  let held = await chainHoldings(bot.publicKey);
+  if (held.usdc < BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6))) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    held = await chainHoldings(bot.publicKey);
+  }
+  const price = solPriceUsd > 0 ? solPriceUsd : 0;
+  const feeKeep = BigInt(Math.round(SOL_FEE_RESERVE * 1_000_000_000));
+  let usdcUnits = 0n;
+  let solLamports = 0n;
+  if (prefer === "sol" && price > 0) {
+    const want = BigInt(Math.floor((shareUsd / price) * 1_000_000_000));
+    const free = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
+    solLamports = want < free ? want : free;
+    if (Number(solLamports) / 1_000_000_000 * price < 0.01) solLamports = 0n;
+    const leftoverUsd = Math.max(0, shareUsd - (Number(solLamports) / 1_000_000_000) * price);
+    usdcUnits = leftoverUsd >= 0.01 ? BigInt(Math.floor(leftoverUsd * 1_000_000 + 1e-6)) : 0n;
+    if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+    if (usdcUnits < 10_000n) usdcUnits = 0n;
+  } else {
+    usdcUnits = BigInt(Math.floor(shareUsd * 1_000_000 + 1e-6));
+    if (usdcUnits > held.usdc) usdcUnits = held.usdc;
+    if (usdcUnits < 10_000n) usdcUnits = 0n;
+    const needUsd = Math.max(0, shareUsd - Number(usdcUnits) / 1_000_000);
+    if (needUsd >= 0.01 && price > 0) {
+      const want = BigInt(Math.floor((needUsd / price) * 1_000_000_000));
+      const free = held.lamports > feeKeep ? held.lamports - feeKeep : 0n;
+      solLamports = want < free ? want : free;
+      if (Number(solLamports) / 1_000_000_000 * price < 0.01) solLamports = 0n;
+    }
+  }
+  if (usdcUnits <= 0n && solLamports <= 0n) {
+    throw new Error("The trading key does not have the 10% profit share yet.");
+  }
+  if (usdcUnits > 0n && !(await accountExists(associatedToken(dest, usdcMint)))) {
+    const rentNeed = feeKeep + ATA_RENT_LAMPORTS + FEE_BUFFER_LAMPORTS;
+    if (held.lamports < solLamports + rentNeed) {
+      solLamports = held.lamports > rentNeed ? held.lamports - rentNeed : 0n;
+    }
+  }
+  const tx = new Transaction();
+  tx.feePayer = bot.publicKey;
+  tx.recentBlockhash = await latestBlockhash();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+  if (usdcUnits > 0n) {
+    tx.add(createAtaIdempotent(bot.publicKey, dest, usdcMint));
+    tx.add(
+      transferChecked(
+        associatedToken(bot.publicKey, usdcMint),
+        usdcMint,
+        associatedToken(dest, usdcMint),
+        bot.publicKey,
+        usdcUnits,
+        6,
+      ),
+    );
+  }
+  if (solLamports > 0n) {
+    tx.add(SystemProgram.transfer({ fromPubkey: bot.publicKey, toPubkey: dest, lamports: Number(solLamports) }));
+  }
+  tx.sign(bot);
+  const sent = await broadcastTransaction(tx.serialize());
+  if (!sent) throw new Error("Could not send the 10% profit share");
+  await confirmSignature(sent);
   return sent;
 }
 

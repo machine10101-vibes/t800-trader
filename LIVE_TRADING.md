@@ -8,11 +8,11 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 
 | Action | LIVE | Notes |
 | --- | --- | --- |
-| Long open | Yes | After you arm, a browser trading key sends Jupiter ExactIn (USDC or SOL → token). |
-| Long close (button, stop, target, trail, time) | Yes | Token → USDC. If the trading key has under 0.006 SOL, Jupiter Ultra sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
-| SOL 5x / 10x | Yes | Jupiter perps on the polished desk, when the trading key can post collateral. |
-| Short open / cover | SOL only | Practice can short every book name with the same 4-hour setups used to buy. A live short is a SOL Jupiter perpetual. Other live names stay spot buys and sells. |
-| Cronos | Separate | VVS path on the Cronos desk. LIVE confirm is Solana-only. |
+| Buy | Yes | After you arm, a browser trading key sends Jupiter ExactIn (USDC or SOL → token). |
+| Sell (button, stop, target, trail, time) | Yes | Token → USDC. If the trading key has under 0.006 SOL, Jupiter Ultra sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
+| SOL 5x / 10x | Settings | Jupiter long perps when the Sol desk is on Margin or Both and the trading key can post collateral. Spot mode stays a swap. Margin can wait for a solid 4-hour setup. |
+| Short | No | Both desks only buy and sell. |
+| Cronos | Same 4-hour logic | Book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. Buys and sells quote WolfSwap and cro.trade and send the better output. LIVE confirm is Solana-only. |
 
 ## Enable LIVE
 
@@ -23,7 +23,7 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 5. Arm the bot. The wallet signs once to fund the trading key. That key sends each Jupiter swap.
 6. After confirm, the ticket stores the signature (Solscan link) and the book refreshes balances.
 
-Reload locks LIVE again. The preference may still say LIVE, but this session will not send until you re-confirm. **Kill LIVE** immediately sets PAPER, stops the bot, and disarms the session. Signed tickets can still be closed by hand.
+A refresh or a later visit keeps LIVE on if the bot was still armed. Closing the GitHub Pages tab still stops the scans. On your computer run `npm run build` then `npm run desk`, open http://127.0.0.1:8787/t800-trader/, and arm from that address. That process keeps scanning after you close the browser. Keys stay in `~/.t800-trader` (or `$T800_DATA`) on that machine. They are never uploaded. **Kill LIVE** immediately sets PAPER, stops the bot, and disarms the session. Signed tickets can still be closed by hand.
 
 ## Env (all optional, all public)
 
@@ -33,6 +33,7 @@ Reload locks LIVE again. The preference may still say LIVE, but this session wil
 | `NEXT_PUBLIC_JUPITER_API` | `https://lite-api.jup.ag/swap/v1` | Keyless quote + swap build |
 | `NEXT_PUBLIC_JUPITER_ULTRA_API` | `https://lite-api.jup.ag/ultra/v1` | Fee-sponsored closes when SOL is under 0.006 |
 | `NEXT_PUBLIC_JUPITER_API_KEY` | unset | Optional `x-api-key` if you use `https://api.jup.ag/swap/v1` |
+| `NEXT_PUBLIC_WOLFSWAP_API_KEY` | WolfSwap's published test key | Cronos quotes. A production key replaces the test key. |
 
 No private key env vars exist. Do not add any.
 
@@ -44,7 +45,7 @@ Rebuild after changing `NEXT_PUBLIC_*` (`npm run build` or `npm run dev`).
 - **Max live size** (default $250 USDC per ticket)
 - **Min SOL for fees** (default 0.02)
 - Existing paper risk: per-trade %, daily loss cap, max positions, liquidity floor
-- Preflight refuses: kill switch, unarmed session, a spot short, dust, oversize. A SOL short is sent as a Jupiter perpetual.
+- Preflight refuses: kill switch, unarmed session, a short, dust, oversize. Both desks only buy and sell.
 
 ## Dry-run / tests
 

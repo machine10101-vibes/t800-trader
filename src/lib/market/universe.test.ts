@@ -2,7 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
 import {
+  bookMints,
+  bookPools,
   classifySector,
+  headlineFor,
   isForeignOrWrapped,
   isQuote,
   isStable,
@@ -31,5 +34,18 @@ describe("Solana universe", () => {
     assert.equal(classifySector("BONK", "Bonk"), "Meme");
     assert.equal(isForeignOrWrapped("WETH", "Wrapped Ether"), true);
     assert.equal(isForeignOrWrapped("JUP", "Jupiter"), false);
+  });
+
+  it("trades CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI on Cronos", () => {
+    const symbols = bookMints("cronos").map((mint) => watchMeta(mint, "cronos")?.symbol);
+    assert.deepEqual(symbols, ["CRO", "ULTCAT", "CRIMECAT", "MERY", "PACK", "ULTI"]);
+    assert.equal(bookPools("cronos").length, 6);
+    assert.deepEqual(
+      headlineFor("cronos").map((row) => row.symbol),
+      ["CRO", "ULTCAT", "CRIMECAT", "MERY", "PACK", "ULTI"],
+    );
+    assert.equal(watchMeta("0x5b326376d34253fab935d3113698c335c7e61e85", "cronos")?.name, "Crime Cat");
+    assert.equal(watchMeta("0x074fa42e34c503ba83a6913d275a2fce5f94f1d5", "cronos")?.name, "Ulti");
+    assert.equal(bookMints("solana").includes("0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23"), false);
   });
 });

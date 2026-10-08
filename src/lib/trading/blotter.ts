@@ -88,7 +88,7 @@ export function executionLine(trade: Trade, stillOpen = false): ExecutionLine {
   const verb = trade.action === "open" ? "Bought" : partial ? "Sold part" : "Sold";
   return {
     id: trade.id,
-    verb: trade.side === "short" && verb === "Bought" ? "Bought" : verb,
+    verb: trade.side === "short" && verb === "Bought" ? "Sold" : verb,
     symbol: trade.symbol,
     side: trade.side,
     qty: trade.qty,
@@ -105,7 +105,7 @@ export function executionLine(trade: Trade, stillOpen = false): ExecutionLine {
 
 function buyWhy(trade: Trade): string {
   const base = BUY_WHY[trade.reason] ?? "Bought";
-  return trade.side === "short" ? base.replace(/^Bought/, "Bet against") : base;
+  return trade.side === "short" ? base.replace(/^Bought/, "Sold") : base;
 }
 
 function sellWhy(trade: Trade): string {

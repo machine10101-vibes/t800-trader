@@ -42,24 +42,26 @@ const portfolio = (over: Partial<Portfolio> = {}): Portfolio => ({
 });
 
 describe("risk", () => {
-  it("sizes smaller in a defensive regime", () => {
-    const riskOn = sizePosition({
+  it("spends the chosen buy size and never more than the book can hold", () => {
+    const sized = sizePosition({
       equity: 10_000,
       price: 100,
       stopPct: 2,
-      config: DEFAULT_CONFIG,
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 25 },
       regime: regime("risk-on"),
       researchScore: 70,
     });
-    const def = sizePosition({
-      equity: 10_000,
+    assert.equal(sized.notional, 25);
+    const tight = sizePosition({
+      equity: 6,
       price: 100,
       stopPct: 2,
-      config: DEFAULT_CONFIG,
-      regime: regime("defensive"),
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 25 },
+      regime: regime("risk-on"),
       researchScore: 70,
     });
-    assert.ok(def.notional < riskOn.notional);
+    assert.ok(tight.notional <= 6 * cashConcentration(6));
+    assert.ok(tight.notional >= MIN_TICKET_USD);
   });
 
   it("blocks new risk after the daily loss limit", () => {
@@ -167,13 +169,13 @@ describe("risk", () => {
     assert.equal(reason, "Sector cap of 2 reached for DEX");
   });
 
-  it("blocks shorts when the tape is defensive", () => {
+  it("refuses a short on both desks", () => {
     const signal = {
       id: "s3",
       mint: SOL_MINT,
       symbol: "SOL",
       poolAddress: "z",
-      sector: "Meme",
+      sector: "L1",
       side: "short",
       reason: "fade",
       confidence: 80,
@@ -184,43 +186,25 @@ describe("risk", () => {
       researchScore: 60,
       createdAt: new Date().toISOString(),
     } as Signal;
-    const reason = canOpen({
-      positions: [],
-      signal,
-      config: DEFAULT_CONFIG,
-      portfolio: portfolio(),
-      stance: "defensive",
-    });
-    assert.equal(reason, "No shorts in a defensive tape");
     assert.equal(
       canOpen({
         positions: [],
-        signal: { ...signal, sector: "L1" },
-        config: DEFAULT_CONFIG,
+        signal,
+        config: { ...DEFAULT_CONFIG, walletSwaps: false, allowShorts: true },
         portfolio: portfolio(),
-        stance: "defensive",
-        defensiveShorts: true,
+        stance: "mixed",
       }),
-      null,
-    );
-  });
-
-  it("lets practice short a coin other than SOL, and keeps a live short on SOL", () => {
-    const signal = {
-      mint: "ray",
-      symbol: "RAY",
-      sector: "DEX",
-      side: "short",
-      reason: "breakout",
-      confidence: 80,
-    } as Signal;
-    assert.equal(
-      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: false }, portfolio: portfolio(), stance: "mixed" }),
-      null,
+      "This desk only buys and sells",
     );
     assert.equal(
-      canOpen({ positions: [], signal, config: { ...DEFAULT_CONFIG, walletSwaps: true }, portfolio: portfolio(), stance: "mixed" }),
-      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
+      canOpen({
+        positions: [],
+        signal: { ...signal, mint: "ray", symbol: "RAY", sector: "DEX" },
+        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
+        portfolio: portfolio(),
+        stance: "mixed",
+      }),
+      "This desk only buys and sells",
     );
   });
 
@@ -273,26 +257,17 @@ describe("risk", () => {
     assert.equal(reason, "Holding 2 coins, the most allowed at once");
   });
 
-  it("sizes down after a two-loss streak", () => {
-    const fresh = sizePosition({
-      equity: 10_000,
-      price: 100,
-      stopPct: 6,
-      config: DEFAULT_CONFIG,
-      regime: regime("risk-on"),
-      researchScore: 70,
-      lossStreak: 0,
-    });
+  it("keeps the chosen buy size after a two-loss streak", () => {
     const hurt = sizePosition({
       equity: 10_000,
       price: 100,
       stopPct: 6,
-      config: DEFAULT_CONFIG,
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 10 },
       regime: regime("risk-on"),
       researchScore: 70,
       lossStreak: 2,
     });
-    assert.ok(hurt.notional < fresh.notional);
+    assert.equal(hurt.notional, 10);
   });
 
   it("counts consecutive closed losses", () => {
@@ -691,6 +666,8 @@ describe("risk", () => {
 describe("walletRiskBook", () => {
   it("sizes a live ticket from the wallet and ignores unsigned paper rows", () => {
     assert.ok(Math.abs(spendableUsd({ usdc: 10, sol: 0.2, solPriceUsd: 100 }) - 19.6) < 1e-6);
+    assert.ok(Math.abs(spendableUsd({ usdc: 40, sol: 600, solPriceUsd: 0.1, wcro: 10 }, { quote: "cro", feeReserve: 0.5 }) - 60.95) < 1e-6);
+    assert.equal(spendableUsd({ usdc: 40, sol: 1, solPriceUsd: 0.1 }, { quote: "cro", feeReserve: 0.5 }), 0.05);
     const perp = solPerpPostableUsd({ usdc: 0, sol: 0.13, solPriceUsd: 120 });
     assert.ok(perp >= 10, `0.13 SOL should still post a 5x or 10x, got ${perp}`);
     assert.equal(solPerpPostableUsd({ usdc: 12, sol: 0.02, solPriceUsd: 200 }), 12);
@@ -758,7 +735,7 @@ describe("LIVE gates and short trail", () => {
     );
   });
 
-  it("lets a live SOL short through and a practice short of any book name", () => {
+  it("refuses every short, including a live SOL ticket", () => {
     assert.equal(
       canOpen({
         positions: [],
@@ -767,7 +744,7 @@ describe("LIVE gates and short trail", () => {
         portfolio: portfolio(),
         stance: "mixed",
       }),
-      null,
+      "This desk only buys and sells",
     );
     assert.equal(
       canOpen({
@@ -777,17 +754,7 @@ describe("LIVE gates and short trail", () => {
         portfolio: portfolio(),
         stance: "mixed",
       }),
-      null,
-    );
-    assert.equal(
-      canOpen({
-        positions: [],
-        signal: { ...longSignal, side: "short", symbol: "ZBCN" },
-        config: { ...DEFAULT_CONFIG, walletSwaps: true, allowShorts: true },
-        portfolio: portfolio(),
-        stance: "mixed",
-      }),
-      "A live short is SOL only, on Jupiter perps. Practice can short this coin.",
+      "This desk only buys and sells",
     );
   });
 
@@ -970,6 +937,9 @@ describe("settings stop and target", () => {
       targetPrice: 104,
       bracketPreset: true,
     });
-    assert.equal(managePosition(cro).exit, "time");
+    assert.equal(managePosition(cro).feeHold, true);
+    assert.equal(managePosition(cro).exit, undefined);
+    const croCleared = { ...cro, markPrice: 102, highWater: 102 };
+    assert.equal(managePosition(croCleared).exit, "time");
   });
 });

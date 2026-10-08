@@ -1,3 +1,4 @@
+import type { ChainId } from "@/lib/chain";
 import { feeHurdlePct } from "@/lib/trading/fees";
 import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
@@ -54,12 +55,12 @@ export function homeStatus(
     };
   }
   const why = bot.blocked.find((line) =>
-    /4-hour chart|fee to open|Cooling for|Daily loss|Kill switch|Re-confirm LIVE|trading balance/i.test(line),
+    /chart has not loaded|but the (1|4)-hour|fee to open|Cooling for|Daily loss|Kill switch|Re-confirm LIVE|trading balance/i.test(line),
   );
   return {
     tone: "amber",
     title: "Watching for a good setup",
-    detail: why ?? "It buys only when the 4-hour chart lines up. A quiet day can pass with no trade.",
+    detail: why ?? "It trades a 15-minute setup only when the 1-hour and 4-hour charts agree. A quiet day can pass with no trade.",
   };
 }
 
@@ -72,26 +73,61 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 }
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
-export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">): string[] {
+export function planRules(
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour" | "cronosQuote">,
+  chain: ChainId = "solana",
+): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
+  const fourHourMargin = chain === "solana" && config.marginOnFourHour && config.solTradeMode !== "spot";
   const rules = [
-    "Buys only when the 4-hour chart sets up. It skips the noise in between.",
-    config.allowShorts
-      ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid. A bet the price will fall uses the same distances, with the stop above and the goal below.`
-      : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
+    fourHourMargin && config.solTradeMode === "margin"
+      ? "Finds SOL margin trades on a solid 4-hour setup. Other names are skipped."
+      : fourHourMargin
+        ? "Finds spot trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. SOL margin waits for a solid 4-hour setup."
+        : "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
+    `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
     `Holds at most ${config.maxPositions} coins at once.`,
+    `Arms with $${config.armFundsUsd ?? 50} and spends $${config.buySizeUsd ?? 10} on each buy.`,
     config.lossStreakPause > 0
       ? `After ${config.lossStreakPause} losses in a row it rests for an hour.`
       : "It does not pause after a losing streak.",
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
-  if (config.allowShorts) {
-    rules.push("It can bet a price will fall, with the same 4-hour setups it uses to buy. Real-money bets against the price are SOL only.");
+  if (chain === "cronos") {
+    rules.push(
+      config.cronosQuote === "cro"
+        ? "Every ticket spends CRO and sells back to CRO. CRO itself is skipped. Extra size is not used."
+        : "Every ticket spends USDC and sells back to USDC. Extra size is not used.",
+    );
+    rules.push("Every profitable Cronos close automatically sends 10% of the gain to the profit address in the coin that ticket spent.");
+  } else if (config.solTradeMode === "margin") {
+    rules.push(
+      config.marginOnFourHour
+        ? "Margin only. SOL perps wait for a solid 4-hour setup. Zebec, Pump, ZEC, and Ray are skipped."
+        : `Margin only. SOL uses ${config.multipliers.length ? config.multipliers.join("x or ") + "x" : "a 5x or 10x"} on a Jupiter perp. Other names are skipped.`,
+    );
+  } else if (config.solTradeMode === "both") {
+    rules.push(
+      config.marginOnFourHour
+        ? "Spot swaps on 15-minute setups. SOL margin waits for a solid 4-hour setup. This loses faster when wrong."
+        : `SOL can use ${config.multipliers.length ? config.multipliers.join("x or ") + "x" : "5x or 10x"}. Other names stay spot. This loses faster when wrong.`,
+    );
+  } else {
+    rules.push("Every Solana ticket is a Jupiter spot swap. Extra size is off.");
   }
-  if (config.multipliers.length) rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
+  if (chain === "solana") {
+    rules.push("Every profitable Solana close automatically sends 10% of the gain to the profit address.");
+  }
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
   return rules;
+}
+
+/** Honest: GitHub Pages dies with the tab. The local desk runner does not. */
+export function alwaysOnNote(runner: boolean): string {
+  return runner
+    ? "The desk runner on this computer keeps checking after you close this browser. Stop that process to stop the bot."
+    : "This page stops checking when you close the tab. On your computer run npm run desk, open that address, then arm if you want the bot to keep going after you close the browser.";
 }
 
 export interface HomeResults {
@@ -118,10 +154,13 @@ export interface BotActivity {
 }
 
 const LIMIT_LINE =
-  /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short needs/i;
+  /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short/i;
+
+/** Charts and pool prints still arriving. The bot is working, not stuck. */
+const WAIT_LINE = /(5-minute|15-minute|1-hour|4-hour) chart has not loaded|pool tape has not arrived/i;
 
 const WALL_LINE =
-  /4-hour chart has not loaded|price feeds disagree|pool tape has not arrived|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
+  /price feeds disagree|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
 
 function lineCore(line: string): string {
   return line.replace(/^[A-Za-z0-9.]+\s+(long|short):\s+/i, "").replace(/^[A-Za-z0-9.]+:\s+/, "");
@@ -158,6 +197,8 @@ export function botActivity(input: {
   portfolio: Portfolio;
   config: BotConfig;
   nowMs?: number;
+  /** Page load time. A tick from before the refresh is not a stuck wall. */
+  pageStartedAt?: number;
 }): BotActivity {
   const now = input.nowMs ?? Date.now();
   const targets: ActivityItem[] = [];
@@ -199,6 +240,7 @@ export function botActivity(input: {
   for (const line of input.blocked) {
     if (/fee to open and the fee to close/i.test(line)) continue;
     if (/already in this mint/i.test(line)) continue;
+    if (WAIT_LINE.test(line)) continue;
     const core = lineCore(line);
     if (LIMIT_LINE.test(line)) {
       if (/most allowed at once|daily loss|cooling for an hour|kill switch/i.test(line)) continue;
@@ -212,14 +254,17 @@ export function botActivity(input: {
   if (input.running && input.ticks > 0 && input.lastTickAt) {
     const at = Date.parse(input.lastTickAt);
     const staleAfter = Math.max(input.scanSeconds * 8_000, 90_000);
-    if (Number.isFinite(at) && now - at > staleAfter) {
-      const secs = Math.round((now - at) / 1000);
+    // A tick saved before this page loaded is not a stuck bot. Time the wait from the refresh.
+    const effective =
+      input.pageStartedAt != null && Number.isFinite(at) && at < input.pageStartedAt ? input.pageStartedAt : at;
+    if (Number.isFinite(effective) && now - effective > staleAfter) {
+      const secs = Math.round((now - effective) / 1000);
       const age = secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs}s`;
       add(walls, "wall", `The last check was ${age} ago. The bot looks stuck.`);
     }
   }
 
-  let summary = "It is working and waiting for a 4-hour setup. Nothing is stopping it.";
+  let summary = "It is working and waiting for a 15-minute setup the 1-hour and 4-hour charts agree with. Nothing is stopping it.";
   if (!input.running && !input.killSwitch) summary = "The bot is off, so it is not checking for trades.";
   if (targets.length && !limits.length && !walls.length) summary = "Open trades are waiting for their profit goals.";
   if (limits.length && !targets.length && !walls.length) summary = "A limit is blocking new trades.";

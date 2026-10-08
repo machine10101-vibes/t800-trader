@@ -1,4 +1,3 @@
-import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { feeHurdlePct, targetAboveFees } from "./fees";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
@@ -109,24 +108,14 @@ export function sizePosition(args: {
   lossStreak?: number;
   dayUsed?: number;
 }): { qty: number; notional: number } {
-  const { equity, price, stopPct, config, regime, researchScore } = args;
+  const { equity, price, stopPct, config, regime } = args;
   if (price <= 0 || stopPct <= 0) return { qty: 0, notional: 0 };
 
-  let riskPct = config.maxRiskPerTradePct;
-  if (regime.stance === "defensive") riskPct *= 0.45;
-  if (regime.stance === "mixed") riskPct *= 0.75;
-  if (researchScore !== null && researchScore < 55) riskPct *= 0.7;
-  if (researchScore !== null && researchScore > 72) riskPct *= 1.1;
-  if ((args.confidence ?? 60) >= 78) riskPct *= 1.08;
-  if ((args.lossStreak ?? 0) >= 2) riskPct *= 0.55;
-  if ((args.dayUsed ?? 0) >= 0.7) riskPct *= 0.45;
-
-  const riskUsd = equity * (riskPct / 100);
-  const stopFrac = stopPct / 100;
   const capPct = sizeCapPct(equity, regime.stance);
-  const raw = riskUsd / stopFrac;
-  const floor = isMicroBook(equity) ? Math.min(equity * 0.45, equity * capPct) : 0;
-  const notional = Math.min(Math.max(raw, floor), equity * capPct);
+  const target = Math.max(MIN_TICKET_USD, config.buySizeUsd || 0);
+  const liveCap = config.maxLiveNotionalUsd > 0 ? config.maxLiveNotionalUsd : target;
+  const notional = Math.min(target, liveCap, equity * capPct);
+  if (notional < MIN_TICKET_USD) return { qty: 0, notional: 0 };
   const qty = notional / price;
   return { qty, notional };
 }
@@ -135,6 +124,12 @@ export interface WalletBudget {
   usdc: number;
   sol: number;
   solPriceUsd: number;
+  wcro?: number;
+}
+
+export interface PayableOpts {
+  quote?: "usdc" | "cro";
+  feeReserve?: number;
 }
 
 /**
@@ -174,20 +169,23 @@ export function marginCashUsd(budget: WalletBudget): number {
   return Math.max(usdc, solLeg);
 }
 
-/** One Jupiter swap spends either USDC or SOL, never a mix of the two. */
-export function payableUsd(budget: WalletBudget): number {
+/** One Jupiter swap spends either USDC or SOL, never a mix of the two. Cronos CRO mode spends CRO only. */
+export function payableUsd(budget: WalletBudget, opts?: PayableOpts): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
-  const solLeg = Math.max(0, budget.sol - SOL_FEE_RESERVE) * px;
-  return Math.max(Math.max(0, budget.usdc), solLeg);
+  const reserve = opts?.feeReserve ?? SOL_FEE_RESERVE;
+  const nativeLeg = Math.max(0, budget.sol - reserve) * px;
+  const wrapped = Math.max(0, budget.wcro ?? 0) * px;
+  if (opts?.quote === "cro") return nativeLeg + wrapped;
+  return Math.max(Math.max(0, budget.usdc), nativeLeg);
 }
 
 export function walletMarkUsd(budget: WalletBudget): number {
   const px = budget.solPriceUsd > 0 ? budget.solPriceUsd : 0;
-  return Math.max(0, budget.usdc) + Math.max(0, budget.sol) * px;
+  return Math.max(0, budget.usdc) + (Math.max(0, budget.sol) + Math.max(0, budget.wcro ?? 0)) * px;
 }
 
-export function spendableUsd(budget: WalletBudget): number {
-  return payableUsd(budget);
+export function spendableUsd(budget: WalletBudget, opts?: PayableOpts): number {
+  return payableUsd(budget, opts);
 }
 
 /**
@@ -200,11 +198,12 @@ export function walletRiskBook(
   trades: Trade[],
   budget: WalletBudget | null | undefined,
   walletSwaps: boolean,
+  opts?: PayableOpts,
 ): { portfolio: Portfolio; positions: Position[]; trades: Trade[] } {
   if (!walletSwaps || !budget) return { portfolio, positions, trades };
   const livePositions = positions.filter((p) => Boolean(p.signature));
   const liveTrades = trades.filter((t) => Boolean(t.signature));
-  const cashUsd = payableUsd(budget);
+  const cashUsd = payableUsd(budget, opts);
   const signedValue = livePositions.reduce((acc, p) => acc + positionEquity(p), 0);
   const equityUsd = walletMarkUsd(budget) + signedValue;
   const hasChainFill = liveTrades.length > 0;
@@ -231,14 +230,12 @@ export function canOpen(args: {
   stance?: MarketRegime["stance"];
   /** Wallet swaps size from the spendable leg, which can sit under the marked $3 balance. */
   minCashUsd?: number;
-  /** Solana shorts the same setups in a falling tape. Cronos keeps the old block. */
+  /** Shorts use the same setups in a falling tape on both chains. */
   defensiveShorts?: boolean;
 }): string | null {
   const { positions, signal, config, portfolio, trades = [], stance } = args;
   if (config.killSwitch) return "Kill switch is on";
-  if (signal.side === "short" && signal.symbol !== "SOL" && signal.mint !== SOL_MINT && config.walletSwaps) {
-    return "A live short is SOL only, on Jupiter perps. Practice can short this coin.";
-  }
+  if (signal.side === "short") return "This desk only buys and sells";
   if (config.microOneTicket !== false && isMicroBook(portfolio.equityUsd) && positions.length >= 2) {
     return "Micro book rides two tickets";
   }
@@ -247,10 +244,8 @@ export function canOpen(args: {
     return `Holding ${config.maxPositions} coins, the most allowed at once`;
   }
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
-  if (!config.allowShorts && signal.side === "short") return "Shorts disabled";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
   if (portfolio.cashUsd < minCash) return "Insufficient cash";
-  if (stance === "defensive" && signal.side === "short" && !args.defensiveShorts) return "No shorts in a defensive tape";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
   if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
     return `Breakouts need a ${breakoutScore}+ score when defensive`;

@@ -1,8 +1,21 @@
 import type { ChainId } from "@/lib/chain";
+import type { KeyBackend } from "@/lib/keystore";
 import { DEFAULT_VENUES, normalizeVenues } from "@/lib/market/venues";
 import type { AppState, BotConfig } from "@/lib/types";
+import { resumeLiveSession } from "@/lib/solana/live-session";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
 import { normalizeMultipliers } from "@/lib/trading/leverage";
+import {
+  DEFAULT_ARM_FUNDS_USD,
+  DEFAULT_BUY_SIZE_USD,
+  DEFAULT_CRONOS_QUOTE,
+  DEFAULT_SOL_TRADE_MODE,
+  normalizeArmFundsUsd,
+  normalizeBuySizeUsd,
+  normalizeCronosQuote,
+  normalizeMarginOnFourHour,
+  resolveSolTradeMode,
+} from "@/lib/deskSettings";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -13,7 +26,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   minLiquidityUsd: 120_000,
   minVolume24hUsd: 80_000,
   minAgeHours: 8,
-  allowShorts: true,
+  allowShorts: false,
   allowMemes: true,
   scanSeconds: 5,
   ...POLICY,
@@ -21,9 +34,14 @@ export const DEFAULT_CONFIG: BotConfig = {
   walletSwaps: false,
   liveTradesRev: 1,
   multipliers: [5, 10],
+  solTradeMode: DEFAULT_SOL_TRADE_MODE,
+  marginOnFourHour: false,
   executionMode: "paper",
   slippageBps: 80,
   maxLiveNotionalUsd: 250,
+  armFundsUsd: DEFAULT_ARM_FUNDS_USD,
+  buySizeUsd: DEFAULT_BUY_SIZE_USD,
+  cronosQuote: DEFAULT_CRONOS_QUOTE,
   minSolForFees: 0.02,
   killSwitch: false,
 };
@@ -50,7 +68,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     minLiquidityUsd: clampNum(src.minLiquidityUsd, DEFAULT_CONFIG.minLiquidityUsd, 20_000, 2_000_000),
     minVolume24hUsd: clampNum(src.minVolume24hUsd, DEFAULT_CONFIG.minVolume24hUsd, 10_000, 2_000_000),
     minAgeHours: clampNum(src.minAgeHours, DEFAULT_CONFIG.minAgeHours, 0, 168, true),
-    allowShorts: asBool(src.allowShorts, DEFAULT_CONFIG.allowShorts),
+    allowShorts: false,
     allowMemes: asBool(src.allowMemes, DEFAULT_CONFIG.allowMemes),
     scanSeconds: clampNum(src.scanSeconds, DEFAULT_CONFIG.scanSeconds, 4, 60, true),
     oneTicketPerTick: asBool(src.oneTicketPerTick, POLICY.oneTicketPerTick),
@@ -77,8 +95,13 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
     multipliers: normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers),
+    solTradeMode: resolveSolTradeMode(input, normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers)),
+    marginOnFourHour: normalizeMarginOnFourHour(src.marginOnFourHour),
     slippageBps: clampNum(src.slippageBps, DEFAULT_CONFIG.slippageBps, 1, 2_000, true),
     maxLiveNotionalUsd: clampNum(src.maxLiveNotionalUsd, DEFAULT_CONFIG.maxLiveNotionalUsd, 5, 10_000),
+    armFundsUsd: normalizeArmFundsUsd(src.armFundsUsd),
+    buySizeUsd: normalizeBuySizeUsd(src.buySizeUsd, normalizeArmFundsUsd(src.armFundsUsd)),
+    cronosQuote: normalizeCronosQuote(src.cronosQuote),
     minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
     killSwitch: asBool(src.killSwitch, false),
     strategyRev: clampNum(input?.strategyRev, 0, 0, 99, true),
@@ -100,6 +123,8 @@ export const SOLANA_STRATEGY = {
   memeTimeCapMin: 180,
   scratchEnabled: false,
   multipliers: [] as number[],
+  solTradeMode: DEFAULT_SOL_TRADE_MODE,
+  marginOnFourHour: false,
   strategyRev: 1,
 } satisfies Partial<BotConfig>;
 
@@ -113,8 +138,10 @@ export function withSolanaStrategy(config: BotConfig): BotConfig {
   return normalizeConfig({ ...config, ...SOLANA_STRATEGY });
 }
 
+/** Solana and Cronos share the 4-hour stop, target, and time defaults. Later edits stick. */
 function chainConfig(chain: ChainId, config: Partial<BotConfig>): Partial<BotConfig> {
-  return chain === "solana" ? withSolanaStrategy(normalizeConfig(config)) : config;
+  const next = normalizeConfig(config);
+  return chain === "solana" || chain === "cronos" ? withSolanaStrategy(next) : next;
 }
 
 /**
@@ -153,6 +180,60 @@ const slots: Record<ChainId, BookSlot> = {
   cronos: blankSlot(),
 };
 
+let storeBackend: KeyBackend | null = null;
+
+/** File map used only by the desk runner. The browser bundle never imports fs. */
+export function useDeskStore(next: KeyBackend | null): void {
+  storeBackend = next;
+}
+
+function storageGet(key: string): string | null {
+  if (typeof window !== "undefined") {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  return storeBackend?.get(key) ?? null;
+}
+
+function storageSet(key: string, value: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Quota or private-mode — keep the in-memory book.
+    }
+    return;
+  }
+  storeBackend?.set(key, value);
+}
+
+function storageRemove(key: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // The next connect writes a new address.
+    }
+    return;
+  }
+  storeBackend?.remove?.(key);
+}
+
+function storageKeys(): string[] {
+  if (typeof window !== "undefined") {
+    const out: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key) out.push(key);
+    }
+    return out;
+  }
+  return storeBackend?.keys?.() ?? [];
+}
+
 function slotFor(chain: ChainId = "solana"): BookSlot {
   return slots[chain];
 }
@@ -165,6 +246,22 @@ function walletError(chain: ChainId): string {
 
 export function getActiveWallet(chain: ChainId = "solana"): string | null {
   return slotFor(chain).wallet;
+}
+
+function lastWalletKey(chain: ChainId): string {
+  return `t800-trader-last-wallet:${chain}`;
+}
+
+export function readLastWallet(chain: ChainId): string | null {
+  return storageGet(lastWalletKey(chain));
+}
+
+export function writeLastWallet(chain: ChainId, address: string): void {
+  storageSet(lastWalletKey(chain), address);
+}
+
+export function clearLastWallet(chain: ChainId): void {
+  storageRemove(lastWalletKey(chain));
 }
 
 export function bookStorageKey(chain: ChainId, wallet: string): string {
@@ -217,13 +314,10 @@ export function peekBook(address: string, chain: ChainId = "solana"): AppState |
 }
 
 export function listLocalBooks(chain: ChainId = "solana"): string[] {
-  if (typeof window === "undefined") return [];
   const prefix = `t800-trader-state:${chain}:`;
   const legacy = "t800-trader-state:";
   const out: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const key = window.localStorage.key(i);
-    if (!key) continue;
+  for (const key of storageKeys()) {
     if (key.startsWith(prefix)) {
       out.push(key.slice(prefix.length));
       continue;
@@ -237,9 +331,8 @@ export function listLocalBooks(chain: ChainId = "solana"): string[] {
 }
 
 function readRaw(key: string): AppState | null {
-  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = storageGet(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AppState;
     if (!parsed?.config || !parsed?.portfolio) return null;
@@ -251,7 +344,7 @@ function readRaw(key: string): AppState | null {
 
 function readBrowserState(chain: ChainId, wallet: string): AppState | null {
   const found = readRaw(bookStorageKey(chain, wallet)) ?? (chain === "solana" ? readRaw(legacyStorageKey(wallet)) : null);
-  if (!found || chain !== "solana") return found;
+  if (!found) return found;
   return { ...found, config: withSolanaStrategy(found.config) };
 }
 
@@ -260,12 +353,18 @@ function blankBook(chain: ChainId, startingEquity = 0): AppState {
 }
 
 function writeBrowserState(chain: ChainId, wallet: string, next: AppState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(bookStorageKey(chain, wallet), JSON.stringify(next));
-  } catch {
-    // Quota or private-mode — keep the in-memory book.
-  }
+  storageSet(bookStorageKey(chain, wallet), JSON.stringify(next));
+}
+
+/** Take a book the page posted to the desk runner. Does not reseed or invent cash. */
+export async function adoptPostedBook(chain: ChainId, wallet: string, state: AppState): Promise<AppState> {
+  const slot = slotFor(chain);
+  slot.wallet = wallet;
+  slot.memory = hydrate(state);
+  writeLastWallet(chain, wallet);
+  writeBrowserState(chain, wallet, slot.memory);
+  if (slot.memory.bot.running && slot.memory.config.walletSwaps) resumeLiveSession();
+  return slot.memory;
 }
 
 export function isIdleEmptyBook(state: AppState): boolean {
@@ -277,17 +376,33 @@ export function isIdleEmptyBook(state: AppState): boolean {
   );
 }
 
+function keepRunningBot(previous: AppState, next: AppState): AppState {
+  if (!previous.bot.running) return next;
+  return { ...next, bot: { ...previous.bot, lastError: next.bot.lastError } };
+}
+
+function dropStaleLiveLock(state: AppState): AppState {
+  const blocked = (state.bot.blocked ?? []).filter((line) => !/re-confirm live/i.test(line));
+  const lastError = state.bot.lastError && /re-confirm live/i.test(state.bot.lastError) ? null : state.bot.lastError;
+  if (blocked.length === (state.bot.blocked ?? []).length && lastError === state.bot.lastError) return state;
+  return { ...state, bot: { ...state.bot, blocked, lastError } };
+}
+
 export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppState {
   if (!isIdleEmptyBook(state)) return state;
-  if (liveEquityUsd < MIN_TRADE_USD) return state;
-  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+  const target = state.config.armFundsUsd;
+  if (state.config.walletSwaps && liveEquityUsd < MIN_TRADE_USD) return state;
+  if (target < MIN_TRADE_USD) return state;
+  return keepRunningBot(state, emptyState({ ...state.config, startingEquity: target }));
 }
 
 /** Flat book only. A sub-$3 live read leaves an already funded book alone. */
 export function freshBook(state: AppState, liveEquityUsd: number): AppState {
   if (state.positions.length > 0 || state.trades.length > 0) return state;
-  if (liveEquityUsd < MIN_TRADE_USD) return state;
-  return emptyState({ ...state.config, startingEquity: liveEquityUsd });
+  const target = state.config.armFundsUsd;
+  if (state.config.walletSwaps && liveEquityUsd < MIN_TRADE_USD) return state;
+  if (target < MIN_TRADE_USD) return state;
+  return keepRunningBot(state, emptyState({ ...state.config, startingEquity: target }));
 }
 
 export async function adoptLiveEquity(liveEquityUsd: number, chain: ChainId = "solana"): Promise<AppState> {
@@ -308,24 +423,40 @@ export async function attachWallet(address: string, liveEquityUsd: number, chain
       slot.memory = next;
       writeBrowserState(chain, address, slot.memory);
     }
-    return slot.memory;
-  }
-  slot.wallet = address;
-  const loaded = readBrowserState(chain, address);
-  if (loaded) {
-    slot.memory = seedFromLiveEquity(loaded, liveEquityUsd);
+  } else {
+    slot.wallet = address;
+    const loaded = readBrowserState(chain, address);
+    slot.memory = loaded
+      ? seedFromLiveEquity(loaded, liveEquityUsd)
+      : blankBook(chain, Math.max(0, liveEquityUsd));
     writeBrowserState(chain, address, slot.memory);
-    return slot.memory;
   }
-  slot.memory = blankBook(chain, Math.max(0, liveEquityUsd));
-  writeBrowserState(chain, address, slot.memory);
+  writeLastWallet(chain, address);
+  if (slot.memory.bot.running && slot.memory.config.walletSwaps) resumeLiveSession();
+  if (slot.memory.bot.running) {
+    const cleaned = dropStaleLiveLock(slot.memory);
+    if (cleaned !== slot.memory) {
+      slot.memory = cleaned;
+      writeBrowserState(chain, address, slot.memory);
+    }
+  }
   return slot.memory;
+}
+
+/** Open the last saved book so a refresh can keep ticking before the wallet returns. */
+export async function resumeSavedBook(chain: ChainId = "solana"): Promise<AppState | null> {
+  const last = readLastWallet(chain);
+  if (!last) return null;
+  const saved = peekBook(last, chain);
+  if (!saved) return null;
+  return attachWallet(last, Math.max(0, saved.portfolio.equityUsd), chain);
 }
 
 export function detachWallet(chain: ChainId = "solana"): void {
   const slot = slotFor(chain);
   slot.wallet = null;
   slot.memory = null;
+  clearLastWallet(chain);
 }
 
 export async function loadState(chain: ChainId = "solana"): Promise<AppState> {

@@ -12,13 +12,25 @@ export interface ScreenConfig {
   venues?: string[];
 }
 
-/** Cronos only trades the VVS pool. The saved Solana venue list must not blank that book. */
+/**
+ * Cronos liquidity sits in VVS pools. WolfSwap and cro.trade both settle those pools.
+ * The saved Solana venue list must not blank that book.
+ * Named Cronos tokens stay on the scan even when Gecko misses liquidity — a 15-minute setup still has to pass the 1-hour and 4-hour check.
+ * An off-book dust pool still fails the floor.
+ */
 export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
   if (chain !== "cronos") return cfg;
-  return { ...cfg, venues: ["vvs"] };
+  return {
+    ...cfg,
+    venues: undefined,
+    minLiquidityUsd: Math.min(cfg.minLiquidityUsd, 10_000),
+    minVolume24hUsd: Math.min(cfg.minVolume24hUsd, 2_000),
+  };
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
+  const namedCronos = (c.chain ?? "solana") === "cronos" && isActiveBook(c.mint, "cronos");
+  if (namedCronos) return null;
   const minLiq = c.watchlist ? Math.min(cfg.minLiquidityUsd, 80_000) : cfg.minLiquidityUsd;
   const minVol = c.watchlist ? Math.min(cfg.minVolume24hUsd, 40_000) : cfg.minVolume24hUsd;
   if (c.liquidityUsd < minLiq) return `Liquidity ${c.liquidityUsd.toFixed(0)} below ${minLiq}`;
@@ -33,7 +45,7 @@ export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | 
     return `Venue ${venueLabel(venueForDex(c.dex))} is off`;
   }
   if (!isActiveBook(c.mint, c.chain ?? "solana") && isForeignOrWrapped(c.symbol, c.name)) {
-    return "Wrapped or non-Solana-native asset";
+    return (c.chain ?? "solana") === "cronos" ? "Wrapped or non-Cronos-native asset" : "Wrapped or non-Solana-native asset";
   }
   return null;
 }

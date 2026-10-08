@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
+import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
 import { solanaDefaults } from "./store";
 import type { Portfolio, Position, Trade } from "./types";
 
@@ -72,12 +72,30 @@ describe("home", () => {
   it("writes the rules from the live settings", () => {
     const rules = planRules(solanaDefaults());
     assert.ok(rules.some((r) => r.includes("4% below") && r.includes("8% above")));
-    assert.ok(rules.some((r) => r.includes("stop above and the goal below")));
-    assert.ok(rules.some((r) => r.includes("bet a price will fall")));
-    assert.ok(!planRules({ ...solanaDefaults(), allowShorts: false }).some((r) => r.includes("bet a price will fall")));
+    assert.ok(rules.every((r) => !r.includes("bet a price will fall") && !r.includes("stop above and the goal below")));
     assert.ok(rules.some((r) => r.includes("never sold until it beats the fees")));
+    assert.ok(rules.some((r) => /Arms with \$50/.test(r) && /\$10 on each buy/.test(r)));
     assert.ok(!rules.some((r) => r.includes("loses faster")));
-    assert.ok(planRules({ ...solanaDefaults(), multipliers: [5] }).some((r) => r.includes("5x")));
+    assert.ok(rules.some((r) => r.includes("Jupiter spot swap")));
+    assert.ok(rules.some((r) => r.includes("10%") && r.includes("profit address")));
+    assert.ok(planRules({ ...solanaDefaults(), solTradeMode: "both", multipliers: [5] }).some((r) => r.includes("5x")));
+    assert.ok(
+      planRules({ ...solanaDefaults(), solTradeMode: "margin", marginOnFourHour: true }).some((r) =>
+        r.includes("solid 4-hour setup"),
+      ),
+    );
+    const cronos = planRules({ ...solanaDefaults(), multipliers: [5] }, "cronos");
+    assert.ok(cronos.every((r) => !r.includes("SOL") && !r.includes("Solana") && !r.includes("5x")));
+    assert.ok(cronos.some((r) => r.includes("spends USDC") && r.includes("sells back to USDC")));
+    assert.ok(cronos.some((r) => r.includes("10%") && r.includes("profit address") && r.includes("coin that ticket spent")));
+    assert.ok(
+      planRules({ ...solanaDefaults(), cronosQuote: "cro" }, "cronos").some((r) =>
+        r.includes("spends CRO") && r.includes("CRO itself is skipped"),
+      ),
+    );
+    assert.match(alwaysOnNote(false), /npm run desk/);
+    assert.match(alwaysOnNote(true), /desk runner/);
+    assert.match(alwaysOnNote(true), /close this browser/);
   });
 
   it("sums closed results and words every exit", () => {
@@ -101,7 +119,7 @@ describe("home", () => {
       lastError: null,
       lastTickAt: new Date(now).toISOString(),
       ticks: 4,
-      blocked: ["SOL: no 4-hour setup yet", "RAY: dropping right now (-0.40% in 15 minutes), so it waits"],
+      blocked: ["SOL: no 15-minute setup yet", "RAY: dropping right now (-0.40% in 15 minutes), so it waits"],
       scanSeconds: 5,
       positions: [],
       trades: [],
@@ -112,7 +130,7 @@ describe("home", () => {
     assert.equal(quiet.targets.length, 0);
     assert.equal(quiet.limits.length, 0);
     assert.equal(quiet.walls.length, 0);
-    assert.match(quiet.summary, /waiting for a 4-hour setup/);
+    assert.match(quiet.summary, /waiting for a 15-minute setup/);
     assert.deepEqual(visibleActivity(quiet), []);
 
     const held = botActivity({
@@ -139,14 +157,48 @@ describe("home", () => {
     assert.ok(held.limits.some((item) => /6% limit/.test(item.text)));
     assert.ok(held.limits.some((item) => /Resting for an hour/.test(item.text)));
     assert.equal(held.limits.filter((item) => /most allowed/.test(item.text)).length, 1);
-    assert.deepEqual(
-      held.walls.map((item) => item.text),
-      ["PUMP: 4-hour chart has not loaded"],
-    );
-    assert.match(held.summary, /stuck/);
+    assert.equal(held.walls.length, 0);
+    assert.match(held.summary, /profit goals/);
     assert.deepEqual(
       visibleActivity(held).map((group) => group.kind),
-      ["wall"],
+      ["limit", "target"],
+    );
+
+    const loading = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 1,
+      blocked: ["PUMP: 4-hour chart has not loaded", "SOL: pool tape has not arrived"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.equal(loading.walls.length, 0);
+    assert.equal(loading.limits.length, 0);
+    assert.match(loading.summary, /waiting for a 15-minute setup/);
+
+    const split = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 2,
+      blocked: ["RAY: price feeds disagree"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.deepEqual(
+      split.walls.map((item) => item.text),
+      ["RAY: price feeds disagree"],
     );
 
     const stuck = botActivity({
@@ -164,6 +216,40 @@ describe("home", () => {
       nowMs: now,
     });
     assert.match(stuck.walls[0]?.text ?? "", /looks stuck/);
+
+    const afterReload = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 3 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      pageStartedAt: now - 5_000,
+    });
+    assert.equal(afterReload.walls.length, 0);
+
+    const minuteAfterReload = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 5 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      pageStartedAt: now - 60_000,
+    });
+    assert.equal(minuteAfterReload.walls.length, 0);
 
     const off = botActivity({
       running: false,

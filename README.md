@@ -36,9 +36,9 @@ Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). 
 
 ## Solana strategy and replay results
 
-A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
+A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. The defaults find trades on the 15-minute chart, then check the 1-hour and 4-hour charts. A 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. Settings can switch the Sol desk to spot swaps, SOL margin, or both, and can wait for a solid 4-hour setup before a SOL perp. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
 
-Shorts use those same 4-hour setups turned over: a breakdown through the prior low, an extreme RSI reject, a watchlist continuation that has real volume, and a VWAP reject. The stop and the target are the same distances, with the stop above the fill and the goal below it. Practice can short every name on the book. A real-money short is SOL only, sent as a Jupiter perpetual. Other live names stay spot buys and sells.
+Both desks only buy and sell. They do not bet that a price will fall.
 
 `scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
 
@@ -49,6 +49,10 @@ Shorts use those same 4-hour setups turned over: a breakdown through the prior l
 | Same defaults with mirrored shorts | −1.4%, max drawdown 5.0% | −2.4%, max drawdown 3.6% |
 
 No configuration tested was profitable after fees in both windows. Mirrored shorts use the same setups as the longs. On this replay they added a small loss. They did not produce a profit in either window. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
+
+## Cronos
+
+The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, and fee hurdle. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Both desks only buy and sell. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
 
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 
@@ -61,12 +65,21 @@ npm run dev
 
 Open [http://localhost:3000/t800-trader/](http://localhost:3000/t800-trader/). The `/t800-trader` base path matches GitHub Pages. Connect a wallet, then press **Space** to arm or disarm the bot.
 
+The published GitHub Pages tab stops scanning when you close it. To keep an armed bot running after you close the browser, build once and leave the desk runner up:
+
+```bash
+npm run build
+npm run desk
+```
+
+Open [http://127.0.0.1:8787/t800-trader/](http://127.0.0.1:8787/t800-trader/), connect, and arm from that address. The runner serves `out/` and ticks from `~/.t800-trader` (or `$T800_DATA`). Trading keys stay on that computer. They are not uploaded. Stop the process to stop the bot.
+
 ```bash
 npm test
 npm run build
 ```
 
-`next build` writes a static export to `out/` (project Pages layout: `basePath` / `assetPrefix` `/t800-trader`). Paper state is stored in the browser. Reset it from the Risk tab.
+`next build` writes a static export to `out/` (project Pages layout: `basePath` / `assetPrefix` `/t800-trader`). Paper state is stored in the browser. The desk runner also writes the book to disk. Reset it from the Risk tab.
 
 ## Data sources
 
@@ -75,7 +88,9 @@ npm run build
 | [CoinGecko](https://www.coingecko.com) | BTC / ETH / SOL price, dominance, global cap |
 | [Alternative.me](https://alternative.me/crypto/fear-and-greed-index/) | Fear & Greed |
 | [DefiLlama](https://defillama.com) | Solana TVL and DEX volume |
-| [GeckoTerminal](https://www.geckoterminal.com) | Solana pools, flow, OHLCV |
+| [GeckoTerminal](https://www.geckoterminal.com) | Solana and Cronos pools, flow, OHLCV |
+| [WolfSwap](https://wolfswap.gg) | Cronos swap quotes |
+| [cro.trade](https://cro.trade) | Cronos swap quotes |
 
 No API keys required for the public endpoints above. Rate limits apply. On Pages the browser calls these feeds directly, so a blocked or rate-limited origin degrades that slice (the rest of the desk still boots).
 
@@ -87,7 +102,7 @@ No API keys required for the public endpoints above. Rate limits apply. On Pages
 - Unlock calendars, treasuries, audits, and protocol revenue are **not** in these feeds.
 - A research score is a ranking heuristic, not a valuation.
 - Fast 5m signals overfit noise. Silence is a valid position.
-- Static Pages cannot persist a shared book. Each browser has its own paper account.
+- Static Pages cannot persist a shared book. Each browser has its own paper account. `npm run desk` keeps a local book on disk so scans continue after you close the tab.
 
 ## License
 

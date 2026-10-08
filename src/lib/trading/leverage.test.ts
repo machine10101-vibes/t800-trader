@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PUMP_MINT, SOL_MINT, WCRO_MINT, ZBCN_MINT } from "../market/universe";
 import type { Position } from "../types";
-import { collateralFor, collateralRoom, leveragedTicket, marginFill, multiplierFor, normalizeMultipliers, orderForPosition, pickMultiplier, signedOnChain } from "./leverage";
+import { collateralFor, collateralRoom, effectiveMultipliers, leveragedTicket, marginFill, multiplierFor, normalizeMultipliers, orderForPosition, pickMultiplier, signedOnChain, tradeLeverage } from "./leverage";
 
 describe("multipliers", () => {
   it("keeps 5x and 10x and drops anything else", () => {
@@ -27,6 +27,53 @@ describe("multipliers", () => {
     assert.equal(multiplierFor([5, 10], 80, "breakout", "CRO", WCRO_MINT), 1);
     assert.equal(multiplierFor([5, 10], 90, "breakout", "JUP", "jup"), 1);
     assert.equal(multiplierFor([], 90, "breakout", "SOL", SOL_MINT), 1);
+  });
+
+  it("applies SOL margin only when the mode and 4-hour gate allow it", () => {
+    assert.deepEqual(effectiveMultipliers("spot", [5, 10]), []);
+    assert.deepEqual(effectiveMultipliers("margin", []), [5, 10]);
+    assert.equal(
+      tradeLeverage({ multipliers: [5, 10], confidence: 80, reason: "breakout", symbol: "SOL", mint: SOL_MINT, mode: "spot" }),
+      1,
+    );
+    assert.equal(
+      tradeLeverage({
+        multipliers: [5, 10],
+        confidence: 80,
+        reason: "breakout",
+        symbol: "SOL",
+        mint: SOL_MINT,
+        mode: "both",
+        marginOnFourHour: true,
+        setupFrame: "15m",
+      }),
+      1,
+    );
+    assert.equal(
+      tradeLeverage({
+        multipliers: [],
+        confidence: 80,
+        reason: "breakout",
+        symbol: "SOL",
+        mint: SOL_MINT,
+        mode: "margin",
+        marginOnFourHour: true,
+        setupFrame: "4h",
+      }),
+      10,
+    );
+    assert.equal(
+      tradeLeverage({
+        multipliers: [5, 10],
+        confidence: 80,
+        reason: "breakout",
+        symbol: "ZBCN",
+        mint: ZBCN_MINT,
+        mode: "margin",
+        setupFrame: "4h",
+      }),
+      1,
+    );
   });
 
   it("marks a Zebec spot bag at the full 5x or 10x exposure", () => {
@@ -86,6 +133,8 @@ describe("multipliers", () => {
     assert.equal(solShort.notionalUsd, 100);
     assert.equal(solShort.leverage, 10);
     assert.equal(solShort.positionPubkey, "pos");
+    const croClose = orderForPosition(ticket({ cronosQuote: "cro", qty: 10, markPrice: 0.02 }), "close");
+    assert.equal(croClose.cronosQuote, "cro");
     const bag = orderForPosition(ticket({ qty: 5000, markPrice: 0.002, leverage: 5 }), "close");
     assert.equal(bag.qty, 1000);
     assert.ok(Math.abs(bag.notionalUsd - 2) < 1e-9);

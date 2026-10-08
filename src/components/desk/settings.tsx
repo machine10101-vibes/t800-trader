@@ -1,7 +1,7 @@
 "use client";
 
-import type { ChainId } from "@/lib/chain";
-import { commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
+import { CHAIN_COPY, type ChainId } from "@/lib/chain";
+import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -50,7 +50,7 @@ export function SettingsPanel({
               onClick={() =>
                 setLocal(
                   normalizeConfig({
-                    ...(chain === "solana" ? solanaDefaults() : DEFAULT_CONFIG),
+                    ...(chain === "solana" || chain === "cronos" ? solanaDefaults() : DEFAULT_CONFIG),
                     startingEquity: local.startingEquity,
                   }),
                 )
@@ -68,16 +68,63 @@ export function SettingsPanel({
           Checks every {local.scanSeconds}s · up to {local.maxPositions} coins at once · one loss can cost{" "}
           {local.maxRiskPerTradePct.toFixed(1)}% · stops for the day after a {local.dailyLossLimitPct}% loss · needs a score of{" "}
           {local.minConfidence}
-          {local.allowShorts ? " · bets against the price are on" : " · bets against the price are off"}
           {local.allowMemes ? " · meme coins on" : " · meme coins off"}
           {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
-          {chain === "cronos" ? "VVS Finance" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
+          {chain === "cronos" ? "WolfSwap and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
-          {local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : " · no extra size"}
+          {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
+          {chain === "cronos"
+            ? ` · spends ${local.cronosQuote === "cro" ? "CRO" : "USDC"} · no extra size`
+            : local.solTradeMode === "spot"
+              ? " · spot swaps"
+              : local.solTradeMode === "margin"
+                ? ` · SOL margin${local.marginOnFourHour ? " on 4-hour setups" : ""}${local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : ""}`
+                : ` · spot and SOL margin${local.marginOnFourHour ? " on 4-hour setups" : ""}${local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : ""}`}
         </p>
       </div>
+
+      <Section
+        title="Trading money"
+        hint={
+          chain === "cronos" && local.cronosQuote === "cro"
+            ? "Arming loads this much CRO, at the live CRO price, onto the trading key, plus a little for fees. Practice uses the same number as pretend money. Each buy spends the size you pick."
+            : "Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
+        }
+      >
+        {chain === "cronos" ? (
+          <Pills
+            label="Spend on each buy"
+            hint="USDC buys with the stablecoin and sells back to USDC. CRO buys with wrapped CRO and sells back to CRO. Changing this does not flip an open ticket."
+            value={local.cronosQuote}
+            display={local.cronosQuote === "cro" ? "CRO" : "USDC"}
+            options={[
+              { value: "usdc" as const, label: "USDC" },
+              { value: "cro" as const, label: "CRO" },
+            ]}
+            onChange={(cronosQuote) => set({ cronosQuote })}
+          />
+        ) : null}
+        <Choice
+          label="Loaded when you arm"
+          hint={
+            chain === "cronos" && local.cronosQuote === "cro"
+              ? "25, 50, or 150 dollars of CRO. Real money moves that much CRO plus fee CRO. Practice starts a book of that size."
+              : "25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
+          }
+          value={local.armFundsUsd}
+          options={ARM_FUNDS_USD.map((n) => ({ value: n, label: `$${n}` }))}
+          onChange={(armFundsUsd) => set({ armFundsUsd, buySizeUsd: Math.min(local.buySizeUsd, armFundsUsd) })}
+        />
+        <Choice
+          label="Buy size per trade"
+          hint="What one buy spends. It cannot be larger than the armed bankroll."
+          value={local.buySizeUsd}
+          options={BUY_SIZE_USD.filter((n) => n <= local.armFundsUsd).map((n) => ({ value: n, label: `$${n}` }))}
+          onChange={(buySizeUsd) => set({ buySizeUsd })}
+        />
+      </Section>
 
       <Section title="Each buy" hint="These three are the main choices. The sell prices are a percent of what the buy cost.">
         <Field
@@ -92,11 +139,7 @@ export function SettingsPanel({
         />
         <Field
           label="Sell if it rises"
-          hint={
-            chain === "solana"
-              ? "Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
-              : "Percent of the buy. A 4% rise on a $100 buy sells after a $4 gain."
-          }
+          hint="Percent of the buy. The bot will not sell a winner until the gain is bigger than the fee to open the trade and the fee to close it."
           suffix="%"
           min={0.5}
           max={30}
@@ -129,7 +172,7 @@ export function SettingsPanel({
         <div className="mt-4 space-y-4">
       <Section
         title="Real money or practice"
-        hint="Practice is the normal mode. Real money asks you to type the word LIVE once each visit, so a refresh cannot turn it on by accident. Turning the bot on then asks the wallet to set money aside for fees."
+        hint="Practice is the normal mode. Real money asks you to type the word LIVE once when you turn it on. A refresh keeps the bot running. Turning the bot on then asks the wallet to set money aside for fees."
       >
         <Toggle
           label="Use real money"
@@ -171,42 +214,87 @@ export function SettingsPanel({
         />
       </Section>
 
-      <Section
-        title="Bigger buys"
-        hint={
-          chain === "cronos"
-            ? "CRO is a normal buy and a normal sell. 5x and 10x are SOL only."
-            : "SOL only, and off by default. In 120-day replays, 5x and 10x lost more than plain buys every time. A stronger buy uses 10 times the money. An order can be as small as $5. Jupiter raises a new one to $10 when the key has it."
-        }
-      >
-        <Toggle
-          label="5 times the money"
-          hint="SOL only. Puts up at least $5 and takes five times that much. A small drop can wipe it out."
-          checked={local.multipliers.includes(5)}
-          onChange={(on) => {
-            const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
-            set({ multipliers: next });
-          }}
-        />
-        <Toggle
-          label="10 times the money"
-          hint="SOL only. Puts up at least $5 and takes ten times that much. An even smaller drop can wipe it out."
-          checked={local.multipliers.includes(10)}
-          onChange={(on) => {
-            const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
-            set({ multipliers: next });
-          }}
-        />
-      </Section>
+      {chain === "cronos" ? (
+        <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
+          <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
+            {local.cronosQuote === "cro"
+              ? "A buy spends CRO on WolfSwap or cro.trade. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
+              : "A buy spends USDC on WolfSwap or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos."}
+          </p>
+        </Section>
+      ) : (
+        <Section title="Spot or margin" hint={CHAIN_COPY.solana.settingsMultiplier}>
+          <Pills
+            label="How Solana trades"
+            hint="Spot is a Jupiter swap. Margin is a SOL 5x or 10x perp. Both keeps swaps on the book and lets SOL use a perp."
+            value={local.solTradeMode}
+            display={local.solTradeMode === "spot" ? "Spot" : local.solTradeMode === "margin" ? "Margin" : "Both"}
+            options={SOL_TRADE_MODES.map((mode) => ({
+              value: mode,
+              label: mode === "spot" ? "Spot" : mode === "margin" ? "Margin" : "Both",
+            }))}
+            onChange={(solTradeMode) =>
+              set({
+                solTradeMode,
+                multipliers: multipliersForMode(solTradeMode, local.multipliers),
+              })
+            }
+          />
+          {local.solTradeMode !== "spot" ? (
+            <Toggle
+              label="Margin only on solid 4-hour setups"
+              hint="On waits for a 4-hour structure setup before a SOL perp. A 15-minute SOL fill stays a spot swap if Both is selected."
+              checked={local.marginOnFourHour}
+              onChange={(marginOnFourHour) => set({ marginOnFourHour })}
+            />
+          ) : null}
+          {local.solTradeMode === "spot" ? (
+            <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
+              Every ticket is a Jupiter spot swap. SOL 5x and 10x stay off until you pick Margin or Both.
+            </p>
+          ) : (
+            <>
+              <Toggle
+                label="5 times the money"
+                hint={CHAIN_COPY.solana.settingsFive}
+                checked={local.multipliers.includes(5)}
+                onChange={(on) => {
+                  const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
+                  set({ multipliers: multipliersForMode(local.solTradeMode, next) });
+                }}
+              />
+              <Toggle
+                label="10 times the money"
+                hint={CHAIN_COPY.solana.settingsTen}
+                checked={local.multipliers.includes(10)}
+                onChange={(on) => {
+                  const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
+                  set({ multipliers: multipliersForMode(local.solTradeMode, next) });
+                }}
+              />
+            </>
+          )}
+        </Section>
+      )}
 
       {chain === "cronos" ? (
         <Section
           title="Where it buys"
-          hint="Cronos buys and sells go through VVS Finance. A buy spends USDC. A sell turns the coin back into USDC."
+          hint={
+            local.cronosQuote === "cro"
+              ? "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends CRO. A sell turns the coin back into CRO."
+              : "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
+          }
         >
           <Toggle
-            label="VVS Finance"
-            hint="This stays on. Every Cronos buy and sell uses VVS."
+            label="WolfSwap"
+            hint="This stays on. The quote is compared with cro.trade."
+            checked
+            onChange={() => {}}
+          />
+          <Toggle
+            label="cro.trade"
+            hint="This stays on. Its 0.9% fee is taken off the quote before the comparison."
             checked
             onChange={() => {}}
           />
@@ -265,11 +353,7 @@ export function SettingsPanel({
         />
         <Toggle
           label="Sell a buy that is going nowhere"
-          hint={
-            chain === "solana"
-              ? "Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
-              : "If a buy is still barely up and the short-term price turns down hard, sell it."
-          }
+          hint="Sells early when the last 15 minutes turn red. Off is the tested default: in replays these early sells cost more in fees than they saved."
           checked={local.scratchEnabled}
           onChange={(v) => set({ scratchEnabled: v })}
         />
@@ -325,16 +409,6 @@ export function SettingsPanel({
           onChange={(v) => set({ defensiveBreakoutScore: v })}
         />
         <div className="grid gap-3">
-          <Toggle
-            label="Allow bets that the price will fall"
-            hint={
-              chain === "solana"
-                ? "Practice bets against SOL, Zebec, Pump, ZEC, and Ray with the same 4-hour setups it uses to buy. A real-money short is SOL only, as a Jupiter perpetual."
-                : "SOL shorts are sent as a Jupiter perpetual. Other tokens stay in practice. They turn off when the market looks shaky."
-            }
-            checked={local.allowShorts}
-            onChange={(v) => set({ allowShorts: v })}
-          />
           <Toggle
             label="Allow meme coins"
             hint="Off skips meme coins that are not already on the watch list."
@@ -651,6 +725,86 @@ function Field({
         />
       )}
     </label>
+  );
+}
+
+function Choice({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  options: { value: number; label: string }[];
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-3">
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="min-w-0">{label}</span>
+        <span className="num shrink-0 text-[var(--magenta)]">${value}</span>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => {
+          const on = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Pills<T extends string>({
+  label,
+  hint,
+  value,
+  options,
+  display,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: T;
+  options: { value: T; label: string }[];
+  display?: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-3">
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="min-w-0">{label}</span>
+        <span className="num shrink-0 text-[var(--magenta)]">{display ?? value}</span>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => {
+          const on = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

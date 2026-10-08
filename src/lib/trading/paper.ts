@@ -116,6 +116,7 @@ export function openPosition(
     leverage: leverage > 1 ? leverage : undefined,
     collateralUsd: leverage > 1 ? collateral : undefined,
     positionPubkey: stamp?.positionPubkey,
+    cronosQuote: stamp?.cronosQuote ?? state.config.cronosQuote,
   };
 
   const trade: Trade = {
@@ -175,6 +176,7 @@ export function closePosition(
     at: new Date().toISOString(),
     note: signature ? `${reason} exit from ${pos.reason} entry. Wallet tx ${signature}.` : `${reason} exit from ${pos.reason} entry`,
     signature,
+    cronosQuote: pos.cronosQuote ?? state.config.cronosQuote,
   };
 
   const realized = state.portfolio.realizedPnlUsd + pnl.usd;
@@ -295,6 +297,7 @@ export function scaleOut(
     at: new Date().toISOString(),
     note: `Scale ${Math.round(fraction * 100)}% at +${((price / pos.entryPrice - 1) * 100 * (pos.side === "long" ? 1 : -1)).toFixed(2)}% — let the rest run${signature ? `. Wallet tx ${signature}.` : ""}`,
     signature,
+    cronosQuote: pos.cronosQuote ?? state.config.cronosQuote,
   };
   const learned = rememberClose(state, { position: marked, pnlUsd: pnl.usd, r: rMultiple(marked), exitReason: "target" });
   return syncBook({

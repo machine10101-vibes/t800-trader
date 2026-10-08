@@ -1,15 +1,15 @@
-import { SOL_MINT } from "@/lib/market/universe";
 import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { clamp, id, mean, stdev } from "@/lib/utils";
+
+/** ATR% range a frame can trade. A 15-minute bar is a quarter of the 4-hour swing. */
+export type AtrBand = readonly [number, number];
+export const FOUR_HOUR_ATR: AtrBand = [0.45, 5.2];
+export const FIFTEEN_MIN_ATR: AtrBand = [0.12, 3.2];
 
 export interface SignalContext {
   stance: MarketRegime["stance"];
   fearGreed: number | null;
   solChange: number;
-}
-
-function solOnlyShort(token: { symbol: string; mint: string }): boolean {
-  return token.symbol === "SOL" || token.mint === SOL_MINT;
 }
 
 function buyShare(buys: number, sells: number): number {
@@ -75,8 +75,8 @@ export function vwap(candles: Candle[]): number | null {
   return pv / vol;
 }
 
-export function atrTradeable(atr: number): boolean {
-  return atr >= 0.45 && atr <= 5.2;
+export function atrTradeable(atr: number, band: AtrBand = FOUR_HOUR_ATR): boolean {
+  return atr >= band[0] && atr <= band[1];
 }
 
 export function rewardToRisk(stopPct: number, targetPct: number): number {
@@ -102,7 +102,11 @@ export function snapshotTechnical(candles: Candle[]): TechnicalSnapshot {
   const extensionPct = last && vw ? ((last - vw) / vw) * 100 : null;
   const bar = candles[candles.length - 1];
   const range = bar ? bar.high - bar.low : 0;
-  const closeStrength = bar && range > 0 ? (bar.close - bar.low) / range : null;
+  const atr = atrPct(candles, 14);
+  const typical = last && atr !== null ? (last * atr) / 100 : 0;
+  // Gecko 15-minute bars on thin Cronos pools are often a single print. That is not a weak close.
+  const closeStrength =
+    bar && range > 0 && typical > 0 && range >= typical * 0.2 ? (bar.close - bar.low) / range : bar ? 0.5 : null;
   const prior = candles.slice(-13, -1);
   const priorHigh = prior.length ? Math.max(...prior.map((c) => c.high)) : null;
   const priorLow = prior.length ? Math.min(...prior.map((c) => c.low)) : null;
@@ -129,7 +133,7 @@ export function snapshotTechnical(candles: Candle[]): TechnicalSnapshot {
     ema9: e9,
     ema21: e21,
     vwap: vw,
-    atrPct: atrPct(candles, 14),
+    atrPct: atr,
     volumeZ,
     lastClose: last,
     extensionPct,
@@ -147,12 +151,13 @@ export function buildSignals(
   researchScore: number | null,
   allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
 ): Signal[] {
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
   const fearGreed = typeof ctx === "string" ? null : ctx.fearGreed;
   const solChange = typeof ctx === "string" ? 0 : ctx.solChange;
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
-  if (!atrTradeable(tech.atrPct)) return [];
+  if (!atrTradeable(tech.atrPct, band)) return [];
   const price = tech.lastClose;
   const atr = Math.max(tech.atrPct, 0.6);
   const volZ = tech.volumeZ ?? 0;
@@ -255,30 +260,7 @@ export function buildSignals(
     });
   }
 
-  const solNotRipping = solChange < 3.2;
-  if (
-    allowShorts &&
-    solOnlyShort(token) &&
-    stance === "mixed" &&
-    solNotRipping &&
-    (h30 > 12 || h1 > 19) &&
-    tech.rsi14 > 78 &&
-    ext > 5 &&
-    tape <= 0.46 &&
-    (tech.closeStrength ?? 1) <= 0.4
-  ) {
-    const rr = withMinRR(clamp(atr * 1.4, 1.0, 4.2), clamp(atr * 2.2, 1.6, 6.5));
-    signals.push({
-      ...base,
-      id: id("sig"),
-      side: "short",
-      reason: "fade",
-      confidence: clamp(58 + Math.min(h30, 25) * 0.55, 54, 90),
-      ...rr,
-      thesis: `${token.symbol} climax (${h30.toFixed(1)}% / 30m, RSI ${tech.rsi14.toFixed(0)}, weak close). Fade — time-boxed, no hero shorts.`,
-    });
-  }
-
+  void allowShorts;
   return signals
     .filter((s) => rewardToRisk(s.stopPct, s.targetPct) >= 1.6)
     .sort((a, b) => b.confidence - a.confidence)
@@ -321,17 +303,10 @@ export function entrySignals(
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
 ): Signal[] {
   if (tech) {
-    const structured = buildSignals(token, tech, researchScore, allowShorts, ctx);
-    if (structured.length) {
-      // A 4-hour long must not hide the 15m short, or the red-tape filter drops the only signal.
-      if (structured.every((signal) => signal.side === "long")) {
-        const short = buildFlowSignals(token, researchScore, allowShorts, ctx).find((signal) => signal.side === "short");
-        if (short) return [short];
-      }
-      return structured;
-    }
+    const structured = buildSignals(token, tech, researchScore, allowShorts, ctx).filter((signal) => signal.side === "long");
+    if (structured.length) return structured;
   }
-  return buildFlowSignals(token, researchScore, allowShorts, ctx);
+  return buildFlowSignals(token, researchScore, allowShorts, ctx).filter((signal) => signal.side === "long");
 }
 
 /**
@@ -345,42 +320,36 @@ export function solanaEntrySignals(
   researchScore: number | null,
   allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
 ): Signal[] {
-  if (!decision) return [];
-  const found = buildSignals(token, decision, researchScore, allowShorts, ctx);
-  if (!allowShorts) return found;
-  const shorts = structuredShorts(token, decision, researchScore, ctx);
-  return [...found, ...shorts].sort((a, b) => b.confidence - a.confidence).slice(0, 1);
+  return candleSetups(token, decision, researchScore, allowShorts, ctx, band)
+    .filter((signal) => signal.side === "long")
+    .slice(0, 1);
 }
 
 /**
- * The same 4-hour setups as the longs, turned over.
- * A breakdown is a breakout through the prior low. A reject is a reclaim from overbought.
- * A falling watchlist name and a VWAP reject match the continuation and the VWAP pullback.
+ * 15-minute watchlist continuation. The 4-hour breakout rules need a volume spike and a
+ * firm close; Gecko Cronos 15-minute bars rarely print either, so a name holding its
+ * average with a mid RSI would never fire. The 1-hour and 4-hour back-check still has to pass.
  */
-function structuredShorts(
+function fifteenWatchlist(
   token: TokenCandidate,
   tech: TechnicalSnapshot,
   researchScore: number | null,
+  allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"],
 ): Signal[] {
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
-  const fearGreed = typeof ctx === "string" ? null : ctx.fearGreed;
-  const solChange = typeof ctx === "string" ? 0 : ctx.solChange;
+  if (!token.watchlist) return [];
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
-  if (!atrTradeable(tech.atrPct)) return [];
+  if (!atrTradeable(tech.atrPct, FIFTEEN_MIN_ATR)) return [];
   const price = tech.lastClose;
-  const atr = Math.max(tech.atrPct, 0.6);
+  const atr = Math.max(tech.atrPct, 0.35);
   const volZ = tech.volumeZ ?? 0;
   const ext = tech.extensionPct ?? 0;
-  const h15 = token.flows.m15.priceChangePct;
-  const h30 = token.flows.m30.priceChangePct;
-  const h1 = token.flows.h1.priceChangePct;
-  const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
-  const closeWeak = (tech.closeStrength ?? 1) <= 0.42;
-  const brokeDown = tech.priorLow !== null && price <= tech.priorLow;
-  const barsBelow = tech.barsBelowEma9 ?? 0;
-  const signals: Signal[] = [];
+  const close = tech.closeStrength ?? 0.5;
+  const heldLow = tech.priorLow === null || price >= tech.priorLow;
+  const underHigh = tech.priorHigh === null || price <= tech.priorHigh;
   const base = {
     mint: token.mint,
     symbol: token.symbol,
@@ -390,93 +359,47 @@ function structuredShorts(
     researchScore,
     createdAt: new Date().toISOString(),
   };
-  const fearfulMemes = token.sector === "Meme" && fearGreed !== null && fearGreed <= 25;
-  const solRip = solChange > 2.8;
-  const trendDown = tech.ema9 < tech.ema21 && h1 < 1.5 && barsBelow >= 2;
-  const notPanic = tech.rsi14 > 30 && ext > -4.8 && volZ < 5.2;
-  const allowBreakdown =
-    !fearfulMemes &&
-    !(solRip && !token.watchlist) &&
-    (stance !== "risk-on" || (token.watchlist && (researchScore ?? 0) >= 70));
-
-  if (allowBreakdown && trendDown && notPanic && brokeDown && closeWeak && volZ > 1.05 && h15 < -0.35 && tech.rsi14 < 48 && tape <= 0.47) {
-    const rr = withMinRR(clamp(atr * 1.25, 0.8, 3.6), clamp(atr * 2.15, 1.4, 6.8));
-    signals.push({
-      ...base,
-      id: id("sig"),
-      side: "short",
-      reason: "breakout",
-      confidence: clamp(60 + volZ * 5 + (researchScore ? (researchScore - 50) * 0.22 : 0) + (token.watchlist ? 3 : 0), 52, 93),
-      ...rr,
-      thesis: `${token.symbol} closed under the prior 12-bar low with EMA9<EMA21, RSI ${tech.rsi14.toFixed(0)}, buy share ${(tape * 100).toFixed(0)}%. Structure breakdown — the same setup as a breakout, turned over.`,
-    });
-  }
-
-  const notRocket = h1 < 7 && h30 < 14;
-  // The long reclaim fires under RSI 33, which is rare. A 4-hour RSI of 67 is common on this book
-  // and those shorts lost the replay, so the short waits for a real extreme, the same RSI 78 line as a climax fade.
-  if (tech.rsi14 > 78 && volZ > 0.35 && ext > -0.8 && notRocket && h15 < 0 && tape <= 0.52 && (tech.closeStrength ?? 1) <= 0.55) {
-    const rr = withMinRR(clamp(atr * 1.15, 0.7, 3.2), clamp(atr * 2.0, 1.3, 5.8));
-    signals.push({
-      ...base,
-      id: id("sig"),
-      side: "short",
-      reason: "reclaim",
-      confidence: clamp(58 + (tech.rsi14 - 78) + (researchScore ? (researchScore - 45) * 0.15 : 0), 52, 88),
-      ...rr,
-      thesis: `${token.symbol} RSI ${tech.rsi14.toFixed(0)} with a weak close and no 1h rip. Mean-reversion short, the mirror of a reclaim.`,
-    });
-  }
-
-  const underHigh = tech.priorHigh !== null && price <= tech.priorHigh;
-  // A long continuation accepts a flat-to-up average or two closes above EMA9.
-  // The short needs both: the average is not rising, and two closes are under EMA9.
-  // One dip under the average was shorting every watchlist name.
-  const flatToDown = tech.ema9 <= tech.ema21 * 1.002 && barsBelow >= 2;
+  const out: Signal[] = [];
   if (
-    signals.length === 0 &&
-    token.watchlist &&
-    stance !== "risk-on" &&
-    !solRip &&
-    flatToDown &&
-    underHigh &&
-    tech.rsi14 >= 34 &&
-    tech.rsi14 <= 54 &&
-    ext > -3.2 &&
-    (tech.closeStrength ?? 1) <= 0.42 &&
-    tape <= 0.47 &&
-    h15 < -0.35 &&
-    h1 < 0.5 &&
-    volZ > 1.05
+    stance !== "defensive" &&
+    tech.ema9 >= tech.ema21 * 0.999 &&
+    tech.rsi14 >= 48 &&
+    tech.rsi14 <= 68 &&
+    close >= 0.4 &&
+    ext < 3.5 &&
+    volZ > -1.2 &&
+    heldLow
   ) {
     const rr = withMinRR(clamp(atr * 1.05, 0.7, 2.8), clamp(atr * 1.9, 1.2, 5.2));
-    signals.push({
+    out.push({
       ...base,
       id: id("sig"),
-      side: "short",
+      side: "long",
       reason: "reclaim",
-      confidence: clamp(64 + (50 - tech.rsi14) * 0.25, 60, 84),
+      confidence: clamp(62 + (tech.rsi14 - 50) * 0.3, 58, 84),
       ...rr,
-      thesis: `${token.symbol} is a liquid watchlist name failing its range with RSI ${tech.rsi14.toFixed(0)} and the hour offered. Small continuation short.`,
+      thesis: `${token.symbol} 15-minute EMA 9 is over 21, RSI ${tech.rsi14.toFixed(0)}, holding its range. Continuation long — the 1-hour and 4-hour still have to agree.`,
     });
   }
+  void allowShorts;
+  void underHigh;
+  return out.filter((s) => s.side === "long" && rewardToRisk(s.stopPct, s.targetPct) >= 1.6);
+}
 
-  const nearVwap =
-    tech.vwap !== null && price >= tech.vwap * 0.996 && price <= tech.vwap * 1.008 && tech.rsi14 >= 42 && tech.rsi14 <= 54;
-  if (!solRip && trendDown && nearVwap && volZ > 0.2 && volZ < 4 && tape <= 0.49 && stance !== "risk-on") {
-    const rr = withMinRR(clamp(atr * 1.1, 0.7, 3.0), clamp(atr * 1.95, 1.25, 5.4));
-    signals.push({
-      ...base,
-      id: id("sig"),
-      side: "short",
-      reason: "reclaim",
-      confidence: clamp(59 + volZ * 3.5 + (researchScore ? (researchScore - 50) * 0.16 : 0), 54, 86),
-      ...rr,
-      thesis: `${token.symbol} is rejecting VWAP with a live 4-hour downtrend. Pullback short — the mirror of a VWAP buy.`,
-    });
-  }
-
-  return signals.filter((s) => rewardToRisk(s.stopPct, s.targetPct) >= 1.6);
+/** Buy setups on one chart, best first, before any higher-frame check. */
+export function candleSetups(
+  token: TokenCandidate,
+  tech: TechnicalSnapshot | null,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
+): Signal[] {
+  if (!tech) return [];
+  void allowShorts;
+  const found = buildSignals(token, tech, researchScore, false, ctx, band);
+  const extra = band === FIFTEEN_MIN_ATR ? fifteenWatchlist(token, tech, researchScore, false, ctx) : [];
+  return [...found, ...extra].filter((signal) => signal.side === "long").sort((a, b) => b.confidence - a.confidence);
 }
 
 /** Trade the pool tape the desk already loaded. No candle request. */
@@ -498,41 +421,7 @@ export function buildFlowSignals(
   const tape = buyShare(token.flows.m15.buys, token.flows.m15.sells);
   const defensive = stance === "defensive";
   const solDump = solChange < -4.5;
-  // A down 15m can still print about as many buys as sells. A buy spike is not a short.
-  const sellHeavy = tape <= 0.62;
-  const falling =
-    token.watchlist &&
-    m15 <= -0.15 &&
-    m15 > -8 &&
-    m5 < 0 &&
-    h1 > -6 &&
-    h1 < 4 &&
-    sellHeavy;
-  if (allowShorts && solOnlyShort(token) && !defensive && falling) {
-    const stopPct = clamp(1.35, 1.2, 2.6);
-    const rr = withMinRR(stopPct, stopPct * 1.8);
-    const confidence = clamp(
-      60 + Math.min(Math.abs(m15), 6) * 2 + (tape < 0.45 ? 4 : 0) + (researchScore !== null ? (researchScore - 55) * 0.1 : 0),
-      58,
-      88,
-    );
-    const short: Signal = {
-      id: id("sig"),
-      mint: token.mint,
-      symbol: token.symbol,
-      poolAddress: token.poolAddress,
-      sector: token.sector,
-      price,
-      researchScore,
-      createdAt: new Date().toISOString(),
-      side: "short",
-      reason: "fade",
-      confidence,
-      ...rr,
-      thesis: `${token.symbol} 5m and 15m are falling — 15m ${m15.toFixed(2)}%, 1h ${h1.toFixed(2)}%, buy share ${(tape * 100).toFixed(0)}%. Short the drop.`,
-    };
-    return rewardToRisk(short.stopPct, short.targetPct) >= 1.6 ? [short] : [];
-  }
+  void allowShorts;
   if (h1 <= -6 || m15 <= -0.25 || m5 <= -1.2 || solDump) return [];
   if (
     token.sector === "Meme" &&
