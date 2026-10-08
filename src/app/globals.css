@@ -731,6 +731,37 @@ html[data-desk="cronos"] .desk-scroll::-webkit-scrollbar-thumb {
   background-color: #ffffff;
 }
 
+.token-logo {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.token-logo-fallback {
+  display: inline-grid;
+  place-items: center;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.22), transparent 46%),
+    linear-gradient(160deg, rgba(255, 74, 216, 0.55), rgba(0, 82, 255, 0.45));
+}
+
+.token-logo-on-chart {
+  box-shadow:
+    0 0 0 2px rgba(5, 5, 8, 0.55),
+    0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.theme-cronos .token-logo {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(7, 24, 51, 0.08);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

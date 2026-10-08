@@ -5,6 +5,7 @@ import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRule
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
+import { TokenLogo } from "./TokenLogo";
 
 const pageStartedAt = Date.now();
 
@@ -160,7 +161,10 @@ export function Home({
                 <li key={p.id} className="rounded-2xl border border-[var(--line)] bg-black/20 p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <button type="button" onClick={() => onOpenPosition(p.id)} className="text-left">
-                      <span className="text-lg font-medium">{p.symbol}</span>
+                      <span className="inline-flex items-center gap-2 text-lg font-medium">
+                        <TokenLogo symbol={p.symbol} mint={p.mint} chain={chain} size="md" />
+                        {p.symbol}
+                      </span>
                       <span className="ml-2 text-xs text-[var(--faint)]">
                         {p.side === "long" ? "buy" : "sell"}
                         {(p.leverage ?? 1) > 1 ? ` · ${p.leverage}x` : ""}
@@ -213,7 +217,8 @@ export function Home({
             <ul className="mt-3 divide-y divide-[var(--line)]">
               {recent.map((t) => (
                 <li key={t.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                  <span className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
                     <span className="font-medium">{t.symbol}</span>
                     <span className="ml-2 text-[var(--muted)]">{exitWords(t.reason)}</span>
                   </span>

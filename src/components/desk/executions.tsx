@@ -5,6 +5,7 @@ import { executionLine, logHeadline, sizeText, stillOpenIds } from "@/lib/tradin
 import type { Trade } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Tone } from "./bits";
+import { TokenLogo } from "./TokenLogo";
 
 export function ExecutionLog({
   trades,
@@ -30,7 +31,8 @@ export function ExecutionLog({
             <div key={line.id} className="rounded-xl border border-[var(--line)] px-3 py-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">
+                  <div className="flex items-center gap-2 font-medium">
+                    <TokenLogo symbol={line.symbol} mint={trade.mint} chain={chain} size="sm" />
                     {line.verb} {line.symbol}{" "}
                     <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--faint)]">{direction}</span>
                   </div>
