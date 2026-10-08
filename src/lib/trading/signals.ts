@@ -2,6 +2,11 @@ import { SOL_MINT } from "@/lib/market/universe";
 import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { clamp, id, mean, stdev } from "@/lib/utils";
 
+/** ATR% range a frame can trade. A 15-minute bar is a quarter of the 4-hour swing. */
+export type AtrBand = readonly [number, number];
+export const FOUR_HOUR_ATR: AtrBand = [0.45, 5.2];
+export const FIFTEEN_MIN_ATR: AtrBand = [0.12, 3.2];
+
 export interface SignalContext {
   stance: MarketRegime["stance"];
   fearGreed: number | null;
@@ -75,8 +80,8 @@ export function vwap(candles: Candle[]): number | null {
   return pv / vol;
 }
 
-export function atrTradeable(atr: number): boolean {
-  return atr >= 0.45 && atr <= 5.2;
+export function atrTradeable(atr: number, band: AtrBand = FOUR_HOUR_ATR): boolean {
+  return atr >= band[0] && atr <= band[1];
 }
 
 export function rewardToRisk(stopPct: number, targetPct: number): number {
@@ -147,12 +152,13 @@ export function buildSignals(
   researchScore: number | null,
   allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
 ): Signal[] {
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
   const fearGreed = typeof ctx === "string" ? null : ctx.fearGreed;
   const solChange = typeof ctx === "string" ? 0 : ctx.solChange;
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
-  if (!atrTradeable(tech.atrPct)) return [];
+  if (!atrTradeable(tech.atrPct, band)) return [];
   const price = tech.lastClose;
   const atr = Math.max(tech.atrPct, 0.6);
   const volZ = tech.volumeZ ?? 0;
@@ -345,16 +351,29 @@ export function solanaEntrySignals(
   researchScore: number | null,
   allowShorts: boolean,
   ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
 ): Signal[] {
-  if (!decision) return [];
-  const found = buildSignals(token, decision, researchScore, allowShorts, ctx);
+  return candleSetups(token, decision, researchScore, allowShorts, ctx, band).slice(0, 1);
+}
+
+/** Every long and short setup on one chart, best first, before any higher-frame check. */
+export function candleSetups(
+  token: TokenCandidate,
+  tech: TechnicalSnapshot | null,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  band: AtrBand = FOUR_HOUR_ATR,
+): Signal[] {
+  if (!tech) return [];
+  const found = buildSignals(token, tech, researchScore, allowShorts, ctx, band);
   if (!allowShorts) return found;
-  const shorts = structuredShorts(token, decision, researchScore, ctx);
-  return [...found, ...shorts].sort((a, b) => b.confidence - a.confidence).slice(0, 1);
+  const shorts = structuredShorts(token, tech, researchScore, ctx, band);
+  return [...found, ...shorts].sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
- * The same 4-hour setups as the longs, turned over.
+ * The same candle setups as the longs, turned over.
  * A breakdown is a breakout through the prior low. A reject is a reclaim from overbought.
  * A falling watchlist name and a VWAP reject match the continuation and the VWAP pullback.
  */
@@ -363,12 +382,13 @@ function structuredShorts(
   tech: TechnicalSnapshot,
   researchScore: number | null,
   ctx: SignalContext | MarketRegime["stance"],
+  band: AtrBand = FOUR_HOUR_ATR,
 ): Signal[] {
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
   const fearGreed = typeof ctx === "string" ? null : ctx.fearGreed;
   const solChange = typeof ctx === "string" ? 0 : ctx.solChange;
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
-  if (!atrTradeable(tech.atrPct)) return [];
+  if (!atrTradeable(tech.atrPct, band)) return [];
   const price = tech.lastClose;
   const atr = Math.max(tech.atrPct, 0.6);
   const volZ = tech.volumeZ ?? 0;

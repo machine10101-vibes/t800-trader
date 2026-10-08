@@ -2,6 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
+import { cronosSource, FRAME_BARS, FRAME_REFRESH_MS, FRAME_SECONDS, frameKey, FRAMES, geckoFrameUrl, jupiterInterval, rollUp, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
@@ -970,6 +971,90 @@ export function requestDecisionCharts(mints: string[], chain: ChainId): void {
 export function prefetchDecisionCharts(chain: ChainId): Promise<void> {
   if (chain === "cronos") return prefetchCronosDecisionCharts();
   return Promise.all(bookMints(chain).map((mint) => loadDecisionChart(mint, chain).catch(() => []))).then(() => undefined);
+}
+
+const frameCache = new Map<string, { at: number; rows: Candle[] }>();
+const frameMiss = new Map<string, number>();
+const frameInflight = new Map<string, Promise<void>>();
+
+/** The 5-minute, 15-minute, 1-hour or 4-hour bars for one book coin. The 4-hour is the decision chart above. */
+export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Candle[] | null {
+  if (frame === "4h") return cachedDecisionChart(mint, chain);
+  const hit = frameCache.get(frameKey(chain, mint, frame));
+  return hit?.rows.length ? hit.rows : null;
+}
+
+async function readFrameSource(mint: string, chain: ChainId, source: Frame): Promise<void> {
+  const key = frameKey(chain, mint, source);
+  if (chain === "cronos") {
+    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
+    if (!pool) return;
+    const network = geckoNetwork(chain);
+    let rows = await readOhlcvDirect(geckoFrameUrl(network, pool, "pools", source));
+    if (!rows.length) rows = await readOhlcvDirect(geckoFrameUrl(network, mint, "tokens", source)).catch(() => rows);
+    if (!rows.length) throw new Error("empty");
+    const at = Date.now();
+    frameCache.set(key, { at, rows: rows.slice(-FRAME_BARS) });
+    if (source === "5m") frameCache.set(frameKey(chain, mint, "15m"), { at, rows: rollUp(rows, FRAME_SECONDS["15m"]).slice(-FRAME_BARS) });
+    return;
+  }
+  const json = await fetchJson<{ candles?: unknown }>(jupiterChartUrl(mint, Date.now(), FRAME_BARS, jupiterInterval(source)), {
+    timeoutMs: 8_000,
+    retries: 1,
+  });
+  const rows = parseJupiterCandles(json.candles);
+  if (!rows.length) throw new Error("empty");
+  frameCache.set(key, { at: Date.now(), rows });
+}
+
+/** Cronos fills the 15-minute from its 5-minute read, so one Gecko call serves both. */
+export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame): Promise<Candle[]> {
+  if (frame === "4h") return loadDecisionChart(mint, chain);
+  const source = chain === "cronos" ? cronosSource(frame) : frame;
+  const key = frameKey(chain, mint, source);
+  const hit = frameCache.get(key);
+  // Gecko allows about 30 calls a minute across the whole page, so Cronos frames refresh a little slower.
+  const ttl = FRAME_REFRESH_MS[source] * (chain === "cronos" ? 1.4 : 1);
+  const fresh = hit?.rows.length && Date.now() - hit.at < ttl;
+  const missedAt = frameMiss.get(key);
+  const cooling = (missedAt && Date.now() - missedAt < CANDLE_COOL_MS) || (chain === "cronos" && geckoIsCooling());
+  if (!fresh && !cooling) {
+    let run = frameInflight.get(key);
+    if (!run) {
+      run = readFrameSource(mint, chain, source)
+        .then(() => {
+          frameMiss.delete(key);
+        })
+        .catch(() => {
+          frameMiss.set(key, Date.now());
+        })
+        .finally(() => {
+          if (frameInflight.get(key) === run) frameInflight.delete(key);
+        });
+      frameInflight.set(key, run);
+    }
+    await run;
+  }
+  return cachedFrameChart(mint, chain, frame) ?? [];
+}
+
+/** All four frames for one coin, read together before the bot decides. */
+export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
+  const rows = await Promise.all(FRAMES.map((frame) => loadFrameChart(mint, chain, frame).catch(() => [] as Candle[])));
+  return Object.fromEntries(FRAMES.map((frame, i) => [frame, rows[i]])) as Record<Frame, Candle[]>;
+}
+
+/** Keep every book coin's four charts warm for the desk. Fresh frames return without a call. */
+export function requestFrameCharts(mints: string[], chain: ChainId): void {
+  requestDecisionCharts(mints, chain);
+  for (const mint of mints) {
+    if (!mint) continue;
+    for (const frame of FRAMES) {
+      if (frame === "4h") continue;
+      if (chain === "cronos" && frame === "15m") continue;
+      void loadFrameChart(mint, chain, frame);
+    }
+  }
 }
 
 /** Pull a native 4-hour chart for every tradable pool. Does not replace the 1-minute cache signals use. */

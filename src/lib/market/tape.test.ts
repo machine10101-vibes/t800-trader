@@ -88,8 +88,8 @@ describe("candle tape", () => {
     assert.match(tapeRead("SOL", 0.4, 0.8, 1), /green at 0.80%.*long is eligible/);
     assert.match(tickPass("ZBCN", 0), /flat \(0.00%\), waiting on a 5m/);
     assert.match(tickPass("SOL", -0.4), /red \(-0.40%\), staying in cash/);
-    assert.equal(solanaPass("SOL", 0), "SOL: no 4-hour setup yet (0.00% in 15 minutes)");
-    assert.match(solanaPass("RAY", -0.4), /no 4-hour setup yet \(-0.40% in 15 minutes\)/);
+    assert.equal(solanaPass("SOL", 0), "SOL: no 15-minute setup yet (0.00% in 15 minutes)");
+    assert.match(solanaPass("RAY", -0.4), /no 15-minute setup yet \(-0.40% in 15 minutes\)/);
     assert.equal(solanaKeepEntry("short", 0.4), false);
     assert.equal(solanaKeepEntry("short", -0.4), true);
     assert.equal(solanaKeepEntry("long", -0.4), false);

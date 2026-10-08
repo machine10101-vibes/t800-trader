@@ -101,7 +101,7 @@ describe("home", () => {
       lastError: null,
       lastTickAt: new Date(now).toISOString(),
       ticks: 4,
-      blocked: ["SOL: no 4-hour setup yet", "RAY: dropping right now (-0.40% in 15 minutes), so it waits"],
+      blocked: ["SOL: no 15-minute setup yet", "RAY: dropping right now (-0.40% in 15 minutes), so it waits"],
       scanSeconds: 5,
       positions: [],
       trades: [],
@@ -112,7 +112,7 @@ describe("home", () => {
     assert.equal(quiet.targets.length, 0);
     assert.equal(quiet.limits.length, 0);
     assert.equal(quiet.walls.length, 0);
-    assert.match(quiet.summary, /waiting for a 4-hour setup/);
+    assert.match(quiet.summary, /waiting for a 15-minute setup/);
     assert.deepEqual(visibleActivity(quiet), []);
 
     const held = botActivity({
@@ -162,7 +162,7 @@ describe("home", () => {
     });
     assert.equal(loading.walls.length, 0);
     assert.equal(loading.limits.length, 0);
-    assert.match(loading.summary, /waiting for a 4-hour setup/);
+    assert.match(loading.summary, /waiting for a 15-minute setup/);
 
     const split = botActivity({
       running: true,

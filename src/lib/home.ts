@@ -54,12 +54,12 @@ export function homeStatus(
     };
   }
   const why = bot.blocked.find((line) =>
-    /4-hour chart|fee to open|Cooling for|Daily loss|Kill switch|Re-confirm LIVE|trading balance/i.test(line),
+    /chart has not loaded|but the (1|4)-hour|fee to open|Cooling for|Daily loss|Kill switch|Re-confirm LIVE|trading balance/i.test(line),
   );
   return {
     tone: "amber",
     title: "Watching for a good setup",
-    detail: why ?? "It buys only when the 4-hour chart lines up. A quiet day can pass with no trade.",
+    detail: why ?? "It trades a 15-minute setup only when the 1-hour and 4-hour charts agree. A quiet day can pass with no trade.",
   };
 }
 
@@ -75,7 +75,7 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts">): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
   const rules = [
-    "Buys only when the 4-hour chart sets up. It skips the noise in between.",
+    "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
     config.allowShorts
       ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid. A bet the price will fall uses the same distances, with the stop above and the goal below.`
       : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
@@ -87,7 +87,7 @@ export function planRules(config: Pick<BotConfig, "stopLossPct" | "targetProfitP
     `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
   ];
   if (config.allowShorts) {
-    rules.push("It can bet a price will fall, with the same 4-hour setups it uses to buy. Real-money bets against the price are SOL only.");
+    rules.push("It can bet a price will fall, with the same 15-minute setups turned over and the same 1-hour and 4-hour check. Real-money bets against the price are SOL only.");
   }
   if (config.multipliers.length) rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
@@ -121,7 +121,7 @@ const LIMIT_LINE =
   /kill switch|daily loss|most allowed at once|cooling for an hour|day budget|cooldown after|sector cap|micro book|meme cluster|memes are flattened|confidence below|shorts disabled|insufficient cash|need at least|too small|trading balance is under|two new tickets|no new trade after that fill|only sol can be shorted|no shorts in a defensive|breakouts need|live short/i;
 
 /** Charts and pool prints still arriving. The bot is working, not stuck. */
-const WAIT_LINE = /4-hour chart has not loaded|pool tape has not arrived/i;
+const WAIT_LINE = /(5-minute|15-minute|1-hour|4-hour) chart has not loaded|pool tape has not arrived/i;
 
 const WALL_LINE =
   /price feeds disagree|could not read the trading balance|cannot ask the wallet|swap was not broadcast|wallet (swap|sell|scale)|missing live mark|signature was declined|re-confirm live|cash could not fill/i;
@@ -228,7 +228,7 @@ export function botActivity(input: {
     }
   }
 
-  let summary = "It is working and waiting for a 4-hour setup. Nothing is stopping it.";
+  let summary = "It is working and waiting for a 15-minute setup the 1-hour and 4-hour charts agree with. Nothing is stopping it.";
   if (!input.running && !input.killSwitch) summary = "The bot is off, so it is not checking for trades.";
   if (targets.length && !limits.length && !walls.length) summary = "Open trades are waiting for their profit goals.";
   if (limits.length && !targets.length && !walls.length) summary = "A limit is blocking new trades.";

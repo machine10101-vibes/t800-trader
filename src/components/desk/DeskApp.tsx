@@ -1,6 +1,6 @@
 "use client";
 
-import { CandleChart, EquityPath, ScatterTape, VolumeBars, type ChartLayers } from "@/components/desk/charts";
+import { ALL_TA_LAYERS, AnalysisChart, CandleChart, EquityPath, ScatterTape, TaNotes, VolumeBars, type ChartLayers, type ChartTrade, type TaLayers } from "@/components/desk/charts";
 import { ExecutionLog } from "@/components/desk/executions";
 import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
@@ -27,7 +27,9 @@ import {
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { getActiveWallet, listLocalBooks, readLastWallet, resumeSavedBook } from "@/lib/store";
 import { parseWalletAddress } from "@/lib/monitor";
-import { cachedDecisionChart, prefetchDecisionCharts, rememberTapeMark, requestDecisionCharts } from "@/lib/market/providers";
+import { cachedFrameChart, prefetchDecisionCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
+import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
+import { frameBias, type Bias } from "@/lib/market/analysis";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -1454,24 +1456,28 @@ function Ticker({ label, value, chg, hint }: { label: string; value: string; chg
   );
 }
 
-function useDecisionCharts(mints: string[], chain: ChainId): Record<string, Candle[]> {
+type FrameBars = Partial<Record<Frame, Candle[]>>;
+
+function useFrameCharts(mints: string[], chain: ChainId): Record<string, FrameBars> {
   const key = mints.join("|");
-  const [bars, setBars] = useState<Record<string, Candle[]>>({});
+  const [bars, setBars] = useState<Record<string, FrameBars>>({});
   useEffect(() => {
     if (!key) return;
     const ids = key.split("|").filter(Boolean);
     let live = true;
     const paint = () => {
       if (!live) return;
-      requestDecisionCharts(ids, chain);
+      requestFrameCharts(ids, chain);
       setBars((cur) => {
         let changed = false;
         const next = { ...cur };
         for (const mint of ids) {
-          const rows = cachedDecisionChart(mint, chain);
-          if (!rows?.length || next[mint] === rows) continue;
-          next[mint] = rows;
-          changed = true;
+          for (const frame of FRAMES) {
+            const rows = cachedFrameChart(mint, chain, frame);
+            if (!rows?.length || next[mint]?.[frame] === rows) continue;
+            next[mint] = { ...next[mint], [frame]: rows };
+            changed = true;
+          }
         }
         return changed ? next : cur;
       });
@@ -1484,6 +1490,75 @@ function useDecisionCharts(mints: string[], chain: ChainId): Record<string, Cand
     };
   }, [chain, key]);
   return bars;
+}
+
+function FrameTabs({ value, onChange, label }: { value: Frame; onChange: (frame: Frame) => void; label: string }) {
+  return (
+    <span role="tablist" aria-label={label} className="flex gap-1">
+      {FRAMES.map((frame) => (
+        <button
+          key={frame}
+          type="button"
+          role="tab"
+          aria-selected={value === frame}
+          data-on={value === frame}
+          onClick={(event) => {
+            event.stopPropagation();
+            onChange(frame);
+          }}
+          className="filter-chip num"
+        >
+          {frame}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+const BIAS_WORD: Record<Bias, string> = { up: "Up", down: "Down", range: "Range" };
+const BIAS_TONE: Record<Bias, "mint" | "crimson" | "amber"> = { up: "mint", down: "crimson", range: "amber" };
+
+/** What the bot sees on each frame for one coin: 15m finds the trade, 1h and 4h must agree. */
+function BotRead({ frames, call }: { frames: FrameBars; call: string }) {
+  const role: Record<Frame, string> = { "5m": "context", "15m": "entry", "1h": "back-check", "4h": "back-check" };
+  return (
+    <div className="mb-2 rounded-xl border border-[var(--line)] p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {FRAMES.map((frame) => {
+          const bias = frameBias(frames[frame]);
+          return (
+            <span key={frame} className="flex items-center gap-1 text-[11px]">
+              <span className="num uppercase tracking-[0.12em] text-[var(--faint)]">{frame}</span>
+              {bias ? <Pill tone={BIAS_TONE[bias]}>{BIAS_WORD[bias]}</Pill> : <Pill>loading</Pill>}
+              <span className="text-[10px] text-[var(--faint)]">{role[frame]}</span>
+            </span>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-xs leading-5 text-[var(--text)]">
+        <span className="text-[var(--faint)]">Bot: </span>
+        {call}
+      </p>
+    </div>
+  );
+}
+
+function TaToggles({ layers, onChange }: { layers: TaLayers; onChange: (next: TaLayers) => void }) {
+  const items: [keyof TaLayers, string, "magenta" | "ice" | "amber"][] = [
+    ["emas", "EMA 9/21/50", "magenta"],
+    ["vwap", "VWAP", "amber"],
+    ["levels", "Support / resistance", "ice"],
+    ["trendlines", "Trendlines", "ice"],
+    ["fib", "Fibonacci", "amber"],
+    ["swings", "Swings HH/HL", "magenta"],
+  ];
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {items.map(([id, label, tone]) => (
+        <LegendToggle key={id} on={layers[id]} tone={tone} label={label} onClick={() => onChange({ ...layers, [id]: !layers[id] })} />
+      ))}
+    </span>
+  );
 }
 
 function LegendToggle({
@@ -1541,6 +1616,10 @@ function Overview({
   busy: boolean;
 }) {
   const [layers, setLayers] = useState<ChartLayers>({ ema9: true, ema21: true, vwap: true });
+  const [taLayers, setTaLayers] = useState<TaLayers>(ALL_TA_LAYERS);
+  const [focusFrame, setFocusFrame] = useState<Frame>("4h");
+  const [chartFrame, setChartFrame] = useState<Frame>("4h");
+  const [gridFrame, setGridFrame] = useState<Frame>("15m");
   const [tapeFilter, setTapeFilter] = useState<"all" | "live" | "up" | "down">("all");
   const [noteOpen, setNoteOpen] = useState(false);
   const [chartMint, setChartMint] = useState<string | null>(null);
@@ -1550,7 +1629,7 @@ function Overview({
   const copy = CHAIN_COPY[chain];
   const focus = desk.research.find((r) => sameMint(r.candidate.mint, focusMint ?? "")) ?? desk.research[0] ?? null;
   const book = bookTokens(chain);
-  const bars = useDecisionCharts(book.map((token) => token.mint), chain);
+  const bars = useFrameCharts(book.map((token) => token.mint), chain);
   const openToken = (mint: string) => {
     onFocus(mint);
     if (book.some((token) => token.mint === mint || token.mint.toLowerCase() === mint.toLowerCase())) setChartMint(mint);
@@ -1577,10 +1656,18 @@ function Overview({
     book.find((token) => token.mint === focus?.candidate.mint || token.mint.toLowerCase() === focus?.candidate.mint.toLowerCase())?.mint ??
     focus?.candidate.mint ??
     null;
-  const focusCandles = focusMintKey ? (bars[focusMintKey] ?? []) : [];
+  const focusCandles = focusMintKey ? (bars[focusMintKey]?.[focusFrame] ?? []) : [];
   const chartToken = chartMint ? book.find((token) => token.mint === chartMint || token.mint.toLowerCase() === chartMint.toLowerCase()) : null;
-  const chartCandles = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? []) : [];
-  const chartEmpty = chain === "solana" ? "Waiting on the Jupiter 4-hour chart" : "Waiting on the 4-hour chart";
+  const chartFrames: FrameBars = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? {}) : {};
+  const chartCandles = chartFrames[chartFrame] ?? [];
+  const feed = chain === "solana" ? "Jupiter" : "GeckoTerminal";
+  const emptyFor = (frame: Frame) => `Waiting on the ${feed} ${FRAME_LABEL[frame]} chart`;
+  const chartEmpty = emptyFor(gridFrame);
+  const tradeOn = (mint: string | null | undefined): ChartTrade | null => {
+    if (!mint) return null;
+    const pos = desk.positions.find((row) => sameMint(row.mint, mint));
+    return pos ? { side: pos.side, entry: pos.entryPrice, stop: pos.stopPrice, target: pos.targetPrice } : null;
+  };
   const stanceTone = desk.regime.stance === "risk-on" ? "mint" : desk.regime.stance === "defensive" ? "crimson" : "amber";
   const swaps = desk.config.walletSwaps;
   const fills = shownFills(desk.trades, swaps);
@@ -1600,15 +1687,22 @@ function Overview({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={chartToken ? `${tapeLabel(chartToken.symbol)} 4-hour chart` : "4-hour chart"}
-            className="neon w-full max-w-4xl p-4"
+            aria-label={chartToken ? `${tapeLabel(chartToken.symbol)} ${FRAME_LABEL[chartFrame]} chart` : "Chart"}
+            className="neon max-h-[94vh] w-full max-w-5xl overflow-y-auto p-4"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-2 flex items-start justify-between gap-3">
               <div>
                 <div className="text-lg font-medium">{chartToken ? tapeLabel(chartToken.symbol) : "Chart"}</div>
                 <p className="text-sm text-[var(--muted)]">
-                  {chain === "solana" ? "Jupiter 4-hour chart." : "4-hour chart."} The bot reads these bars before it buys or shorts.
+                  {feed} {FRAME_LABEL[chartFrame]} chart.{" "}
+                  {chartFrame === "15m"
+                    ? "The bot finds its long and short setups on this chart."
+                    : chartFrame === "4h"
+                      ? "The bot's technical read is drawn on the chart. A 15-minute trade must not fight this trend."
+                      : chartFrame === "1h"
+                        ? "A 15-minute trade must not fight this trend."
+                        : "Short-term context for the 15-minute setup."}
                   {chartCandles.length ? ` ${chartCandles.length} bars.` : ""}
                 </p>
               </div>
@@ -1616,14 +1710,34 @@ function Overview({
                 Close
               </button>
             </div>
-            <div className="mb-2 flex gap-1.5">
-              <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
-              <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
-              <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+            <BotRead
+              frames={chartFrames}
+              call={chartToken ? (assetCall(chartToken.symbol, desk.signals, desk.bot.blocked ?? []) || "Waiting for the next check.") : "—"}
+            />
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <FrameTabs value={chartFrame} onChange={setChartFrame} label="Chart timeframe" />
+              {chartFrame === "4h" ? (
+                <TaToggles layers={taLayers} onChange={setTaLayers} />
+              ) : (
+                <span className="flex gap-1.5">
+                  <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+                  <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+                  <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                </span>
+              )}
             </div>
-            <div className="h-[420px]">
-              <CandleChart candles={chartCandles} layers={layers} emptyLabel={chartEmpty} />
-            </div>
+            {chartFrame === "4h" ? (
+              <>
+                <div className="h-[min(62vh,540px)]">
+                  <AnalysisChart candles={chartCandles} layers={taLayers} trade={tradeOn(chartToken?.mint)} emptyLabel={emptyFor("4h")} />
+                </div>
+                <TaNotes candles={chartCandles} />
+              </>
+            ) : (
+              <div className="h-[420px]">
+                <CandleChart candles={chartCandles} layers={layers} emptyLabel={emptyFor(chartFrame)} />
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -1685,25 +1799,45 @@ function Overview({
             </div>
             <div className="border-t border-[var(--line)] p-2 lg:border-t-0 lg:border-l">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="uppercase tracking-[0.16em]">
-                  {focusName ? `${tapeLabel(focusName)} 4h · open chart` : "4h chart"}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!focusMintKey) return;
+                    setChartFrame(focusFrame);
+                    openToken(focusMintKey);
+                  }}
+                  className="uppercase tracking-[0.16em]"
+                >
+                  {focusName ? `${tapeLabel(focusName)} ${focusFrame} · open chart` : `${focusFrame} chart`}
                 </button>
-                <span className="flex gap-1.5 tracking-normal normal-case">
-                  <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
-                  <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
-                  <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                <span className="flex flex-wrap gap-1.5 tracking-normal normal-case">
+                  <FrameTabs value={focusFrame} onChange={setFocusFrame} label="Main chart timeframe" />
+                  {focusFrame === "4h" ? null : (
+                    <>
+                      <LegendToggle on={layers.ema9} tone="magenta" label="EMA 9" onClick={() => setLayers((cur) => ({ ...cur, ema9: !cur.ema9 }))} />
+                      <LegendToggle on={layers.ema21} tone="ice" label="EMA 21" onClick={() => setLayers((cur) => ({ ...cur, ema21: !cur.ema21 }))} />
+                      <LegendToggle on={layers.vwap} tone="amber" label="VWAP" onClick={() => setLayers((cur) => ({ ...cur, vwap: !cur.vwap }))} />
+                    </>
+                  )}
                 </span>
               </div>
-              <button type="button" onClick={() => focusMintKey && openToken(focusMintKey)} className="block h-[280px] w-full text-left">
-                <CandleChart candles={focusCandles} layers={layers} emptyLabel={chartEmpty} />
-              </button>
+              <div className={`block w-full ${focusFrame === "4h" ? "h-[360px]" : "h-[280px]"}`}>
+                {focusFrame === "4h" ? (
+                  <AnalysisChart candles={focusCandles} layers={taLayers} trade={tradeOn(focusMintKey)} emptyLabel={emptyFor("4h")} />
+                ) : (
+                  <CandleChart candles={focusCandles} layers={layers} emptyLabel={emptyFor(focusFrame)} />
+                )}
+              </div>
             </div>
         </div>
       </section>
 
       <section className="neon p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-          <Label>4-hour charts</Label>
+          <span className="flex flex-wrap items-center gap-2">
+            <Label>{FRAME_LABEL[gridFrame]} charts</Label>
+            <FrameTabs value={gridFrame} onChange={setGridFrame} label="Coin chart timeframe" />
+          </span>
           <span className="text-[11px] text-[var(--faint)]">
             {desk.bot.lastTickAt ? `Tick ${desk.bot.ticks} · ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Waiting for tick 1"}
           </span>
@@ -1755,7 +1889,10 @@ function Overview({
                 key={token.mint}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => openToken(token.mint)}
+                onClick={() => {
+                  setChartFrame(gridFrame);
+                  openToken(token.mint);
+                }}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
                 <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
@@ -1773,7 +1910,7 @@ function Overview({
                 </div>
                 <p className={`mb-1 line-clamp-2 px-1 text-xs leading-4 ${live ? "text-[var(--mint)]" : "text-[var(--muted)]"}`}>{call}</p>
                 <div className="h-[112px]">
-                  <CandleChart candles={bars[token.mint] ?? []} layers={layers} emptyLabel={chartEmpty} />
+                  <CandleChart candles={bars[token.mint]?.[gridFrame] ?? []} layers={layers} emptyLabel={chartEmpty} />
                 </div>
               </button>
             );

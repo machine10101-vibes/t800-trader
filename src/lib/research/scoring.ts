@@ -15,7 +15,7 @@ export interface ScreenConfig {
 /**
  * Cronos liquidity sits in VVS pools. WolfSwap and cro.trade both settle those pools.
  * The saved Solana venue list must not blank that book.
- * Named Cronos tokens stay on the scan even when Gecko misses liquidity — a 4-hour setup still has to print.
+ * Named Cronos tokens stay on the scan even when Gecko misses liquidity — a 15-minute setup still has to pass the 1-hour and 4-hour check.
  * An off-book dust pool still fails the floor.
  */
 export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {

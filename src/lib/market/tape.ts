@@ -110,9 +110,9 @@ export function cashExit(side: "long" | "short", m15: number): boolean {
   return side !== "short" && tapeInCash(m15);
 }
 
-/** Solana entries come from the 4-hour chart. A red 15m still holds a buy back. */
+/** A 15-minute setup that the live 15m pool tape then vetoed. */
 export function solanaPass(symbol: string, m15: number): string {
-  return `${symbol}: no 4-hour setup yet (${m15.toFixed(2)}% in 15 minutes)`;
+  return `${symbol}: no 15-minute setup yet (${m15.toFixed(2)}% in 15 minutes)`;
 }
 
 export function tickPass(symbol: string, m15: number): string {

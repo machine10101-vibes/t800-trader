@@ -1,5 +1,5 @@
 import { sameMint, type ChainId } from "@/lib/chain";
-import { cachedDecisionChart, cachedOhlcv, cachedTapeMarks, livePoolPrice, loadDecisionChart, loadMarket } from "@/lib/market/providers";
+import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
 import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
@@ -32,7 +32,7 @@ import {
   type WalletBudget,
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
-import { snapshotTechnical, solanaEntrySignals } from "./signals";
+import { frameEntrySignals } from "./mtf";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
@@ -297,26 +297,30 @@ export async function tickBot(
           fearGreed: market.regime.fearGreed?.value ?? null,
           solChange: market.regime.sol.change24h,
         };
-        await Promise.all(focus.map((token) => loadDecisionChart(token.mint, chain).catch(() => [])));
-        for (const token of focus) {
+        const charts = await Promise.all(focus.map((token) => loadFrameCharts(token.mint, chain)));
+        focus.forEach((token, i) => {
           if (token.priceAgreement === "split") {
             blocked.push(`${token.symbol}: price feeds disagree`);
-            continue;
+            return;
           }
-          const decision = cachedDecisionChart(token.mint, chain);
-          const charted = decision && decision.length >= 30 ? snapshotTechnical(decision) : null;
-          if (!charted) {
-            blocked.push(`${token.symbol}: 4-hour chart has not loaded`);
-            continue;
-          }
-          const found = solanaEntrySignals(token, charted, token.researchScore, next.config.allowShorts, tapeCtx).filter(
-            (signal) => solanaKeepEntry(signal.side, token.flows.m15.priceChangePct),
+          const frames = charts[i];
+          const decision = frameEntrySignals(
+            token,
+            { m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
+            token.researchScore,
+            next.config.allowShorts,
+            tapeCtx,
           );
+          if (decision.missing) {
+            blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
+            return;
+          }
+          const found = decision.signals.filter((signal) => solanaKeepEntry(signal.side, token.flows.m15.priceChangePct));
           signals.push(...found);
           if (!found.length) {
-            blocked.push(solanaPass(token.symbol, token.flows.m15.priceChangePct));
+            blocked.push(decision.pass ?? solanaPass(token.symbol, token.flows.m15.priceChangePct));
           }
-        }
+        });
 
         signals.sort((a, b) => b.confidence - a.confidence);
         const shown: Signal[] = [];

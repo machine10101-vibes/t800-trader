@@ -58,7 +58,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     bookArm:
       "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back.",
     noOpen: "No open swap. A rising SOL, Zebec, Pump, ZEC, or Ray long is sent from the trading key.",
-    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. The bot buys when the 4-hour chart sets up, so a quiet day can pass with no trade.",
+    noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. The bot trades a 15-minute setup once the 1-hour and 4-hour charts agree, so a quiet day can pass with no trade.",
     explorerName: "Solscan",
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. A SOL short is a Jupiter perpetual. Other tokens cannot be shorted on-chain.",
@@ -90,12 +90,12 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     waitingTick: "Waiting for the first CRO, ULTCAT, CRIMECAT, MERY, and PACK tick.",
     radar: "CRO, ULTCAT, CRIMECAT, MERY, and PACK. Empty rows mean the feeds missed this cycle — nothing is invented.",
     noSwaps:
-      "No signed swaps yet. An armed bot sends the next 4-hour setup from the trading key. The row appears here with a Cronoscan link once that swap confirms.",
+      "No signed swaps yet. An armed bot sends the next 15-minute setup that passes the 1-hour and 4-hour check from the trading key. The row appears here with a Cronoscan link once that swap confirms.",
     bookArm:
       "Arm asks the Crypto.com Onchain extension to sign. That signature moves a trading balance to a key in this browser, and that key signs each WolfSwap or cro.trade swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm asks the extension to sign, sells open tickets, then sends the leftover CRO and USDC back.",
-    noOpen: "No open swap. A 4-hour setup is sent from the trading key.",
+    noOpen: "No open swap. A 15-minute setup that passes the 1-hour and 4-hour check is sent from the trading key.",
     noTickets:
-      "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. The bot buys when the 4-hour chart sets up, so a quiet day can pass with no trade. Practice can bet against these coins. Real money only buys and sells.",
+      "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. The bot trades a 15-minute setup once the 1-hour and 4-hour charts agree, so a quiet day can pass with no trade. Practice can bet against these coins. Real money only buys and sells.",
     explorerName: "Cronoscan",
     settingsWallet:
       "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap and cro.trade and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Real-money shorts are not sent.",
