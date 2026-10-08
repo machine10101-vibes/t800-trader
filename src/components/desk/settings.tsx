@@ -1,7 +1,7 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
-import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, nextSettingsDraft } from "@/lib/deskSettings";
+import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES } from "@/lib/deskSettings";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -76,7 +76,13 @@ export function SettingsPanel({
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
-          {chain === "cronos" || !local.multipliers.length ? " · no extra size" : ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}`}
+          {chain === "cronos"
+            ? " · no extra size"
+            : local.solTradeMode === "spot"
+              ? " · spot swaps"
+              : local.solTradeMode === "margin"
+                ? ` · SOL margin${local.marginOnFourHour ? " on 4-hour setups" : ""}${local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : ""}`
+                : ` · spot and SOL margin${local.marginOnFourHour ? " on 4-hour setups" : ""}${local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : ""}`}
         </p>
       </div>
 
@@ -195,25 +201,57 @@ export function SettingsPanel({
           </p>
         </Section>
       ) : (
-        <Section title="Bigger buys" hint={CHAIN_COPY.solana.settingsMultiplier}>
-          <Toggle
-            label="5 times the money"
-            hint={CHAIN_COPY.solana.settingsFive}
-            checked={local.multipliers.includes(5)}
-            onChange={(on) => {
-              const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
-              set({ multipliers: next });
-            }}
+        <Section title="Spot or margin" hint={CHAIN_COPY.solana.settingsMultiplier}>
+          <Pills
+            label="How Solana trades"
+            hint="Spot is a Jupiter swap. Margin is a SOL 5x or 10x perp. Both keeps swaps on the book and lets SOL use a perp."
+            value={local.solTradeMode}
+            display={local.solTradeMode === "spot" ? "Spot" : local.solTradeMode === "margin" ? "Margin" : "Both"}
+            options={SOL_TRADE_MODES.map((mode) => ({
+              value: mode,
+              label: mode === "spot" ? "Spot" : mode === "margin" ? "Margin" : "Both",
+            }))}
+            onChange={(solTradeMode) =>
+              set({
+                solTradeMode,
+                multipliers: multipliersForMode(solTradeMode, local.multipliers),
+              })
+            }
           />
-          <Toggle
-            label="10 times the money"
-            hint={CHAIN_COPY.solana.settingsTen}
-            checked={local.multipliers.includes(10)}
-            onChange={(on) => {
-              const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
-              set({ multipliers: next });
-            }}
-          />
+          {local.solTradeMode !== "spot" ? (
+            <Toggle
+              label="Margin only on solid 4-hour setups"
+              hint="On waits for a 4-hour structure setup before a SOL perp. A 15-minute SOL fill stays a spot swap if Both is selected."
+              checked={local.marginOnFourHour}
+              onChange={(marginOnFourHour) => set({ marginOnFourHour })}
+            />
+          ) : null}
+          {local.solTradeMode === "spot" ? (
+            <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
+              Every ticket is a Jupiter spot swap. SOL 5x and 10x stay off until you pick Margin or Both.
+            </p>
+          ) : (
+            <>
+              <Toggle
+                label="5 times the money"
+                hint={CHAIN_COPY.solana.settingsFive}
+                checked={local.multipliers.includes(5)}
+                onChange={(on) => {
+                  const next = on ? [...local.multipliers, 5] : local.multipliers.filter((n) => n !== 5);
+                  set({ multipliers: multipliersForMode(local.solTradeMode, next) });
+                }}
+              />
+              <Toggle
+                label="10 times the money"
+                hint={CHAIN_COPY.solana.settingsTen}
+                checked={local.multipliers.includes(10)}
+                onChange={(on) => {
+                  const next = on ? [...local.multipliers, 10] : local.multipliers.filter((n) => n !== 10);
+                  set({ multipliers: multipliersForMode(local.solTradeMode, next) });
+                }}
+              />
+            </>
+          )}
         </Section>
       )}
 
@@ -692,6 +730,47 @@ function Choice({
       <div className="flex items-start justify-between gap-3 text-sm">
         <span className="min-w-0">{label}</span>
         <span className="num shrink-0 text-[var(--magenta)]">${value}</span>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => {
+          const on = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Pills<T extends string>({
+  label,
+  hint,
+  value,
+  options,
+  display,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: T;
+  options: { value: T; label: string }[];
+  display?: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-3">
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="min-w-0">{label}</span>
+        <span className="num shrink-0 text-[var(--magenta)]">{display ?? value}</span>
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
       <div className="mt-3 flex flex-wrap gap-2">

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { backCheck, frameEntrySignals, levelBlock } from "./mtf";
+import { backCheck, deskEntrySignals, fourHourEntrySignals, frameEntrySignals, levelBlock } from "./mtf";
 import type { Candle, TokenCandidate } from "../types";
 
 function trend(n: number, step: number, start: number, sec: number, breakout = false): Candle[] {
@@ -65,6 +65,7 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
     const decision = frameEntrySignals(token, { m15: breakout15m, h1: trend(180, 0.002, 60, 3600), h4: up }, 70, true, ctx);
     assert.equal(decision.signals.length, 1);
     assert.equal(decision.signals[0].side, "long");
+    assert.equal(decision.signals[0].setupFrame, "15m");
     assert.match(decision.signals[0].thesis, /^15-minute long breakout\. Back-check passed: 1-hour up, 4-hour up\./);
   });
 
@@ -142,5 +143,52 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
     }
     assert.match(levelBlock("long", 110.1, h4, 0.6) ?? "", /pressing into 4-hour resistance/);
     assert.equal(levelBlock("long", 101, h4, 0.6), null);
+  });
+});
+
+describe("4-hour margin setups and spot vs margin mode", () => {
+  const up4h = trend(180, 0.001, 60, 14_400, true);
+  const up1h = trend(180, 0.002, 60, 3600);
+
+  it("takes a solid 4-hour breakout and tags it as a 4-hour setup", () => {
+    const decision = fourHourEntrySignals(token, { m15: breakout15m, h1: up1h, h4: up4h }, 70, true, ctx);
+    assert.equal(decision.signals.length, 1);
+    assert.equal(decision.signals[0].setupFrame, "4h");
+    assert.equal(decision.signals[0].side, "long");
+    assert.match(decision.signals[0].thesis, /^4-hour long breakout\. Solid 4-hour structure\./);
+  });
+
+  it("will not call a thin 4-hour tape a solid setup", () => {
+    const thin = trend(12, 0.002, 60, 14_400, true);
+    const decision = fourHourEntrySignals(token, { m15: breakout15m, h1: up1h, h4: thin }, 70, true, ctx);
+    assert.equal(decision.signals.length, 0);
+    assert.match(decision.pass ?? "", /no solid setup yet \(need more closed bars\)/);
+  });
+
+  it("skips every name but SOL in margin mode", () => {
+    const ray = { ...token, symbol: "RAY", mint: "ray" } as TokenCandidate;
+    const decision = deskEntrySignals(ray, { m15: breakout15m, h1: up1h, h4: up4h }, 70, true, ctx, {
+      mode: "margin",
+      marginOnFourHour: false,
+    });
+    assert.equal(decision.signals.length, 0);
+    assert.match(decision.pass ?? "", /margin mode only trades SOL perps/);
+  });
+
+  it("uses the 4-hour setup when margin waits on that chart", () => {
+    const decision = deskEntrySignals(token, { m15: breakout15m, h1: up1h, h4: up4h }, 70, true, ctx, {
+      mode: "margin",
+      marginOnFourHour: true,
+    });
+    assert.equal(decision.signals[0]?.setupFrame, "4h");
+  });
+
+  it("keeps a 15-minute fill as spot when both is on and the 4-hour has no setup", () => {
+    const quiet4h = trend(180, 0.00001, 100, 14_400);
+    const decision = deskEntrySignals(token, { m15: breakout15m, h1: up1h, h4: quiet4h }, 70, true, ctx, {
+      mode: "both",
+      marginOnFourHour: true,
+    });
+    assert.equal(decision.signals[0]?.setupFrame, "15m");
   });
 });

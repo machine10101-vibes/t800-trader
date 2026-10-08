@@ -74,12 +74,17 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts" | "armFundsUsd" | "buySizeUsd">,
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "allowShorts" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour">,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
+  const fourHourMargin = chain === "solana" && config.marginOnFourHour && config.solTradeMode !== "spot";
   const rules = [
-    "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
+    fourHourMargin && config.solTradeMode === "margin"
+      ? "Finds SOL margin trades on a solid 4-hour setup. Other names are skipped."
+      : fourHourMargin
+        ? "Finds spot trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. SOL margin waits for a solid 4-hour setup."
+        : "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
     config.allowShorts
       ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid. A bet the price will fall uses the same distances, with the stop above and the goal below.`
       : `Every trade gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
@@ -100,8 +105,20 @@ export function planRules(
   }
   if (chain === "cronos") {
     rules.push("Every ticket is a normal buy and a normal sell. Extra size is not used.");
-  } else if (config.multipliers.length) {
-    rules.push(`SOL can use ${config.multipliers.join("x or ")}x. This loses faster when wrong.`);
+  } else if (config.solTradeMode === "margin") {
+    rules.push(
+      config.marginOnFourHour
+        ? "Margin only. SOL perps wait for a solid 4-hour setup. Zebec, Pump, ZEC, and Ray are skipped."
+        : `Margin only. SOL uses ${config.multipliers.length ? config.multipliers.join("x or ") + "x" : "a 5x or 10x"} on a Jupiter perp. Other names are skipped.`,
+    );
+  } else if (config.solTradeMode === "both") {
+    rules.push(
+      config.marginOnFourHour
+        ? "Spot swaps on 15-minute setups. SOL margin waits for a solid 4-hour setup. This loses faster when wrong."
+        : `SOL can use ${config.multipliers.length ? config.multipliers.join("x or ") + "x" : "5x or 10x"}. Other names stay spot. This loses faster when wrong.`,
+    );
+  } else {
+    rules.push("Every Solana ticket is a Jupiter spot swap. Extra size is off.");
   }
   if (config.scratchEnabled) rules.push("Early sells on a red 15 minutes are on.");
   return rules;

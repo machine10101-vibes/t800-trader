@@ -150,5 +150,15 @@ describe("store", () => {
     const edited = normalizeConfig({ ...moved, multipliers: [5], stopLossPct: 3 });
     assert.equal(withSolanaStrategy(edited), edited);
     assert.equal(solanaDefaults().timeCapMin, 360);
+    assert.equal(solanaDefaults().solTradeMode, "spot");
+    assert.equal(solanaDefaults().marginOnFourHour, false);
+  });
+
+  it("infers Solana spot vs both from older books that never stored a mode", () => {
+    assert.equal(normalizeConfig({ multipliers: [5, 10] }).solTradeMode, "both");
+    assert.equal(normalizeConfig({ multipliers: [] }).solTradeMode, "spot");
+    assert.equal(normalizeConfig({ solTradeMode: "margin", multipliers: [] }).solTradeMode, "margin");
+    assert.equal(normalizeConfig({ solTradeMode: "both", marginOnFourHour: true }).marginOnFourHour, true);
+    assert.equal(normalizeConfig({ startingEquity: 6 }).solTradeMode, "spot");
   });
 });

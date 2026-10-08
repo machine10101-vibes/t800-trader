@@ -32,8 +32,8 @@ import {
   type WalletBudget,
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
-import { frameEntrySignals } from "./mtf";
-import { PERP_MIN_COLLATERAL_USD, leveragedTicket, multiplierFor, orderForPosition, signedOnChain } from "./leverage";
+import { deskEntrySignals } from "./mtf";
+import { PERP_MIN_COLLATERAL_USD, leveragedTicket, orderForPosition, signedOnChain, tradeLeverage } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
@@ -304,18 +304,22 @@ export async function tickBot(
             return;
           }
           const frames = charts[i];
-          const decision = frameEntrySignals(
+          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const decision = deskEntrySignals(
             token,
             { m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
             token.researchScore,
             next.config.allowShorts,
             tapeCtx,
+            { mode, marginOnFourHour: chain === "solana" && next.config.marginOnFourHour },
           );
           if (decision.missing) {
             blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
             return;
           }
-          const found = decision.signals.filter((signal) => solanaKeepEntry(signal.side, token.flows.m15.priceChangePct));
+          const found = decision.signals.filter((signal) =>
+            signal.setupFrame === "4h" ? true : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct),
+          );
           signals.push(...found);
           if (!found.length) {
             blocked.push(decision.pass ?? solanaPass(token.symbol, token.flows.m15.priceChangePct));
@@ -412,17 +416,29 @@ export async function tickBot(
               })
             : { qty: 0, notional: 0 };
           const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
-          const wanted = multiplierFor(
-            next.config.multipliers,
-            Math.max(signal.confidence, learned.confidence),
-            learned.reason,
-            learned.symbol,
-            learned.mint,
-          );
+          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const wanted = tradeLeverage({
+            multipliers: next.config.multipliers,
+            confidence: Math.max(signal.confidence, learned.confidence),
+            reason: learned.reason,
+            symbol: learned.symbol,
+            mint: learned.mint,
+            mode,
+            marginOnFourHour: next.config.marginOnFourHour,
+            setupFrame: learned.setupFrame,
+          });
           const solPerp = chain === "solana" && (learned.symbol === "SOL" || sameMint(learned.mint, SOL_MINT));
           const liveShort = Boolean(next.config.walletSwaps && learned.side === "short");
           if (next.positions.some((pos) => sameMint(pos.mint, learned.mint))) {
             blocked.push(`${learned.symbol}: already in this mint`);
+            continue;
+          }
+          if (liveShort && mode === "spot") {
+            blocked.push(`${learned.symbol}: spot mode only sends Jupiter swaps, so a live short waits`);
+            continue;
+          }
+          if (liveShort && next.config.marginOnFourHour && learned.setupFrame !== "4h") {
+            blocked.push(`${learned.symbol}: margin waits for a solid 4-hour setup, so this 15-minute short stays off live`);
             continue;
           }
           const wantedLev = liveShort && solPerp && wanted <= 1 ? 5 : wanted;

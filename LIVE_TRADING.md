@@ -10,7 +10,7 @@ There is **no seed phrase in the repo**, **no server wallet**, and **no custody*
 | --- | --- | --- |
 | Long open | Yes | After you arm, a browser trading key sends Jupiter ExactIn (USDC or SOL → token). |
 | Long close (button, stop, target, trail, time) | Yes | Token → USDC. If the trading key has under 0.006 SOL, Jupiter Ultra sponsors the fee so Phantom's 0.005 SOL warning does not block the close. Positions under about $10 cannot be sponsored — add 0.006 SOL first. |
-| SOL 5x / 10x | Yes | Jupiter perps on the polished desk, when the trading key can post collateral. |
+| SOL 5x / 10x | Settings | Jupiter perps when the Sol desk is on Margin or Both and the trading key can post collateral. Spot mode stays a swap. Margin can wait for a solid 4-hour setup. |
 | Short open / cover | SOL only | Practice can short every book name with the same 4-hour setups used to buy. A live short is a SOL Jupiter perpetual. Other live names stay spot buys and sells. |
 | Cronos | Same 4-hour logic | Book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. Buys and sells quote WolfSwap and cro.trade and send the better output. Practice can short those names. A live short is not sent. LIVE confirm is Solana-only. |
 

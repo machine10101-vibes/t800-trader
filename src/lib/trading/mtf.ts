@@ -1,7 +1,9 @@
+import { sameMint } from "@/lib/chain";
 import { analyzeChart, frameBias, type Bias } from "@/lib/market/analysis";
 import { closedCandles, FRAME_SECONDS, MIN_FOUR_HOUR_BARS, MIN_FRAME_BARS } from "@/lib/market/frames";
-import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
-import { candleSetups, FIFTEEN_MIN_ATR, snapshotTechnical, type SignalContext } from "./signals";
+import { SOL_MINT } from "@/lib/market/universe";
+import type { BotConfig, Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
+import { candleSetups, FIFTEEN_MIN_ATR, FOUR_HOUR_ATR, snapshotTechnical, type SignalContext } from "./signals";
 
 export interface FrameSet {
   m15: Candle[] | null;
@@ -103,8 +105,84 @@ export function frameEntrySignals(
     }
     kept.push({
       ...signal,
+      setupFrame: "15m",
       thesis: `15-minute ${signal.side} ${signal.reason}. Back-check passed: ${check.why}. ${signal.thesis}`,
     });
   }
   return kept.length ? { signals: kept.slice(0, 1), pass: null, missing: null } : { signals: [], pass, missing: null };
+}
+
+function isSolName(token: Pick<TokenCandidate, "symbol" | "mint">): boolean {
+  return token.symbol === "SOL" || token.mint === SOL_MINT || sameMint(token.mint, SOL_MINT);
+}
+
+/**
+ * A solid 4-hour structure setup. Needs a full EMA window, not a thin new-pool tape.
+ * Used when SOL margin waits for the 4-hour chart instead of a 15-minute continuation.
+ */
+export function fourHourEntrySignals(
+  token: TokenCandidate,
+  frames: FrameSet,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+): FrameDecision {
+  const h4 = frames.h4 ? closedCandles(frames.h4, FRAME_SECONDS["4h"]) : null;
+  if (!h4 || h4.length < MIN_FOUR_HOUR_BARS) return { signals: [], pass: null, missing: "4-hour" };
+  if (h4.length < MIN_BARS) {
+    return {
+      signals: [],
+      pass: `${token.symbol}: 4-hour chart is in, no solid setup yet (need more closed bars)`,
+      missing: null,
+    };
+  }
+  const tech = snapshotTechnical(h4.slice(-180));
+  const found = candleSetups(token, tech, researchScore, allowShorts, ctx, FOUR_HOUR_ATR);
+  if (!found.length) {
+    return { signals: [], pass: `${token.symbol}: 4-hour chart is in, no solid setup yet (${setupGap(tech)})`, missing: null };
+  }
+  return {
+    signals: found.slice(0, 1).map((signal) => ({
+      ...signal,
+      setupFrame: "4h" as const,
+      thesis: `4-hour ${signal.side} ${signal.reason}. Solid 4-hour structure. ${signal.thesis}`,
+    })),
+    pass: null,
+    missing: null,
+  };
+}
+
+export interface DeskEntryOpts {
+  mode: BotConfig["solTradeMode"];
+  marginOnFourHour: boolean;
+}
+
+/**
+ * Spot stays on the 15-minute path. Margin-only skips every name but SOL.
+ * When margin waits on the 4-hour chart, SOL uses that structure setup.
+ * Both + 4-hour gate keeps a 15-minute fill as spot and prefers a 4-hour SOL margin fill when it is there.
+ */
+export function deskEntrySignals(
+  token: TokenCandidate,
+  frames: FrameSet,
+  researchScore: number | null,
+  allowShorts: boolean,
+  ctx: SignalContext | MarketRegime["stance"] = "mixed",
+  opts: DeskEntryOpts = { mode: "spot", marginOnFourHour: false },
+): FrameDecision {
+  const sol = isSolName(token);
+  if (opts.mode === "margin" && !sol) {
+    return { signals: [], pass: `${token.symbol}: margin mode only trades SOL perps`, missing: null };
+  }
+  if (opts.mode === "margin" && opts.marginOnFourHour) {
+    return fourHourEntrySignals(token, frames, researchScore, allowShorts, ctx);
+  }
+  const fifteen = frameEntrySignals(token, frames, researchScore, allowShorts, ctx);
+  const wantFourHour = (opts.mode === "margin" || opts.mode === "both") && opts.marginOnFourHour && sol;
+  if (!wantFourHour) return fifteen;
+  const four = fourHourEntrySignals(token, frames, researchScore, allowShorts, ctx);
+  if (four.signals.length) return four;
+  if (fifteen.signals.length) return fifteen;
+  if (fifteen.missing) return fifteen;
+  return { signals: [], pass: fifteen.pass ?? four.pass, missing: fifteen.missing ?? four.missing };
 }

@@ -36,7 +36,7 @@ Default book: the connected wallet’s live SOL + USDC mark (no $10,000 dummy). 
 
 ## Solana strategy and replay results
 
-A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. Solana books trade the 4-hour setups only. The defaults are a 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. All of these are still in Settings. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
+A Solana winner is not sold until the gain is larger than the fee to open the trade and the fee to close it. A stop still sells a loser. The defaults find trades on the 15-minute chart, then check the 1-hour and 4-hour charts. A 4% stop, an 8% target, a 4-hour stale exit and a 6-hour time cap. Early fade/scratch sells are off, and 5x/10x are off. Settings can switch the Sol desk to spot swaps, SOL margin, or both, and can wait for a solid 4-hour setup before a SOL perp. Older Solana books move to these defaults once. Your own size cap, slippage and mode are kept.
 
 Shorts use those same 4-hour setups turned over: a breakdown through the prior low, an extreme RSI reject, a watchlist continuation that has real volume, and a VWAP reject. The stop and the target are the same distances, with the stop above the fill and the goal below it. Practice can short every name on the book. A real-money short is SOL only, sent as a Jupiter perpetual. Other live names stay spot buys and sells.
 

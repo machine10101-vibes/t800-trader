@@ -176,6 +176,8 @@ export interface Signal {
   thesis: string;
   researchScore: number | null;
   createdAt: string;
+  /** Which chart produced the setup. Margin can wait for a 4-hour one. */
+  setupFrame?: "15m" | "4h";
 }
 
 export interface Position {
@@ -280,6 +282,13 @@ export interface BotConfig {
    * An empty list keeps SOL at spot too.
    */
   multipliers: number[];
+  /**
+   * Solana only. Spot is Jupiter swaps. Margin is a SOL 5x or 10x perp.
+   * Cronos ignores this and stays a spot buy and sell.
+   */
+  solTradeMode: "spot" | "margin" | "both";
+  /** When on, SOL margin waits for a 4-hour structure setup, not a 15-minute continuation. */
+  marginOnFourHour: boolean;
   /**
    * Books saved before live swaps were the default have no rev and are switched on once.
    * After that, an explicit off stays off.

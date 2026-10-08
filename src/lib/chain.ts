@@ -63,7 +63,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     settingsWallet:
       "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. A SOL short is a Jupiter perpetual. Other tokens cannot be shorted on-chain.",
     settingsMultiplier:
-      "5x and 10x are SOL only, long or short, from a $5 order. Jupiter will not open a brand-new position under $10, so a $5 order is raised to $10 when the trading key has it. Zebec, Pump, ZEC, and Ray are a spot buy and a spot sell. A stronger SOL signal uses 10x when both are on.",
+      "Pick spot swaps, SOL margin, or both. 5x and 10x are SOL only, long or short, from a $5 order. Jupiter will not open a brand-new position under $10, so a $5 order is raised to $10 when the trading key has it. Zebec, Pump, ZEC, and Ray stay a spot buy and a spot sell unless you pick margin only, which skips them. Turn on Margin only on solid 4-hour setups to wait for a 4-hour structure before a SOL perp.",
     settingsFive: "SOL only. Posts at least $5 and takes five times that exposure.",
     settingsTen: "SOL only. Puts up at least $5 and takes ten times that much. An even smaller drop can wipe it out.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live SOL and USDC mark.",

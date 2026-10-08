@@ -4,7 +4,15 @@ import type { AppState, BotConfig } from "@/lib/types";
 import { resumeLiveSession } from "@/lib/solana/live-session";
 import { emptyMemory, ensureMemory } from "@/lib/trading/learn";
 import { normalizeMultipliers } from "@/lib/trading/leverage";
-import { DEFAULT_ARM_FUNDS_USD, DEFAULT_BUY_SIZE_USD, normalizeArmFundsUsd, normalizeBuySizeUsd } from "@/lib/deskSettings";
+import {
+  DEFAULT_ARM_FUNDS_USD,
+  DEFAULT_BUY_SIZE_USD,
+  DEFAULT_SOL_TRADE_MODE,
+  normalizeArmFundsUsd,
+  normalizeBuySizeUsd,
+  normalizeMarginOnFourHour,
+  resolveSolTradeMode,
+} from "@/lib/deskSettings";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -23,6 +31,8 @@ export const DEFAULT_CONFIG: BotConfig = {
   walletSwaps: false,
   liveTradesRev: 1,
   multipliers: [5, 10],
+  solTradeMode: DEFAULT_SOL_TRADE_MODE,
+  marginOnFourHour: false,
   executionMode: "paper",
   slippageBps: 80,
   maxLiveNotionalUsd: 250,
@@ -81,6 +91,8 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     scratchEnabled: asBool(src.scratchEnabled, POLICY.scratchEnabled),
     venues: normalizeVenues(input?.venues),
     multipliers: normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers),
+    solTradeMode: resolveSolTradeMode(input, normalizeMultipliers(input && "multipliers" in input ? input.multipliers : src.multipliers)),
+    marginOnFourHour: normalizeMarginOnFourHour(src.marginOnFourHour),
     slippageBps: clampNum(src.slippageBps, DEFAULT_CONFIG.slippageBps, 1, 2_000, true),
     maxLiveNotionalUsd: clampNum(src.maxLiveNotionalUsd, DEFAULT_CONFIG.maxLiveNotionalUsd, 5, 10_000),
     armFundsUsd: normalizeArmFundsUsd(src.armFundsUsd),
@@ -106,6 +118,8 @@ export const SOLANA_STRATEGY = {
   memeTimeCapMin: 180,
   scratchEnabled: false,
   multipliers: [] as number[],
+  solTradeMode: DEFAULT_SOL_TRADE_MODE,
+  marginOnFourHour: false,
   strategyRev: 1,
 } satisfies Partial<BotConfig>;
 

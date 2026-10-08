@@ -1,6 +1,6 @@
 import { SOL_MINT } from "@/lib/market/universe";
 import { sameMint } from "@/lib/chain";
-import type { ChainFill, ChainOrder, Position } from "@/lib/types";
+import type { BotConfig, ChainFill, ChainOrder, Position } from "@/lib/types";
 
 /** Jupiter perp multipliers the desk can send. SOL only. */
 export const MULTIPLIERS = [5, 10] as const;
@@ -52,6 +52,39 @@ export function multiplierFor(
   const sol = symbol === "SOL" || mint === SOL_MINT || sameMint(mint, SOL_MINT);
   if (!sol) return 1;
   return pickMultiplier(normalizeMultipliers(multipliers), confidence, reason) ?? 1;
+}
+
+/** Spot ignores 5x/10x. Margin or both with an empty list still uses both. */
+export function effectiveMultipliers(mode: BotConfig["solTradeMode"], multipliers: unknown): Multiplier[] {
+  if (mode === "spot") return [];
+  const enabled = normalizeMultipliers(multipliers);
+  return enabled.length ? enabled : [...DEFAULT_MULTIPLIERS];
+}
+
+/**
+ * SOL perp size after the user's spot / margin / 4-hour choice.
+ * A 15-minute SOL setup stays 1x when margin waits for a 4-hour structure.
+ */
+export function tradeLeverage(args: {
+  multipliers: unknown;
+  confidence: number;
+  reason: string;
+  symbol: string;
+  mint: string;
+  mode?: BotConfig["solTradeMode"];
+  marginOnFourHour?: boolean;
+  setupFrame?: "15m" | "4h";
+}): 1 | Multiplier {
+  const mode = args.mode ?? "spot";
+  if (mode === "spot") return 1;
+  if (args.marginOnFourHour && args.setupFrame !== "4h") return 1;
+  return multiplierFor(
+    effectiveMultipliers(mode, args.multipliers),
+    args.confidence,
+    args.reason,
+    args.symbol,
+    args.mint,
+  );
 }
 
 /**

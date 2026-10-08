@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { commitTicketCap, nextSettingsDraft, normalizeArmFundsUsd, normalizeBuySizeUsd, usdcToLoad } from "./deskSettings";
+import {
+  commitTicketCap,
+  multipliersForMode,
+  nextSettingsDraft,
+  normalizeArmFundsUsd,
+  normalizeBuySizeUsd,
+  normalizeMarginOnFourHour,
+  resolveSolTradeMode,
+  usdcToLoad,
+} from "./deskSettings";
 import { DEFAULT_CONFIG, normalizeConfig } from "./store";
 
 describe("arm funds and buy size", () => {
@@ -13,6 +22,20 @@ describe("arm funds and buy size", () => {
     assert.equal(usdcToLoad(200, 50, 0), 50);
     assert.equal(usdcToLoad(20, 50, 40), 10);
     assert.equal(usdcToLoad(20, 50, 0), 20);
+  });
+});
+
+describe("sol trade mode", () => {
+  it("infers both from older books that had 5x on, and keeps an explicit margin choice", () => {
+    assert.equal(resolveSolTradeMode({ multipliers: [5] }), "both");
+    assert.equal(resolveSolTradeMode({ multipliers: [] }), "spot");
+    assert.equal(resolveSolTradeMode({ solTradeMode: "margin", multipliers: [] }), "margin");
+    assert.equal(resolveSolTradeMode({ startingEquity: 6 }), "spot");
+    assert.equal(normalizeMarginOnFourHour(true), true);
+    assert.equal(normalizeMarginOnFourHour("yes"), false);
+    assert.deepEqual(multipliersForMode("spot", []), []);
+    assert.deepEqual(multipliersForMode("margin", []), [5, 10]);
+    assert.deepEqual(multipliersForMode("both", [10]), [10]);
   });
 });
 
