@@ -20,6 +20,14 @@ export const FRAME_REFRESH_MS: Record<Frame, number> = { "5m": 45_000, "15m": 60
 /** Bars kept per frame. Enough for EMA 50 and a month of 4-hour structure. */
 export const FRAME_BARS = 300;
 
+/** 15-minute and 1-hour need a full EMA window. A new pool will not have thirty 4-hour bars yet. */
+export const MIN_FRAME_BARS = 30;
+export const MIN_FOUR_HOUR_BARS = 8;
+
+export function enoughFrameBars(frame: Frame, count: number): boolean {
+  return count >= (frame === "4h" ? MIN_FOUR_HOUR_BARS : MIN_FRAME_BARS);
+}
+
 const JUPITER_INTERVAL: Record<Frame, string> = { "5m": "5_MINUTE", "15m": "15_MINUTE", "1h": "1_HOUR", "4h": "4_HOUR" };
 
 export function jupiterInterval(frame: Frame): string {

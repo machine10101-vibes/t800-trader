@@ -2,7 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { derivedFrames, FRAME_BARS, FRAME_REFRESH_MS, frameKey, FRAMES, geckoFrameUrl, jupiterInterval, sourceFrame, type Frame } from "./frames";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, FRAMES, geckoFrameUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
@@ -955,7 +955,7 @@ async function prefetchCronosDecisionCharts(force = false): Promise<void> {
   await Promise.all(bookPools("cronos").map(({ mint, pool }) => loadCronosDecision(mint, pool, force)));
 }
 
-/** Start a 4-hour read for every tradable mint. Cronos pulls all five at once. */
+/** Start a 4-hour read for every tradable mint. Cronos pulls the named book at once. */
 export function requestDecisionCharts(mints: string[], chain: ChainId): void {
   if (chain === "cronos") {
     void prefetchCronosDecisionCharts();
@@ -987,7 +987,7 @@ function rememberFrames(chain: ChainId, mint: string, source: Frame, rows: Candl
     if (hit?.rows.length && hit.rows.length >= series.length && frame !== source) continue;
     frameCache.set(key, { at, rows: series.slice(-1000) });
   }
-  if (source === "4h" || (filled["4h"]?.length ?? 0) >= 30) {
+  if (source === "4h" || (filled["4h"]?.length ?? 0) >= MIN_FOUR_HOUR_BARS) {
     const four = (source === "4h" ? rows : filled["4h"]) ?? [];
     if (four.length) {
       const key = decisionKey(chain, mint);
@@ -1018,9 +1018,9 @@ export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Ca
   }
   if (frame === "4h") {
     const from1 = derivedFrames(cachedRows(mint, chain, "1h") ?? [], "1h")["4h"];
-    if (from1 && from1.length >= 30) return from1;
+    if (from1 && enoughFrameBars("4h", from1.length)) return from1;
     const from15 = derivedFrames(cachedRows(mint, chain, "15m") ?? [], "15m")["4h"];
-    if (from15 && from15.length >= 30) return from15;
+    if (from15 && enoughFrameBars("4h", from15.length)) return from15;
   }
   return null;
 }
@@ -1056,23 +1056,23 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
   const have = cachedFrameChart(mint, chain, frame);
   const sourceHit = frameCache.get(frameKey(chain, mint, source)) ?? (source === "4h" ? decisionCache.get(decisionKey(chain, mint)) : undefined);
   const ttl = FRAME_REFRESH_MS[source] * (chain === "cronos" ? 1.4 : 1);
-  if (have && have.length >= 30 && sourceHit && Date.now() - sourceHit.at < ttl) return have;
+  if (have && enoughFrameBars(frame, have.length) && sourceHit && Date.now() - sourceHit.at < ttl) return have;
   const key = frameKey(chain, mint, source);
   const missedAt = frameMiss.get(key);
   const missCool = have?.length ? CANDLE_COOL_MS : 2_000;
   if (missedAt && Date.now() - missedAt < missCool) {
-    if (have && have.length >= 30) return have;
+    if (have && enoughFrameBars(frame, have.length)) return have;
     await sleep(missCool - (Date.now() - missedAt));
     const retry = cachedFrameChart(mint, chain, frame);
-    if (retry && retry.length >= 30) return retry;
+    if (retry && enoughFrameBars(frame, retry.length)) return retry;
   }
   if (chain === "cronos") {
     const wait = geckoWaitMs();
     if (wait > 0) {
-      if (have && have.length >= 30) return have;
+      if (have && enoughFrameBars(frame, have.length)) return have;
       await sleep(Math.min(wait, 8_000));
       const after = cachedFrameChart(mint, chain, frame);
-      if (after && after.length >= 30) return after;
+      if (after && enoughFrameBars(frame, after.length)) return after;
     }
   }
   let run = frameInflight.get(key);
@@ -1097,7 +1097,7 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
 export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
   await loadFrameChart(mint, chain, "15m").catch(() => []);
   const four = cachedFrameChart(mint, chain, "4h");
-  if (!four || four.length < 30) await loadFrameChart(mint, chain, "4h").catch(() => []);
+  if (!four || !enoughFrameBars("4h", four.length)) await loadFrameChart(mint, chain, "4h").catch(() => []);
   return {
     "5m": cachedFrameChart(mint, chain, "5m") ?? [],
     "15m": cachedFrameChart(mint, chain, "15m") ?? [],

@@ -1,5 +1,5 @@
 import { analyzeChart, frameBias, type Bias } from "@/lib/market/analysis";
-import { closedCandles, FRAME_SECONDS } from "@/lib/market/frames";
+import { closedCandles, FRAME_SECONDS, MIN_FOUR_HOUR_BARS, MIN_FRAME_BARS } from "@/lib/market/frames";
 import type { Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
 import { candleSetups, FIFTEEN_MIN_ATR, snapshotTechnical, type SignalContext } from "./signals";
 
@@ -14,9 +14,7 @@ export interface BackCheck {
   why: string;
 }
 
-const MIN_BARS = 30;
-/** A new pool can have a 15-minute and 1-hour tape before thirty 4-hour bars exist. */
-const MIN_FOUR_HOUR_BARS = 8;
+const MIN_BARS = MIN_FRAME_BARS;
 
 function biasWord(bias: Bias): string {
   return bias === "range" ? "ranging" : bias;
