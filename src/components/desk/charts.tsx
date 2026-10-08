@@ -17,16 +17,16 @@ export interface ChartToken {
 function ChartBadge({ token, compact = false }: { token?: ChartToken | null; compact?: boolean }) {
   if (!token?.symbol) return null;
   return (
-    <div className={`pointer-events-none absolute z-10 flex items-center gap-2 ${compact ? "left-1.5 top-1.5" : "left-2.5 top-2.5"}`}>
+    <div className={`chart-badge ${compact ? "chart-badge-compact" : ""}`.trim()} aria-hidden>
       <TokenLogo
         symbol={token.symbol}
         mint={token.mint}
         chain={token.chain}
-        size={compact ? "md" : "lg"}
+        size={compact ? "sm" : "md"}
         className="token-logo-on-chart"
       />
       {compact ? null : (
-        <span className="text-sm font-medium tracking-wide text-[var(--text)] drop-shadow">{tapeLabel(token.symbol)}</span>
+        <span className="pr-0.5 text-sm font-medium tracking-wide text-[var(--text)]">{tapeLabel(token.symbol)}</span>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import type { ChainId } from "@/lib/chain";
 import {
   CRIMECAT_MINT,
+  CRONOS_USDC,
   JITO_SOL_MINT,
   JLP_MINT,
   MERY_MINT,
@@ -37,6 +38,7 @@ const BY_MINT: Record<string, string> = {
   [SOL_MINT.toLowerCase()]: SOL_LOGO,
   [WCRO_MINT.toLowerCase()]: CRO_LOGO,
   [USDC_MINT.toLowerCase()]: "https://assets.coingecko.com/coins/images/6319/small/usdc.png",
+  [CRONOS_USDC.toLowerCase()]: "https://assets.coingecko.com/coins/images/6319/small/usdc.png",
   [ZBCN_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/37052/small/zbcn.jpeg",
   [PUMP_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/67164/small/pump.jpg",
   [ZEC_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/70472/small/zcash.png",
@@ -69,6 +71,7 @@ const BY_SYMBOL: Record<string, string> = {
   CRO: CRO_LOGO,
   WCRO: CRO_LOGO,
   WSOL: SOL_LOGO,
+  JITOSOL: BY_MINT[JITO_SOL_MINT.toLowerCase()],
   USDC: BY_MINT[USDC_MINT.toLowerCase()],
   ZBCN: BY_MINT[ZBCN_MINT.toLowerCase()],
   PUMP: BY_MINT[PUMP_MINT.toLowerCase()],
@@ -91,6 +94,14 @@ export function tokenLogoUrl(input: { mint?: string | null; symbol?: string | nu
   const symbol = (input.symbol ?? "").trim().toUpperCase();
   if (symbol && BY_SYMBOL[symbol]) return BY_SYMBOL[symbol];
   return null;
+}
+
+/** First ticker in a status line, only when that name has a known mark. */
+export function leadingTokenSymbol(text: string): string | null {
+  const match = text.trim().match(/^([A-Za-z][A-Za-z0-9]{1,11})\b/);
+  if (!match) return null;
+  const symbol = match[1].toUpperCase();
+  return BY_SYMBOL[symbol] ? symbol : null;
 }
 
 export function tokenInitials(symbol: string): string {

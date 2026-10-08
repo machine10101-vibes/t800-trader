@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CRIMECAT_MINT, SOL_MINT, ULTCAT_MINT, WCRO_MINT, bookTokens } from "./universe";
-import { tokenInitials, tokenLogoUrl } from "./logos";
+import { CRIMECAT_MINT, CRONOS_USDC, SOL_MINT, ULTCAT_MINT, WCRO_MINT, bookTokens } from "./universe";
+import { leadingTokenSymbol, tokenInitials, tokenLogoUrl } from "./logos";
 
 describe("token logos", () => {
   it("maps every book token on Solana and Cronos to a logo", () => {
@@ -23,8 +23,17 @@ describe("token logos", () => {
     assert.ok(tokenLogoUrl({ symbol: "SOL" }));
     assert.ok(tokenLogoUrl({ symbol: "CRO" }));
     assert.equal(tokenLogoUrl({ symbol: "NOPE" }), null);
+    assert.ok(tokenLogoUrl({ mint: CRONOS_USDC, symbol: "USDC" }));
+    assert.ok(tokenLogoUrl({ symbol: "JITOSOL" }));
     assert.equal(tokenInitials("CRO"), "CR");
     assert.equal(tokenInitials("SOL"), "SO");
     assert.equal(tokenInitials("W"), "W");
+  });
+
+  it("pulls a known ticker off a status line", () => {
+    assert.equal(leadingTokenSymbol("CRO is waiting for its profit goal at 0.12."), "CRO");
+    assert.equal(leadingTokenSymbol("SOL: 4-hour chart has not loaded"), "SOL");
+    assert.equal(leadingTokenSymbol("CRIMECAT limit bid at 0.001"), "CRIMECAT");
+    assert.equal(leadingTokenSymbol("Emergency stop is on"), null);
   });
 });

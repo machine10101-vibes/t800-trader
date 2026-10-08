@@ -2,6 +2,7 @@
 
 import type { ChainId } from "@/lib/chain";
 import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
+import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
@@ -141,7 +142,7 @@ export function Home({
         {statusNow.length ? (
           <div className={`mt-4 grid gap-3 ${statusNow.length > 1 ? "lg:grid-cols-2" : ""}`}>
             {statusNow.map((group) => (
-              <ActivityList key={group.kind} title={group.title} tone={group.kind === "target" ? "mint" : group.kind === "limit" ? "amber" : "crimson"} items={group.items} />
+              <ActivityList key={group.kind} title={group.title} tone={group.kind === "target" ? "mint" : group.kind === "limit" ? "amber" : "crimson"} items={group.items} chain={chain} />
             ))}
           </div>
         ) : null}
@@ -260,10 +261,12 @@ function ActivityList({
   title,
   tone,
   items,
+  chain,
 }: {
   title: string;
   tone: "mint" | "amber" | "crimson";
   items: ActivityItem[];
+  chain: ChainId;
 }) {
   const dot = tone === "mint" ? "bg-[var(--mint)]" : tone === "amber" ? "bg-[var(--amber)]" : "bg-[var(--crimson)]";
   const titleColor = tone === "mint" ? "text-[var(--mint)]" : tone === "amber" ? "text-[var(--amber)]" : "text-[var(--crimson)]";
@@ -274,9 +277,15 @@ function ActivityList({
         <h4 className={`text-sm font-medium ${titleColor}`}>{title}</h4>
       </div>
       <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
-        {items.map((item) => (
-          <li key={item.text}>{item.text}</li>
-        ))}
+        {items.map((item) => {
+          const mark = leadingTokenSymbol(item.text);
+          return (
+            <li key={item.text} className="flex items-start gap-2">
+              {mark ? <TokenLogo symbol={mark} chain={chain} size="xs" className="mt-1" /> : null}
+              <span>{item.text}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

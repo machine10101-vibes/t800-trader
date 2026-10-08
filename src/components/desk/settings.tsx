@@ -6,6 +6,7 @@ import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { TokenLogo } from "./TokenLogo";
 
 export function SettingsPanel({
   chain = "solana",
@@ -797,8 +798,11 @@ function Pills<T extends string>({
               key={option.value}
               type="button"
               onClick={() => onChange(option.value)}
-              className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+              className={`num inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
             >
+              {option.label === "USDC" || option.label === "CRO" || option.label === "SOL" ? (
+                <TokenLogo symbol={option.label} size="xs" />
+              ) : null}
               {option.label}
             </button>
           );

@@ -34,6 +34,7 @@ import { parseWalletAddress } from "@/lib/monitor";
 import { cachedFrameChart, prefetchFrameCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
 import { frameBias, type Bias } from "@/lib/market/analysis";
+import { leadingTokenSymbol } from "@/lib/market/logos";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
@@ -882,6 +883,17 @@ function ChainDesk({
                     ? `Connect ${walletHint}`
                     : copy.connectFallback}
           </button>
+          <div className="mt-6">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">This desk trades</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {bookTokens(chain).map((token) => (
+                <span key={token.mint} className="token-pill">
+                  <TokenLogo symbol={token.symbol} mint={token.mint} chain={chain} size="xs" />
+                  {tapeLabel(token.symbol)}
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="mt-5 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
             {chain === "solana" ? (
               <>
@@ -1163,6 +1175,7 @@ function ChainDesk({
       {detail ? (
         <PositionDrawer
           position={detail}
+          chain={chain}
           closing={closingId === detail.id}
           error={closeError?.id === detail.id ? closeError.message : null}
           onDismiss={() => setDetailId(null)}
@@ -1465,7 +1478,7 @@ function rowPnl(position: Position): number {
   return position.qty * position.entryPrice * (pnlPct / 100);
 }
 
-function PositionRail({ positions, onOpen }: { positions: Position[]; onOpen: (id: string) => void }) {
+function PositionRail({ positions, chain, onOpen }: { positions: Position[]; chain: ChainId; onOpen: (id: string) => void }) {
   return (
     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       {positions.map((p) => {
@@ -1474,7 +1487,7 @@ function PositionRail({ positions, onOpen }: { positions: Position[]; onOpen: (i
           <button key={p.id} type="button" onClick={() => onOpen(p.id)} className="pos-card neon p-4 text-left">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium">
-                <TokenLogo symbol={p.symbol} mint={p.mint} size="sm" />
+                <TokenLogo symbol={p.symbol} mint={p.mint} chain={chain} size="sm" />
                 {p.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(p.side, p.leverage)}</span>
               </div>
               <Tone value={pnlPct} />
@@ -1868,9 +1881,9 @@ function Overview({
                     <button
                       key={token.mint}
                       onClick={() => openToken(token.mint)}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
+                      className={`token-pill ${
                         sameMint(token.mint, focus?.candidate.mint ?? focusMint ?? "")
-                          ? "bg-[var(--accent-soft)] text-[var(--magenta)]"
+                          ? "token-pill-on"
                           : "text-[var(--faint)] hover:text-[var(--text)]"
                       }`}
                     >
@@ -1998,7 +2011,7 @@ function Overview({
                 }}
                 className={`tape-card rounded-2xl border p-2 text-left ${selected ? "tape-card-on" : ""} ${live ? "tape-card-live" : ""}`}
               >
-                <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
+                <div className="mb-1 flex items-center justify-between gap-2 px-1">
                   <span className="flex items-center gap-1.5 text-sm font-medium">
                     {live ? <span className="pulse-dot bg-[var(--mint)] text-[var(--mint)]" /> : null}
                     <TokenLogo symbol={symbol} mint={token.mint} chain={chain} size="sm" />
@@ -2031,7 +2044,7 @@ function Overview({
         ) : null}
       </section>
 
-      {open.length ? <PositionRail positions={open} onOpen={onOpenPosition} /> : null}
+      {open.length ? <PositionRail positions={open} chain={chain} onOpen={onOpenPosition} /> : null}
 
       <section className="grid gap-3 md:grid-cols-4">
         <Stat label={swaps ? "Realized" : "Day P&L"} value={<Tone value={swaps ? realized : desk.portfolio.dayPnlUsd}>{usd(swaps ? realized : desk.portfolio.dayPnlUsd)}</Tone>} sub={swaps ? `${stats.closedTrades} signed closes` : `DD ${desk.stats.maxDrawdownPct.toFixed(1)}%`} />
@@ -2409,7 +2422,8 @@ function BotView({
         </div>
         {desk.bot.resting ? (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--line)] px-3 py-2">
-            <p className="text-sm text-[var(--muted)]">
+            <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+              <TokenLogo symbol={desk.bot.resting.symbol} mint={desk.bot.resting.mint} chain={chain} size="sm" />
               {desk.bot.resting.symbol} limit bid at {priceFmt(desk.bot.resting.limitPrice)} · waiting for a taker · {txLink(desk.bot.resting.signature)}
             </p>
             <button
@@ -2426,11 +2440,18 @@ function BotView({
           <div className="mt-4 rounded-2xl border border-[var(--line)] p-3 text-sm text-[var(--muted)]">
             <Label>This tick</Label>
             <ul className="space-y-1">
-              {(desk.bot.blocked ?? []).map((b) => (
-                <li key={b} className={b.includes("red") ? "text-[var(--crimson)]" : b.includes("green") ? "text-[var(--mint)]" : undefined}>
-                  — {b}
-                </li>
-              ))}
+              {(desk.bot.blocked ?? []).map((b) => {
+                const mark = leadingTokenSymbol(b);
+                return (
+                  <li
+                    key={b}
+                    className={`flex items-start gap-2 ${b.includes("red") ? "text-[var(--crimson)]" : b.includes("green") ? "text-[var(--mint)]" : ""}`}
+                  >
+                    {mark ? <TokenLogo symbol={mark} chain={chain} size="xs" className="mt-0.5" /> : <span>—</span>}
+                    <span>{b}</span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : null}
@@ -2455,7 +2476,8 @@ function BotView({
                   <div key={position.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2">
                     <div className="min-w-0 flex-1">
                       <button type="button" onClick={() => onOpenPosition(position.id)} className="text-left">
-                        <div className="font-medium">
+                        <div className="flex items-center gap-2 font-medium">
+                          <TokenLogo symbol={position.symbol} mint={position.mint} chain={chain} size="sm" />
                           {position.symbol} <span className="text-[11px] text-[var(--faint)]">{sideText(position.side, position.leverage)}</span>
                         </div>
                         <div className="text-[11px] text-[var(--muted)]">
@@ -2857,12 +2879,14 @@ function PositionActions({
 
 function PositionDrawer({
   position,
+  chain,
   closing,
   error,
   onDismiss,
   onExit,
 }: {
   position: Position;
+  chain: ChainId;
   closing: boolean;
   error: string | null;
   onDismiss: () => void;
@@ -2879,7 +2903,10 @@ function PositionDrawer({
         <div className="flex items-start justify-between gap-4">
           <div>
             <Pill tone={position.side === "long" ? "mint" : "crimson"}>{sideText(position.side, position.leverage)}</Pill>
-            <h3 className="mt-3 text-2xl font-medium sm:text-3xl">{position.symbol}</h3>
+            <h3 className="mt-3 flex items-center gap-3 text-2xl font-medium sm:text-3xl">
+              <TokenLogo symbol={position.symbol} mint={position.mint} chain={chain} size="xl" />
+              {position.symbol}
+            </h3>
             <p className="mt-2 text-sm text-[var(--muted)]">
               {position.reason} · {position.sector ?? "Unknown"} · {rMultiple(position).toFixed(2)}R
             </p>
