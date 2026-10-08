@@ -101,7 +101,17 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
   });
 
   it("says why the 15-minute chart has no setup instead of claiming the chart is missing", () => {
-    const quiet = trend(120, 0.00001, 100, 900);
+    const quiet: Candle[] = [];
+    for (let i = 0; i < 120; i++) {
+      quiet.push({
+        time: 1_700_000_000 + i * 900,
+        open: 100,
+        high: 100.001,
+        low: 99.999,
+        close: 100,
+        volume: 1000,
+      });
+    }
     const higher = trend(180, 0.002, 60, 3600);
     const decision = frameEntrySignals(token, { m15: quiet, h1: higher, h4: higher }, 70, true, ctx);
     assert.equal(decision.missing, null);
