@@ -138,7 +138,7 @@ export function skeletonBook(chain: ChainId): TokenCandidate[] {
         name: token.name,
         mint: token.mint,
         poolAddress: pin,
-        dex: chain === "cronos" ? "wolf" : "raydium",
+        dex: chain === "cronos" ? "vvs" : "raydium",
         quoteSymbol: chain === "cronos" || token.mint === SOL_MINT ? "USDC" : "SOL",
         priceUsd: token.priceUsd ?? 0,
         marketCapUsd: null,

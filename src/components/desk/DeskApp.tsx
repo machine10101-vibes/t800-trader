@@ -5,7 +5,7 @@ import { ExecutionLog } from "@/components/desk/executions";
 import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
-import { CHAIN_COPY, readDeskChain, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
+import { CHAIN_COPY, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
 import {
   adoptLiveEquity,
   armButton,
@@ -46,14 +46,6 @@ import { Label, Money, Pill, Px, ScoreRing, Spark, Stat, Tone } from "./bits";
 type Tab = "home" | "overview" | "radar" | "bot" | "book" | "risk";
 
 const NAV: { id: Tab; label: string; kicker: string }[] = [
-  { id: "overview", label: "Overview", kicker: "01" },
-  { id: "radar", label: "Radar", kicker: "02" },
-  { id: "bot", label: "Bot", kicker: "03" },
-  { id: "book", label: "Book", kicker: "04" },
-  { id: "risk", label: "Options", kicker: "05" },
-];
-
-const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "home", label: "Home", kicker: "01" },
   { id: "overview", label: "Charts", kicker: "02" },
   { id: "radar", label: "Coins", kicker: "03" },
@@ -62,8 +54,8 @@ const SOLANA_NAV: { id: Tab; label: string; kicker: string }[] = [
   { id: "risk", label: "Settings", kicker: "06" },
 ];
 
-function navFor(chain: ChainId) {
-  return chain === "solana" ? SOLANA_NAV : NAV;
+function navFor(_chain: ChainId) {
+  return NAV;
 }
 
 function previewDeskSession(chain: ChainId, address: string, equityUsd: number): DeskSession {
@@ -134,7 +126,7 @@ function ChainDesk({
   onSwitch: (next: ChainId) => void;
 }) {
   const copy = CHAIN_COPY[chain];
-  const [tab, setTab] = useState<Tab>(chain === "solana" ? "home" : "overview");
+  const [tab, setTab] = useState<Tab>("home");
   const [wallet, setWallet] = useState<DeskSession | null>(null);
   const [trading, setTrading] = useState<Awaited<ReturnType<typeof tradingSnapshot>>>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -888,7 +880,7 @@ function ChainDesk({
     );
   }
 
-  const homeOnPhone = chain === "solana" && tab === "home";
+  const homeOnPhone = tab === "home";
 
   return (
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
@@ -1085,7 +1077,7 @@ function ChainDesk({
             <div className="cmd hidden sm:block">
               {chain === "solana"
                 ? "1–6 pages · Space start or stop · R refresh · F sell everything · Esc close"
-                : "1–5 tabs · Space arm · R refresh · F flatten · Esc thesis"}
+                : "1–6 pages · Space arm · R refresh · F flatten · Esc close"}
             </div>
           ) : null}
         </main>
@@ -1103,6 +1095,7 @@ function ChainDesk({
       ) : null}
       {liveConfirm ? (
         <LiveConfirmModal
+          chain={chain}
           busy={busy}
           onCancel={() => {
             setLiveConfirm(false);
@@ -1126,10 +1119,12 @@ function ChainDesk({
 }
 
 function LiveConfirmModal({
+  chain,
   busy,
   onCancel,
   onConfirm,
 }: {
+  chain: ChainId;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1140,10 +1135,11 @@ function LiveConfirmModal({
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
       <div className="neon w-full max-w-lg p-6">
-        <h2 className="text-xl font-medium">Enable LIVE Jupiter swaps</h2>
+        <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus
-          SOL fees. A SOL short is a Jupiter perpetual. Other tokens stay in practice. A reload locks LIVE until you type LIVE again.
+          {chain === "cronos"
+            ? "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus CRO fees. Real money only buys and sells. Practice can short these coins."
+            : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. A SOL short is a Jupiter perpetual. Other tokens stay in practice. A reload locks LIVE until you type LIVE again."}
         </p>
         <label className="mt-4 flex items-start gap-3 text-sm text-[var(--text)]">
           <input type="checkbox" className="mt-1" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
@@ -1547,7 +1543,7 @@ function Overview({
   const [priceDir, setPriceDir] = useState<"up" | "down" | null>(null);
   const lastPrice = useRef<number | null>(null);
   const copy = CHAIN_COPY[chain];
-  const focus = desk.research.find((r) => r.candidate.mint === focusMint) ?? desk.research[0] ?? null;
+  const focus = desk.research.find((r) => sameMint(r.candidate.mint, focusMint ?? "")) ?? desk.research[0] ?? null;
   const book = bookTokens(chain);
   const bars = useDecisionCharts(book.map((token) => token.mint), chain);
   const openToken = (mint: string) => {
@@ -1630,7 +1626,7 @@ function Overview({
         <div className="grid lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)]">
           <div className="flex flex-col p-3">
               <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-                <span>{focus ? focus.ticker : "NO FINALIST"}</span>
+                <span>{focus ? focus.ticker : book[0] ? tapeLabel(book[0].symbol) : "Waiting"}</span>
                 <Pill tone="magenta">
                   <span className="pulse-dot bg-[var(--magenta)] text-[var(--magenta)]" />
                   Live
@@ -1647,17 +1643,19 @@ function Overview({
                   </span>
                 ) : null}
               </div>
-              {desk.research.length > 1 ? (
+              {book.length > 1 ? (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {desk.research.slice(0, 6).map((r) => (
+                  {book.map((token) => (
                     <button
-                      key={r.id}
-                      onClick={() => openToken(r.candidate.mint)}
+                      key={token.mint}
+                      onClick={() => openToken(token.mint)}
                       className={`rounded-full px-2 py-0.5 text-[11px] ${
-                        focus?.id === r.id ? "bg-[var(--accent-soft)] text-[var(--magenta)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                        sameMint(token.mint, focus?.candidate.mint ?? focusMint ?? "")
+                          ? "bg-[var(--accent-soft)] text-[var(--magenta)]"
+                          : "text-[var(--faint)] hover:text-[var(--text)]"
                       }`}
                     >
-                      {r.ticker}
+                      {tapeLabel(token.symbol)}
                     </button>
                   ))}
                 </div>
@@ -1729,7 +1727,7 @@ function Overview({
         </div>
         <div className={bookTokens(chain).length > 3 ? "tape-grid" : bookTokens(chain).length > 1 ? "grid gap-2 sm:grid-cols-2" : ""}>
           {bookTokens(chain).filter((token) => {
-            const tape = desk.tapes.find((row) => row.mint === token.mint);
+            const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
             const live = desk.signals.some((row) => row.symbol === token.symbol);
             if (tapeFilter === "live") return live;
             if (tapeFilter === "up") return (tape?.change15m ?? 0) > 0.05;
@@ -1737,7 +1735,7 @@ function Overview({
             return true;
           }).map((token) => {
             const symbol = token.symbol;
-            const tape = desk.tapes.find((row) => row.mint === token.mint);
+            const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
             const call = assetCall(symbol, desk.signals, desk.bot.blocked ?? []);
             const live = desk.signals.some((row) => row.symbol === symbol);
             const price =
@@ -1777,7 +1775,7 @@ function Overview({
           })}
         </div>
         {tapeFilter !== "all" && bookTokens(chain).every((token) => {
-          const tape = desk.tapes.find((row) => row.mint === token.mint);
+          const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
           const live = desk.signals.some((row) => row.symbol === token.symbol);
           if (tapeFilter === "live") return !live;
           if (tapeFilter === "up") return !((tape?.change15m ?? 0) > 0.05);
@@ -1908,46 +1906,80 @@ function Overview({
   );
 }
 
+function coinRows(desk: DeskPayload, chain: ChainId) {
+  return bookTokens(chain).map((token) => {
+    const research = desk.research.find((row) => sameMint(row.candidate.mint, token.mint));
+    const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
+    const signal = desk.signals.find((row) => row.symbol === token.symbol || sameMint(row.mint, token.mint));
+    const blocked = (desk.bot.blocked ?? []).find((line) => line.startsWith(`${token.symbol}:`));
+    const price = research?.price || tape?.price || token.priceUsd || 0;
+    return {
+      token,
+      research,
+      tape,
+      signal,
+      blocked,
+      call: assetCall(token.symbol, desk.signals, desk.bot.blocked ?? []),
+      price,
+    };
+  });
+}
+
 function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onOpen: (t: ResearchThesis) => void }) {
+  const coins = coinRows(desk, chain);
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-medium tracking-tight">Research radar</h2>
+        <h2 className="text-xl font-medium tracking-tight">Coins</h2>
         <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">{CHAIN_COPY[chain].radar}</p>
       </div>
       <div className="space-y-3 md:hidden">
-        {desk.research.length === 0 ? (
-          <div className="neon p-4 text-sm text-[var(--muted)]">No live finalists this cycle.</div>
-        ) : (
-          desk.research.map((r) => (
-            <button key={r.id} type="button" onClick={() => onOpen(r)} className="radar-card neon block w-full p-4 text-left">
+        {coins.map((coin) => {
+          const r = coin.research;
+          return (
+            <button
+              key={coin.token.mint}
+              type="button"
+              onClick={() => r && onOpen(r)}
+              className="radar-card neon block w-full p-4 text-left"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{r.ticker}</div>
-                  <div className="text-[11px] text-[var(--faint)]">{r.asset} · {venueLabel(venueForDex(r.candidate.dex))}</div>
+                  <div className="font-medium">{tapeLabel(coin.token.symbol)}</div>
+                  <div className="text-[11px] text-[var(--faint)]">
+                    {coin.token.name}
+                    {r ? ` · ${venueLabel(venueForDex(r.candidate.dex))}` : ""}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <div className="text-right">
-                    <div className="num text-sm">{priceFmt(r.price)}</div>
-                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                    <div className="num text-sm">{coin.price ? priceFmt(coin.price) : "—"}</div>
+                    {r ? <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div> : null}
                   </div>
-                  <ScoreRing score={r.researchScore} />
+                  {r ? <ScoreRing score={r.researchScore} /> : null}
                 </div>
               </div>
-              <div className="mt-3">
-                <ScoreMeter score={r.researchScore} />
-              </div>
-              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r.coreThesis}</p>
-              <p className="mt-2 text-xs leading-5 text-[var(--text)]">{r.keyCatalyst}</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{r.biggestRisk}</p>
+              {r ? (
+                <div className="mt-3">
+                  <ScoreMeter score={r.researchScore} />
+                </div>
+              ) : null}
+              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r?.coreThesis ?? coin.call}</p>
+              {coin.tape ? (
+                <p className="mt-2 text-xs leading-5 text-[var(--text)]">
+                  5m <Tone value={coin.tape.change5m ?? 0} /> · 15m <Tone value={coin.tape.change15m} />
+                </p>
+              ) : null}
+              {coin.blocked ? <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{coin.blocked}</p> : null}
+              {r ? <p className="mt-1 text-xs leading-5 text-[var(--crimson)]">{r.biggestRisk}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--faint)]">
-                <span>{r.sector}</span>
-                <span>MC {usd(r.marketCap)}</span>
-                <span>{r.keyMetric}</span>
+                <span>{r?.sector ?? coin.token.sector}</span>
+                {r ? <span>MC {usd(r.marketCap)}</span> : null}
+                {r ? <span>{r.keyMetric}</span> : <span>Waiting on live tape</span>}
               </div>
             </button>
-          ))
-        )}
+          );
+        })}
       </div>
       <div className="neon desk-scroll hidden overflow-x-auto p-1 md:block">
         <table className="w-full min-w-[1080px] text-left text-sm">
@@ -1956,70 +1988,70 @@ function Radar({ desk, chain, onOpen }: { desk: DeskPayload; chain: ChainId; onO
               <th className="px-4 py-3">Asset</th>
               <th>Ticker</th>
               <th>Price</th>
-              <th>APY</th>
+              <th>5m</th>
+              <th>15m</th>
               <th>Market cap</th>
-              <th>FDV</th>
               <th>Sector</th>
-              <th>Core thesis</th>
-              <th>Key catalyst</th>
-              <th>Biggest risk</th>
-              <th>Key metric</th>
+              <th>Status</th>
               <th>Score</th>
             </tr>
           </thead>
           <tbody>
-            {desk.research.length === 0 ? (
-              <tr>
-                <td className="px-4 py-6 text-[var(--muted)]" colSpan={12}>
-                  No live finalists this cycle.
-                </td>
-              </tr>
-            ) : (
-              desk.research.map((r) => (
+            {coins.map((coin) => {
+              const r = coin.research;
+              return (
                 <tr
-                  key={r.id}
-                  tabIndex={0}
-                  onClick={() => onOpen(r)}
+                  key={coin.token.mint}
+                  tabIndex={r ? 0 : undefined}
+                  onClick={() => r && onOpen(r)}
                   onKeyDown={(event) => {
+                    if (!r) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       onOpen(r);
                     }
                   }}
-                  className="radar-row cursor-pointer border-t border-[var(--line)]"
+                  className={`radar-row border-t border-[var(--line)] ${r ? "cursor-pointer" : ""}`}
                 >
-                  <td className="px-4 py-3 font-medium">{r.asset}</td>
+                  <td className="px-4 py-3 font-medium">{coin.token.name}</td>
                   <td className="num">
-                    {r.ticker}
-                    <span className="block text-[10px] font-sans text-[var(--faint)]">
-                      {venueLabel(venueForDex(r.candidate.dex))}
-                    </span>
+                    {tapeLabel(coin.token.symbol)}
+                    {r ? (
+                      <span className="block text-[10px] font-sans text-[var(--faint)]">
+                        {venueLabel(venueForDex(r.candidate.dex))}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="num">
-                    {priceFmt(r.price)}
-                    {r.candidate.priceAgreement === "split" ? (
+                    {coin.price ? priceFmt(coin.price) : "—"}
+                    {r?.candidate.priceAgreement === "split" ? (
                       <span className="block text-[10px] uppercase tracking-wide text-[var(--crimson)]">feeds split</span>
-                    ) : r.candidate.priceAgreement === "agree" ? (
+                    ) : r?.candidate.priceAgreement === "agree" ? (
                       <span className="block text-[10px] text-[var(--faint)]">
                         {r.candidate.sources.filter((s) => s.endsWith(":price") || s.endsWith(":jlp-price")).length} feeds
                       </span>
                     ) : null}
                   </td>
-                  <td className="num">{r.candidate.apyPct ? `${r.candidate.apyPct.toFixed(2)}%` : "—"}</td>
-                  <td className="num">{usd(r.marketCap)}</td>
-                  <td className="num">{usd(r.fdv)}</td>
-                  <td>{r.sector}</td>
-                  <td className="max-w-[260px] truncate text-[var(--muted)]">{r.coreThesis}</td>
-                  <td className="max-w-[160px] truncate">{r.keyCatalyst}</td>
-                  <td className="max-w-[160px] truncate text-[var(--crimson)]">{r.biggestRisk}</td>
-                  <td className="num">{r.keyMetric}</td>
+                  <td className="num">{coin.tape?.change5m !== undefined ? <Tone value={coin.tape.change5m} /> : "—"}</td>
+                  <td className="num">{coin.tape ? <Tone value={coin.tape.change15m} /> : "—"}</td>
+                  <td className="num">{r ? usd(r.marketCap) : "—"}</td>
+                  <td>{r?.sector ?? coin.token.sector}</td>
+                  <td className="max-w-[320px] truncate text-[var(--muted)]">
+                    {coin.signal ? coin.signal.thesis : coin.blocked ?? r?.coreThesis ?? coin.call}
+                  </td>
                   <td className="pr-4">
-                    <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
-                    <ScoreMeter score={r.researchScore} />
+                    {r ? (
+                      <>
+                        <div className="num text-[var(--magenta)]">{r.researchScore.toFixed(1)}</div>
+                        <ScoreMeter score={r.researchScore} />
+                      </>
+                    ) : (
+                      <span className="text-[var(--faint)]">—</span>
+                    )}
                   </td>
                 </tr>
-              ))
-            )}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -2057,6 +2089,12 @@ function BotView({
   const fills = shownFills(desk.trades, swaps);
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-medium tracking-tight">Bot log</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">
+          Every scan, skip, and fill for {CHAIN_COPY[chain].bookLabel}.
+        </p>
+      </div>
       <section className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -2242,31 +2280,31 @@ function BotView({
           )}
         </div>
         <div className="neon p-5">
-          <Label>Research bench</Label>
-          {desk.research.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No live finalists.</p>
-          ) : (
-            <div className="space-y-2">
-              {desk.research.map((r) => (
+          <Label>Coins this cycle</Label>
+          <div className="space-y-2">
+            {coinRows(desk, chain).map((coin) => {
+              const r = coin.research;
+              return (
                 <button
-                  key={r.id}
-                  onClick={() => onOpen(r)}
+                  key={coin.token.mint}
+                  onClick={() => r && onOpen(r)}
                   className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl px-2 py-2 text-left hover:bg-[var(--accent-wash)]"
                 >
                   <span className="min-w-0">
-                    {r.ticker} <span className="text-[var(--muted)]">{r.sector}</span>
-                    {r.candidate.apyPct ? (
+                    {tapeLabel(coin.token.symbol)} <span className="text-[var(--muted)]">{r?.sector ?? coin.token.sector}</span>
+                    {r?.candidate.apyPct ? (
                       <span className="num text-[var(--faint)]"> {r.candidate.apyPct.toFixed(2)}% APY</span>
                     ) : null}
-                    {r.candidate.priceAgreement === "split" ? (
+                    {r?.candidate.priceAgreement === "split" ? (
                       <span className="text-[var(--crimson)]"> split</span>
                     ) : null}
+                    <span className="block text-[11px] text-[var(--faint)]">{coin.signal ? coin.signal.thesis : coin.blocked ?? coin.call}</span>
                   </span>
-                  <span className="num shrink-0 text-[var(--magenta)]">{r.researchScore.toFixed(1)}</span>
+                  <span className="num shrink-0 text-[var(--magenta)]">{r ? r.researchScore.toFixed(1) : "—"}</span>
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
       </section>
     </div>
@@ -2319,14 +2357,22 @@ function Book({
   const losses = swaps ? signedCloses.filter((trade) => (trade.pnlUsd ?? 0) <= 0).length : desk.portfolio.lossCount;
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-medium tracking-tight">History</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-[var(--muted)]">
+          Open tickets and closed fills for {copy.bookLabel}.
+        </p>
+      </div>
       <div className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <Label>{swaps ? "LIVE Jupiter book" : "PAPER book"}</Label>
+            <Label>{swaps ? (chain === "cronos" ? "LIVE WolfSwap book" : "LIVE Jupiter book") : "PAPER book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
                 ? copy.bookArm
-                : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
+                : chain === "cronos"
+                  ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends WolfSwap or cro.trade swaps."
+                  : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto">

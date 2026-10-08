@@ -38,9 +38,10 @@ export function watchlistTapes(candidates: TokenCandidate[], chain: ChainId = "s
   const rank = new Map(bookTokens(chain).map((token, index) => [token.mint.toLowerCase(), index]));
   const best = new Map<string, TokenCandidate>();
   for (const candidate of candidates) {
-    if (!candidate.watchlist || !candidate.poolAddress || !isActiveBook(candidate.mint, chain)) continue;
-    const prev = best.get(candidate.mint);
-    if (!prev || candidate.liquidityUsd > prev.liquidityUsd) best.set(candidate.mint, candidate);
+    if (!candidate.poolAddress || !isActiveBook(candidate.mint, chain)) continue;
+    const key = candidate.mint.toLowerCase();
+    const prev = best.get(key);
+    if (!prev || candidate.liquidityUsd > prev.liquidityUsd) best.set(key, candidate);
   }
   return [...best.values()]
     .sort((a, b) => (rank.get(a.mint.toLowerCase()) ?? 99) - (rank.get(b.mint.toLowerCase()) ?? 99))

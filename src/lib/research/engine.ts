@@ -31,7 +31,7 @@ function pickFinalists(items: ScoredCandidate[], maxMeme = 2): ScoredCandidate[]
   const rest = ranked.filter((c) => !c.watchlist);
   const out: ScoredCandidate[] = [];
   for (const item of watch) {
-    if (canTake(out, item, Math.min(maxMeme, 1), 0)) out.push(item);
+    if (canTake(out, item, maxMeme, 0)) out.push(item);
     if (out.length >= 6) break;
   }
   for (const item of rest) {

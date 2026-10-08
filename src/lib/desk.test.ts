@@ -115,24 +115,21 @@ describe("BOOK_POOLS", () => {
     assert.equal(bookPools("cronos").length, 5);
     assert.equal(bookPools("cronos")[0]?.mint, WCRO_MINT);
     assert.equal(new Set(bookPools("cronos").map((pin) => pin.pool)).size, 5);
-    const cro = bookTokens("cronos")[0]!;
     const flow = { buys: 1, sells: 1, buyers: 1, sellers: 1, volumeUsd: 1, priceChangePct: 0.4 };
     const croTapes = watchlistTapes(
-      [
-        {
-          symbol: "CRO",
-          mint: cro.mint,
-          poolAddress: "cro-pool",
-          liquidityUsd: 1_000_000,
-          watchlist: true,
-          flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
-        } as TokenCandidate,
-      ],
+      bookTokens("cronos").map((token) => ({
+        symbol: token.symbol,
+        mint: token.mint,
+        poolAddress: `${token.symbol.toLowerCase()}-pool`,
+        liquidityUsd: 1_000,
+        watchlist: false,
+        flows: { m5: flow, m15: flow, m30: flow, h1: flow, h6: flow, h24: flow },
+      })) as TokenCandidate[],
       "cronos",
     );
     assert.deepEqual(
       croTapes.map((tape) => tape.symbol),
-      ["CRO"],
+      ["CRO", "ULTCAT", "CRIMECAT", "MERY", "PACK"],
     );
   });
 });

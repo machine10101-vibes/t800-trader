@@ -41,5 +41,6 @@ describe("skeletonBook", () => {
       rows.map((row) => row.mint),
       bookMints("cronos"),
     );
+    for (const row of rows) assert.equal(row.dex, "vvs");
   });
 });

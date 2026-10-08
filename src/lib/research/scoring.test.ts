@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { TokenCandidate } from "../types";
+import { CRIMECAT_MINT } from "../market/universe";
 import { bookScreen, scoreCandidate, screenCandidate } from "./scoring";
 
 function token(over: Partial<TokenCandidate> = {}): TokenCandidate {
@@ -118,7 +119,7 @@ describe("screenCandidate", () => {
     assert.equal(screenCandidate(token({ dex: "vvs" }), bookScreen(saved, "solana")), "Venue VVS Finance is off");
   });
 
-  it("keeps a thin named Cronos pool and still rejects dust", () => {
+  it("keeps a thin named Cronos pool and still rejects off-book dust", () => {
     const saved = {
       minLiquidityUsd: 120_000,
       minVolume24hUsd: 80_000,
@@ -129,15 +130,17 @@ describe("screenCandidate", () => {
     const named = token({
       symbol: "CRIMECAT",
       name: "Crime Cat",
+      mint: CRIMECAT_MINT,
       chain: "cronos",
-      dex: "vvs",
+      dex: "wolf",
       sector: "Meme",
       watchlist: true,
-      liquidityUsd: 15_000,
-      volume24hUsd: 6_000,
+      liquidityUsd: 100,
+      volume24hUsd: 10,
+      priceUsd: 0,
     });
     assert.equal(screenCandidate(named, bookScreen(saved, "cronos")), null);
-    const dust = token({ ...named, liquidityUsd: 100, volume24hUsd: 10, watchlist: true });
+    const dust = token({ ...named, mint: "0xdust", watchlist: false });
     assert.match(screenCandidate(dust, bookScreen(saved, "cronos")) ?? "", /Liquidity/);
   });
 

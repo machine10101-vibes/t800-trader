@@ -15,20 +15,22 @@ export interface ScreenConfig {
 /**
  * Cronos liquidity sits in VVS pools. WolfSwap and cro.trade both settle those pools.
  * The saved Solana venue list must not blank that book.
- * The Solana liquidity floor would hide ULTCAT and CRIMECAT, so the named book uses a lower floor.
- * A dust pool still fails it.
+ * Named Cronos tokens stay on the scan even when Gecko misses liquidity — a 4-hour setup still has to print.
+ * An off-book dust pool still fails the floor.
  */
 export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
   if (chain !== "cronos") return cfg;
   return {
     ...cfg,
-    venues: ["vvs"],
+    venues: undefined,
     minLiquidityUsd: Math.min(cfg.minLiquidityUsd, 10_000),
     minVolume24hUsd: Math.min(cfg.minVolume24hUsd, 2_000),
   };
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
+  const namedCronos = (c.chain ?? "solana") === "cronos" && isActiveBook(c.mint, "cronos");
+  if (namedCronos) return null;
   const minLiq = c.watchlist ? Math.min(cfg.minLiquidityUsd, 80_000) : cfg.minLiquidityUsd;
   const minVol = c.watchlist ? Math.min(cfg.minVolume24hUsd, 40_000) : cfg.minVolume24hUsd;
   if (c.liquidityUsd < minLiq) return `Liquidity ${c.liquidityUsd.toFixed(0)} below ${minLiq}`;
