@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ACTIVE_BOOK, BOOK_POOLS, WCRO_MINT, WATCHLIST, bookPools, bookTokens } from "./market/universe";
 import { readDeskChain, writeDeskChain } from "./chain";
 import { readLastWallet, writeLastWallet } from "./store";
-import { armButton, shellDesk, watchlistTapes } from "./desk";
+import { armButton, shellDesk, startNeedsLiveSignature, watchlistTapes } from "./desk";
 import { emptyState } from "./store";
 import type { TokenCandidate } from "./types";
 
@@ -11,6 +11,11 @@ describe("armButton", () => {
   it("disarms when the book is already running", () => {
     assert.deepEqual(armButton(true), { action: "stop", label: "Disarm the bot" });
     assert.deepEqual(armButton(false), { action: "start", label: "Arm the bot" });
+  });
+
+  it("only asks the wallet to sign when LIVE is on", () => {
+    assert.equal(startNeedsLiveSignature(false), false);
+    assert.equal(startNeedsLiveSignature(true), true);
   });
 });
 
