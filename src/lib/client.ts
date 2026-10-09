@@ -25,7 +25,8 @@ import { closePosition, pushEquity } from "@/lib/trading/paper";
 import { takeCronosProfitShare } from "@/lib/cronos/share";
 import { takeSolProfitShare } from "@/lib/solana/share";
 import type { AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
-import { armLiveSession, disarmLiveSession } from "@/lib/solana/live-session";
+import { tickSessionFor } from "@/lib/deskHost";
+import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd };
 
@@ -149,8 +150,9 @@ export async function controlBot(
   session?: DeskSession | null,
   chain: ChainId = "solana",
 ): Promise<DeskPayload> {
-  const solana = chain === "solana" ? (session as WalletSession | null | undefined) : null;
-  const liveKit = chain === "cronos" ? await cronosLive(session) : null;
+  const resolved = action === "tick" ? tickSessionFor(chain, session) : session ?? null;
+  const solana = chain === "solana" ? (resolved as WalletSession | null | undefined) : null;
+  const liveKit = chain === "cronos" ? await cronosLive(resolved) : null;
   const executor = liveKit ? liveKit.executor : solana ? executorFor(solana) : undefined;
   const maker = liveKit ? liveKit.maker : solana ? makerDesk(solana) : null;
   const budget = () => (liveKit ? liveKit.budget() : budgetFor(solana));
@@ -161,6 +163,7 @@ export async function controlBot(
   }
   if (action === "tick") {
     const state = await loadState(chain);
+    if (state.config.walletSwaps && state.bot.running) resumeLiveSession();
     const live = state.config.walletSwaps && state.bot.running;
     let funds: WalletBudget | null = null;
     if (live) {

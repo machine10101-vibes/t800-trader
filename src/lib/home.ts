@@ -202,6 +202,12 @@ export function botActivity(input: {
   nowMs?: number;
   /** Page load time. A tick from before the refresh is not a stuck wall. */
   pageStartedAt?: number;
+  /** Last time this tab became visible. Hidden-tab throttle is not a stuck bot. */
+  visibleAt?: number;
+  /** The tab is in the background, so Chrome may delay the next check. */
+  hidden?: boolean;
+  /** A local desk runner is the clock. A quiet UI pull is not a wall. */
+  runner?: boolean;
 }): BotActivity {
   const now = input.nowMs ?? Date.now();
   const targets: ActivityItem[] = [];
@@ -254,12 +260,15 @@ export function botActivity(input: {
   }
 
   if (input.lastError) add(walls, "wall", input.lastError);
-  if (input.running && input.ticks > 0 && input.lastTickAt) {
+  if (input.running && input.ticks > 0 && input.lastTickAt && !input.hidden && !input.runner) {
     const at = Date.parse(input.lastTickAt);
     const staleAfter = Math.max(input.scanSeconds * 8_000, 90_000);
-    // A tick saved before this page loaded is not a stuck bot. Time the wait from the refresh.
-    const effective =
-      input.pageStartedAt != null && Number.isFinite(at) && at < input.pageStartedAt ? input.pageStartedAt : at;
+    // A tick saved before this page loaded, or before this tab came back, is not a stuck bot.
+    const floor = Math.max(
+      input.pageStartedAt != null && Number.isFinite(input.pageStartedAt) ? input.pageStartedAt : 0,
+      input.visibleAt != null && Number.isFinite(input.visibleAt) ? input.visibleAt : 0,
+    );
+    const effective = Number.isFinite(at) && (floor === 0 || at >= floor) ? at : floor || at;
     if (Number.isFinite(effective) && now - effective > staleAfter) {
       const secs = Math.round((now - effective) / 1000);
       const age = secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs}s`;

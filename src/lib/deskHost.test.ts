@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isDeskChain, runnerCronosSession, runnerProbeUrls, runnerWalletSession } from "./deskHost";
+import { isDeskChain, runnerCronosSession, runnerProbeUrls, runnerWalletSession, tickSessionFor } from "./deskHost";
 
 describe("desk host", () => {
   it("probes same-origin first and skips HTTP from HTTPS", () => {
@@ -29,5 +29,17 @@ describe("desk host", () => {
     assert.equal(sol.address, "So1");
     const cro = runnerCronosSession("0xabc");
     assert.equal(cro.address, "0xabc");
+    assert.equal(tickSessionFor("solana", sol), sol);
+  });
+
+  it("ticks from the saved wallet when the extension is gone", async () => {
+    const { attachWallet, detachWallet } = await import("./store");
+    await attachWallet("SoTick", 10, "solana");
+    try {
+      const session = tickSessionFor("solana", null);
+      assert.equal(session?.address, "SoTick");
+    } finally {
+      detachWallet("solana");
+    }
   });
 });

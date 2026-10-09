@@ -31,7 +31,7 @@ import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
 import { startDeskKeepalive } from "@/lib/deskKeepalive";
 import { getActiveWallet, listLocalBooks, loadState, readLastWallet, resumeSavedBook, saveState } from "@/lib/store";
-import { nextTickWaitMs } from "@/lib/trading/runtime";
+import { nextTickWaitMs, shouldBrowserTick } from "@/lib/trading/runtime";
 import { parseWalletAddress } from "@/lib/monitor";
 import { cachedFrameChart, prefetchFrameCharts, rememberTapeMark, requestFrameCharts } from "@/lib/market/providers";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
@@ -174,10 +174,11 @@ function ChainDesk({
   runnerHostRef.current = runnerHost;
 
   const publishRunner = useCallback(async () => {
-    if (!runnerHostRef.current) return;
     const address = walletRef.current?.address ?? getActiveWallet(chain);
     if (!address) return;
     try {
+      const status = await detectDeskRunner();
+      if (status) setRunnerHost(true);
       await publishDeskBook(chain, address, await loadState(chain));
     } catch {
       // The next poll retries. Arming in this tab still saved the book locally.
@@ -287,15 +288,16 @@ function ChainDesk({
 
   useEffect(() => {
     // Hidden Cronos still mounted. Its unpaced Gecko charts 429 the shared
-    // feed and leave Solana waiting on pool prints.
-    if (!active && chain === "cronos") return;
+    // feed and leave Solana waiting on pool prints. A running CRO bot still
+    // needs those frames after a tab switch.
+    if (!active && chain === "cronos" && !desk?.bot.running) return;
     void prefetchFrameCharts(chain);
     const id = window.setInterval(() => {
-      if (!active && chain === "cronos") return;
+      if (!active && chain === "cronos" && !desk?.bot.running) return;
       void prefetchFrameCharts(chain);
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [active, chain]);
+  }, [active, chain, desk?.bot.running]);
 
   useEffect(() => {
     const last = readLastWallet(chain);
@@ -447,6 +449,7 @@ function ChainDesk({
 
   useEffect(() => {
     if (!runnerHost) return;
+    void publishRunner();
     let cancel = false;
     const pull = async () => {
       const book = await pullDeskBook(chain);
@@ -467,23 +470,29 @@ function ChainDesk({
       cancel = true;
       window.clearInterval(id);
     };
-  }, [applyDesk, chain, runnerHost]);
+  }, [applyDesk, chain, publishRunner, runnerHost]);
+
+  const lastTickAtRef = useRef<string | null>(null);
+  lastTickAtRef.current = desk?.bot.lastTickAt ?? null;
 
   useEffect(() => {
-    if (runnerHost) return;
+    const hasBook = Boolean(walletRef.current || getActiveWallet(chain) || readLastWallet(chain));
+    if (!hasBook) return;
     if (!active && !desk?.bot.running) return;
-    if (!walletRef.current && !getActiveWallet(chain)) return;
     let cancel = false;
     let inflight = false;
     let timer = 0;
     const run = async () => {
       if (cancel || inflight || busyRef.current) return false;
+      if (!walletRef.current && !getActiveWallet(chain)) {
+        await resumeSavedBook(chain).catch(() => null);
+      }
       if (!walletRef.current && !getActiveWallet(chain)) return false;
       inflight = true;
       const gen = controlGen.current;
       try {
-        // A saved book can tick before Phantom/Onchain returns. LIVE swaps
-        // wait for the session; the scan still updates lastTickAt.
+        // A saved book can tick before Phantom/Onchain returns. The trading
+        // key signs from that address; the scan still updates lastTickAt.
         const next = await controlBot("tick", walletRef.current, chain);
         // A start or stop click while this tick was in flight wins. Applying the
         // older book here would flip the button back.
@@ -496,12 +505,25 @@ function ChainDesk({
         inflight = false;
       }
     };
+    const pulse = () => {
+      if (cancel || busyRef.current) return Promise.resolve(false);
+      if (
+        !shouldBrowserTick({
+          runnerHost: runnerHostRef.current,
+          lastTickAt: lastTickAtRef.current,
+          scanSeconds: scanSecondsRef.current,
+        })
+      ) {
+        return Promise.resolve(false);
+      }
+      return run();
+    };
     const arm = (delay: number) => {
       timer = window.setTimeout(() => {
         void (async () => {
           if (cancel) return;
           const started = Date.now();
-          if (!busyRef.current) await run();
+          if (!busyRef.current) await pulse();
           if (cancel) return;
           arm(
             nextTickWaitMs({
@@ -513,16 +535,14 @@ function ChainDesk({
         })();
       }, delay);
     };
-    arm(active ? 300 : 1_200);
-    const stopKeep = startDeskKeepalive(() => {
-      if (!cancel && !busyRef.current) void run();
-    });
+    arm(active ? 200 : 800);
+    const stopKeep = startDeskKeepalive(pulse);
     return () => {
       cancel = true;
       window.clearTimeout(timer);
       stopKeep();
     };
-  }, [active, applyDesk, chain, desk?.bot.running, runnerHost, wallet?.address]);
+  }, [active, applyDesk, chain, desk?.bot.running, wallet?.address]);
 
   const onRunningRef = useRef(onRunning);
   onRunningRef.current = onRunning;

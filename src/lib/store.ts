@@ -386,8 +386,9 @@ function keepRunningBot(previous: AppState, next: AppState): AppState {
 }
 
 function dropStaleLiveLock(state: AppState): AppState {
-  const blocked = (state.bot.blocked ?? []).filter((line) => !/re-confirm live/i.test(line));
-  const lastError = state.bot.lastError && /re-confirm live/i.test(state.bot.lastError) ? null : state.bot.lastError;
+  const stale = /re-confirm live|cannot ask the wallet/i;
+  const blocked = (state.bot.blocked ?? []).filter((line) => !stale.test(line));
+  const lastError = state.bot.lastError && stale.test(state.bot.lastError) ? null : state.bot.lastError;
   if (blocked.length === (state.bot.blocked ?? []).length && lastError === state.bot.lastError) return state;
   return { ...state, bot: { ...state.bot, blocked, lastError } };
 }

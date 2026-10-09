@@ -9,6 +9,19 @@ export function nextTickWaitMs(opts: {
   return Math.max(1_000, target - Math.max(0, opts.usedMs ?? 0));
 }
 
+/** Browser ticks unless a live runner is still writing the book. */
+export function shouldBrowserTick(opts: {
+  runnerHost: boolean;
+  lastTickAt?: string | null;
+  scanSeconds: number;
+  nowMs?: number;
+}): boolean {
+  if (!opts.runnerHost) return true;
+  const at = opts.lastTickAt ? Date.parse(opts.lastTickAt) : Number.NaN;
+  const staleAfter = Math.max(Math.max(4, opts.scanSeconds) * 3_000, 20_000);
+  return !Number.isFinite(at) || (opts.nowMs ?? Date.now()) - at > staleAfter;
+}
+
 export const DESK_RUNNER_PORT = 8787;
 export const DESK_RUNNER_HOST = "127.0.0.1";
 

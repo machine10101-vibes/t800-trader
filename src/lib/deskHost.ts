@@ -1,5 +1,6 @@
 import type { ChainId } from "@/lib/chain";
 import { collectSignerSecrets } from "@/lib/keystore";
+import { getActiveWallet } from "@/lib/store";
 import { DESK_RUNNER_PORT, localRunnerOrigin, runnerBookUrl, runnerStatusUrl } from "@/lib/trading/runtime";
 import type { AppState } from "@/lib/types";
 import type { CronosSession } from "@/lib/cronos/wallet";
@@ -82,6 +83,17 @@ export async function pushDeskBook(chain: string, payload: DeskBookPayload, orig
 
 export async function publishDeskBook(chain: ChainId, wallet: string, state: AppState): Promise<boolean> {
   return pushDeskBook(chain, { wallet, state, keys: collectSignerSecrets(wallet) });
+}
+
+/** After a refresh the wallet popup is gone. The trading key still signs from this address. */
+export function tickSessionFor(
+  chain: ChainId,
+  session?: WalletSession | CronosSession | null,
+): WalletSession | CronosSession | null {
+  if (session?.address) return session;
+  const address = getActiveWallet(chain);
+  if (!address) return null;
+  return chain === "cronos" ? runnerCronosSession(address) : runnerWalletSession(address);
 }
 
 export function runnerWalletSession(address: string): WalletSession {
