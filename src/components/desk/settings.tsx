@@ -237,8 +237,8 @@ export function SettingsPanel({
         <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
           <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
             {local.cronosQuote === "cro"
-              ? "A buy spends CRO on WolfSwap, VVS, or cro.trade. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
-              : "A buy spends USDC on WolfSwap, VVS, or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos."}
+              ? "A buy spends CRO on the DEXes you leave on. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
+              : "A buy spends USDC on the DEXes you leave on. A sell turns the coin back into USDC. There is no extra size on Cronos."}
           </p>
         </Section>
       ) : (
