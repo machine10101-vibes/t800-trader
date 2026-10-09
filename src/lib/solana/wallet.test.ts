@@ -5,6 +5,8 @@ import {
   combineMintReads,
   isPhoneEnvironment,
   isUnexpectedWalletError,
+  mergeSolanaReads,
+  orderRpcUrls,
   phantomBrowseUrl,
   pickInjectedProvider,
   pickRpcError,
@@ -24,6 +26,33 @@ describe("combineMintReads", () => {
     assert.equal(combineMintReads([0, null]), null);
     assert.equal(combineMintReads([0, 0]), 0);
     assert.equal(combineMintReads([null, null]), null);
+  });
+});
+
+describe("mergeSolanaReads", () => {
+  it("keeps a SOL print when USDC misses, and a USDC print when SOL misses", () => {
+    const solOnly = mergeSolanaReads({ sol: 0.04, usdc: null, solPriceUsd: 200 });
+    assert.equal(solOnly?.sol, 0.04);
+    assert.equal(solOnly?.usdc, 0);
+    assert.equal(solOnly?.equityUsd, 8);
+    const usdcOnly = mergeSolanaReads({ sol: null, usdc: 25, solPriceUsd: null });
+    assert.equal(usdcOnly?.usdc, 25);
+    assert.equal(usdcOnly?.sol, 0);
+    assert.equal(usdcOnly?.equityUsd, 25);
+  });
+
+  it("does not treat a missed SOL read plus empty USDC as a flat trading key", () => {
+    assert.equal(mergeSolanaReads({ sol: null, usdc: 0, solPriceUsd: 180 }), null);
+    assert.equal(mergeSolanaReads({ sol: null, usdc: null, solPriceUsd: 180 }), null);
+    assert.equal(mergeSolanaReads({ sol: 0, usdc: 0, solPriceUsd: 180 })?.equityUsd, 0);
+  });
+});
+
+describe("orderRpcUrls", () => {
+  it("puts the last healthy node first", () => {
+    const urls = ["a", "b", "c"];
+    assert.deepEqual(orderRpcUrls(urls, "c"), ["c", "a", "b"]);
+    assert.deepEqual(orderRpcUrls(urls, "missing"), urls);
   });
 });
 

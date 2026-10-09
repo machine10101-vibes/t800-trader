@@ -15,6 +15,7 @@ import {
   parseRpcQuantity,
   pickEvmNative,
   preferFundedAccount,
+  cronosReadsReady,
 } from "./balance";
 
 const FUNDED = "0x0000000000000000000000000000000000000001";
@@ -43,6 +44,10 @@ describe("Cronos balance", () => {
     assert.equal(pickEvmNative({ rpc: 3.1, wallet: 206.135, viem: 3.1, posCro: 206.135 }), 3.1);
     assert.equal(pickEvmNative({ wallet: 206.135, posCro: 206.135 }), 0);
     assert.equal(pickEvmNative({ wallet: 8, posCro: 0 }), 8);
+    assert.equal(cronosReadsReady({ usdc: 25 }), true);
+    assert.equal(cronosReadsReady({ rpc: 0, usdc: 0, wcro: 0 }), true);
+    assert.equal(cronosReadsReady({ usdc: 0, wcro: 0 }), false);
+    assert.equal(cronosReadsReady({}), false);
     const kept = mergeCronosRefresh(
       {
         address: FUNDED,

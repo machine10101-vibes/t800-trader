@@ -3,6 +3,21 @@ import { getAddress } from "viem";
 const BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32_GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
+/** True when at least one Cronos read landed, including USDC with no native print. */
+export function cronosReadsReady(input: {
+  rpc?: number | null;
+  wallet?: number | null;
+  viem?: number | null;
+  wcro?: number | null;
+  usdc?: number | null;
+  posCro?: number;
+}): boolean {
+  if (input.rpc != null || input.wallet != null || input.viem != null) return true;
+  if (input.wcro != null && input.wcro > 0) return true;
+  if (input.usdc != null && input.usdc > 0) return true;
+  return (input.posCro ?? 0) > 0;
+}
+
 /** Native reads from a public node and from the wallet. The larger one is the balance. */
 export function formatCro(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0 CRO";
