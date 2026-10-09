@@ -1,5 +1,5 @@
 import { sameMint, type ChainId } from "@/lib/chain";
-import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
+import { cachedOhlcv, loadMarket, skeletonBook } from "@/lib/market/providers";
 import { foldCandles, tapeRead } from "@/lib/market/tape";
 import { bookTokens, isActiveBook, SOL_MINT } from "@/lib/market/universe";
 import { venueForDex, venueLabel, venueSummary } from "@/lib/market/venues";
@@ -276,6 +276,10 @@ export async function runResearch(
     return cached.value;
   }
   const market = await loadMarket(false, chain);
+  const seedRows = [
+    ...market.candidates,
+    ...skeletonBook(chain).filter((row) => !market.candidates.some((c) => sameMint(c.mint, row.mint))),
+  ];
   const screen = bookScreen(
     {
       minLiquidityUsd: config.minLiquidityUsd,
@@ -289,7 +293,7 @@ export async function runResearch(
 
   const passed: TokenCandidate[] = [];
   let eliminated = 0;
-  const book = market.candidates.filter((c) => isActiveBook(c.mint, chain));
+  const book = seedRows.filter((c) => isActiveBook(c.mint, chain));
   for (const c of book) {
     if (screenCandidate(c, screen)) {
       eliminated += 1;

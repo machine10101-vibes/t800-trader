@@ -312,7 +312,9 @@ function ChainDesk({
       applyDesk(shellDesk(book));
       void loadDesk(false, chain).then((next) => {
         if (!cancelled) applyDesk(next);
-      }).catch(() => undefined);
+      }).catch((error) => {
+        if (!cancelled) setError(error instanceof Error ? error.message : "Desk refresh failed");
+      });
     });
     return () => {
       cancelled = true;

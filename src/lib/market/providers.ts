@@ -1179,6 +1179,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   regime: MarketRegime;
   scanned: number;
 }> {
+  // Charts warm in the background. Waiting here left the Coins tab on dashes.
   const chartsReady = prefetchFrameCharts(chain);
   const tapesPromise: Promise<Map<string, JupiterTape>> =
     chain === "solana" ? loadJupiterTapes(bookMints(chain)).catch(() => new Map()) : Promise.resolve(new Map());
@@ -1214,13 +1215,13 @@ async function loadMarketOnce(chain: ChainId): Promise<{
     chain,
     pinnedPools,
   );
+  void chartsReady.catch(() => undefined);
   const [regime, crossed, tapes] = await Promise.all([
     regimePromise,
     chain === "solana"
       ? crossCheck(merged).catch(() => ({ candidates: merged, yields: [] as YieldQuote[] }))
       : Promise.resolve({ candidates: merged, yields: [] as YieldQuote[] }),
     tapesPromise,
-    chartsReady.catch(() => undefined),
   ]);
   let candidates = fillActiveBook(
     crossed.candidates.map((candidate) => withCandleTape(candidate, cachedOhlcv(candidate.poolAddress))),
