@@ -498,7 +498,7 @@ async function readOhlcv(url: string): Promise<Candle[]> {
     () =>
       fetchJson<{
         data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-      }>(url, { timeoutMs: 8_000, retries: 0 }),
+      }>(url, { timeoutMs: 8_000, retries: 1 }),
     { minute: geckoMinuteUrl(url) },
   );
   return candlesFromOhlcv(json);
