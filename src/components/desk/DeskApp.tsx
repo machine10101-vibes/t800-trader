@@ -290,9 +290,8 @@ function ChainDesk({
   }, [chain, connect]);
 
   useEffect(() => {
-    // Hidden Cronos still mounted. Its unpaced Gecko charts 429 the shared
-    // feed and leave Solana waiting on pool prints. A running CRO bot still
-    // needs those frames after a tab switch.
+    // Hidden Cronos still mounted. A running CRO bot still
+    // needs those VVS frames after a tab switch.
     if (!active && chain === "cronos" && !desk?.bot.running) return;
     void prefetchFrameCharts(chain);
     const id = window.setInterval(() => {
@@ -948,7 +947,7 @@ function ChainDesk({
               </>
             ) : (
               <>
-                <GateChip label="Live marks" hint="CoinGecko · GeckoTerminal" />
+                <GateChip label="Live marks" hint="VVS Finance" />
                 <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
                 <GateChip label="Live swaps" hint={copy.swapHint} />
               </>
@@ -1820,7 +1819,7 @@ function Overview({
   const chartToken = chartMint ? book.find((token) => token.mint === chartMint || token.mint.toLowerCase() === chartMint.toLowerCase()) : null;
   const chartFrames: FrameBars = chartMint ? (bars[chartToken?.mint ?? chartMint] ?? {}) : {};
   const chartCandles = chartFrames[chartFrame] ?? [];
-  const feed = chain === "solana" ? "Jupiter" : "GeckoTerminal";
+  const feed = chain === "solana" ? "Jupiter" : "VVS Finance";
   const emptyFor = (frame: Frame) => `Waiting on the ${feed} ${FRAME_LABEL[frame]} chart`;
   const chartEmpty = emptyFor(gridFrame);
   const tradeOn = (mint: string | null | undefined): ChartTrade | null => {
