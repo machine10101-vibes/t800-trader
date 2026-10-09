@@ -1585,7 +1585,7 @@ function useFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): R
   useEffect(() => {
     if (!key) return;
     const ids = key.split("|").filter(Boolean);
-    const more = extraKey.split("|").filter((frame): frame is Frame => frame === "5m");
+    const more = extraKey.split("|").filter((frame): frame is Frame => (FRAMES as readonly string[]).includes(frame));
     let live = true;
     const paint = () => {
       if (!live) return;
