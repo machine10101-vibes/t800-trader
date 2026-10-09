@@ -96,7 +96,7 @@ export async function fetchJson<T>(
   url: string,
   opts?: { timeoutMs?: number; headers?: Record<string, string>; retries?: number },
 ): Promise<T> {
-  const retries = opts?.retries ?? 3;
+  const retries = Math.max(1, opts?.retries ?? 3);
   let lastError: unknown;
   for (let attempt = 0; attempt < retries; attempt++) {
     const ctrl = new AbortController();
