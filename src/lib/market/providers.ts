@@ -2,13 +2,14 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoFrameUrl, geckoMinuteUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoMinuteUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
 import { paintRegime } from "./regime";
 import { crossCheck, type YieldQuote } from "./quotes";
 import { venueForDex } from "./venues";
+import { loadVvsFrames, vvsSeries } from "@/lib/cronos/vvsChart";
 import {
   CANDLE_COOL_MS,
   CHART_BARS,
@@ -519,6 +520,13 @@ async function readOhlcvDirect(url: string): Promise<Candle[]> {
 }
 
 async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const mint =
+      poolMint.get(poolAddress) ?? bookPools("cronos").find((row) => row.pool.toLowerCase() === poolAddress.toLowerCase())?.mint;
+    if (!mint) return [];
+    const book = await loadVvsFrames(mint);
+    return (book?.minutes ?? []).slice(-Math.min(limit, 140));
+  }
   const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/minute?aggregate=1&limit=${limit}`;
   const poolRows = await readOhlcv(poolUrl);
   if (poolRows.length) return poolRows;
@@ -530,6 +538,15 @@ async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId
 
 /** Native 4-hour bars from the pool the desk trades. The token series is only a fallback. */
 async function fetchChartOnce(poolAddress: string, chain: ChainId, opts?: { direct?: boolean }): Promise<Candle[]> {
+  if (chain === "cronos") {
+    const mint =
+      poolMint.get(poolAddress) ?? bookPools("cronos").find((row) => row.pool.toLowerCase() === poolAddress.toLowerCase())?.mint;
+    if (!mint) return [];
+    const book = await loadVvsFrames(mint);
+    if (!book) return [];
+    const four = vvsSeries(book, "4h");
+    return four.length ? four : book.hourly;
+  }
   const read = opts?.direct ? readOhlcvDirect : readOhlcv;
   const network = geckoNetwork(chain);
   const poolRows = await read(geckoHourlyChartUrl(network, poolAddress, "pools"));
@@ -914,7 +931,6 @@ async function loadCronosDecision(mint: string, pool: string, force: boolean): P
   const run = (async () => {
     const missedAt = decisionMiss.get(key);
     const coolMs = hit?.rows.length ? CANDLE_COOL_MS : 2_000;
-    if (!force && geckoIsCooling()) return hit?.rows ?? [];
     if (!force && missedAt && Date.now() - missedAt < coolMs) return hit?.rows ?? [];
     try {
       const rows = (await fetchChartOnce(pool, "cronos", { direct: true })).slice(-CHART_BARS);
@@ -1013,13 +1029,14 @@ export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Ca
 
 async function readFrameSource(mint: string, chain: ChainId, source: Frame): Promise<void> {
   if (chain === "cronos") {
-    const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
-    if (!pool) return;
-    const network = geckoNetwork(chain);
-    let rows = await readOhlcv(geckoFrameUrl(network, pool, "pools", source));
-    if (!rows.length) rows = await readOhlcv(geckoFrameUrl(network, mint, "tokens", source)).catch(() => rows);
-    if (!rows.length) throw new Error("empty");
-    rememberFrames(chain, mint, source, rows);
+    const book = await loadVvsFrames(mint);
+    if (!book) throw new Error("empty");
+    if (book.five.length) rememberFrames(chain, mint, "5m", book.five);
+    if (book.hourly.length) rememberFrames(chain, mint, "1h", book.hourly);
+    else if (book.five.length && (source === "1h" || source === "4h")) {
+      rememberFrames(chain, mint, "5m", book.five);
+    }
+    if (!cachedFrameChart(mint, chain, source)?.length && !book.five.length && !book.hourly.length) throw new Error("empty");
     return;
   }
   const json = await fetchJson<{ candles?: unknown }>(jupiterChartUrl(mint, Date.now(), FRAME_BARS, jupiterInterval(source)), {
@@ -1050,7 +1067,6 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
   if (chain === "cronos") {
     const haveEnough = have && enoughFrameBars(frame, have.length);
     if (haveEnough) return have;
-    // paceGecko waits out the 429 window. A capped sleep here raced the next minute read.
   }
   let run = frameInflight.get(key);
   if (!run) {
@@ -1079,7 +1095,7 @@ function frameSnapshot(mint: string, chain: ChainId): Record<Frame, Candle[]> {
   };
 }
 
-/** Warm every logic chart. Cronos reads 5-minute first so one minute call fills the book. */
+/** Warm every logic chart. Cronos fills 5-minute and hour frames from one VVS read. */
 export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
   if (chain === "solana") {
     await Promise.all(frameWarmOrder(chain).map((frame) => loadFrameChart(mint, chain, frame).catch(() => [])));
@@ -1115,7 +1131,7 @@ function warmCronosMint(mint: string): Promise<void> {
   return cronosWarm;
 }
 
-/** Keep every logic chart warm. Cronos goes one coin at a time through the Gecko queue. */
+/** Keep every logic chart warm. Cronos still goes one coin at a time so VVS swap pages stay paced. */
 export function requestFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): void {
   if (chain === "cronos") {
     for (const mint of mints) void warmCronosMint(mint);

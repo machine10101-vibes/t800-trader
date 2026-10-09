@@ -43,13 +43,13 @@ export function jupiterInterval(frame: Frame): string {
  */
 export function sourceFrame(chain: ChainId, frame: Frame): Frame {
   if (frame === "5m") return "5m";
-  if (chain === "cronos") return frame;
+  if (chain === "cronos") return frame === "15m" ? "5m" : "1h";
   return frame === "1h" ? "15m" : frame;
 }
 
-/** 5-minute first. One successful Cronos 5-minute read fills every longer chart. */
+/** Cronos reads VVS once for 5-minute swaps and once for hour bars. */
 export function frameWarmOrder(chain: ChainId): Frame[] {
-  return chain === "cronos" ? ["5m", "15m", "1h", "4h"] : ["5m", "15m", "1h", "4h"];
+  return chain === "cronos" ? ["5m", "1h"] : ["5m", "15m", "1h", "4h"];
 }
 
 /** Longer frames built from a shorter series. A thin roll-up is still better than an empty chart. */

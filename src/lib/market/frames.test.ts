@@ -19,13 +19,13 @@ describe("closedCandles", () => {
   it("always reads a native 5-minute series", () => {
     assert.equal(sourceFrame("solana", "5m"), "5m");
     assert.equal(sourceFrame("cronos", "5m"), "5m");
-    assert.equal(sourceFrame("cronos", "15m"), "15m");
+    assert.equal(sourceFrame("cronos", "15m"), "5m");
     assert.equal(sourceFrame("cronos", "1h"), "1h");
-    assert.equal(sourceFrame("cronos", "4h"), "4h");
+    assert.equal(sourceFrame("cronos", "4h"), "1h");
   });
 
-  it("warms 5-minute first so one Cronos minute read fills every longer chart", () => {
-    assert.deepEqual(frameWarmOrder("cronos"), ["5m", "15m", "1h", "4h"]);
+  it("warms Cronos from VVS 5-minute swaps and VVS hour bars", () => {
+    assert.deepEqual(frameWarmOrder("cronos"), ["5m", "1h"]);
     assert.deepEqual(frameWarmOrder("solana"), ["5m", "15m", "1h", "4h"]);
     const five = Array.from({ length: 1000 }, (_, i) => bar(1_700_000_000 + i * 300));
     const filled = derivedFrames(five, "5m");
