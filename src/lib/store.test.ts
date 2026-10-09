@@ -53,12 +53,15 @@ describe("store", () => {
     assert.equal(readLastWallet("cronos"), "0xabc");
     const armed = emptyState({ ...DEFAULT_CONFIG, startingEquity: 20, walletSwaps: true, executionMode: "live" });
     armed.bot.running = true;
-    armed.bot.blocked = ["Re-confirm LIVE this session before sending swaps"];
+    armed.bot.blocked = [
+      "Re-confirm LIVE this session before sending swaps",
+      "SOL: this page cannot ask the wallet to sign",
+    ];
     store.set(bookStorageKey("solana", "So1Refresh"), JSON.stringify(armed));
     writeLastWallet("solana", "So1Refresh");
     const book = await resumeSavedBook("solana");
     assert.equal(book?.bot.running, true);
-    assert.equal((book?.bot.blocked ?? []).some((line) => /re-confirm live/i.test(line)), false);
+    assert.equal((book?.bot.blocked ?? []).some((line) => /re-confirm live|cannot ask the wallet/i.test(line)), false);
   });
 
   it("keeps an armed bot running when an empty book is reseeded after a refresh", () => {

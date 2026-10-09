@@ -39,7 +39,7 @@ import { deskEntrySignals } from "./mtf";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, orderForPosition, signedOnChain, tradeLeverage } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
 import type { MakerDesk } from "./quote";
-import { isLiveSessionArmed } from "@/lib/solana/live-session";
+import { isLiveSessionArmed, resumeLiveSession } from "@/lib/solana/live-session";
 
 /** Green 15m watchlist names outrank a high score that is still red, so a flat book can actually enter. */
 export function huntRank(token: ScoredCandidate): number {
@@ -372,6 +372,7 @@ export async function tickBot(
           pauseOpens = true;
           blocked.push("Kill switch is on");
         }
+        if (next.config.walletSwaps && next.bot.running) resumeLiveSession();
         if (chain === "solana" && next.config.walletSwaps && !isLiveSessionArmed()) {
           pauseOpens = true;
           blocked.push("Re-confirm LIVE this session before sending swaps");

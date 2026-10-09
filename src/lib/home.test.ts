@@ -270,6 +270,57 @@ describe("home", () => {
     });
     assert.equal(minuteAfterReload.walls.length, 0);
 
+    const hiddenTab = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 5 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      hidden: true,
+    });
+    assert.equal(hiddenTab.walls.length, 0);
+
+    const afterTabBack = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 5 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      visibleAt: now - 8_000,
+    });
+    assert.equal(afterTabBack.walls.length, 0);
+
+    const runnerQuiet = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now - 5 * 60_000).toISOString(),
+      ticks: 2,
+      blocked: [],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      runner: true,
+    });
+    assert.equal(runnerQuiet.walls.length, 0);
+
     const off = botActivity({
       running: false,
       killSwitch: false,

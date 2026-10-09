@@ -6,6 +6,7 @@ import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRule
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
+import { useEffect, useState } from "react";
 import { Pill } from "./bits";
 import { CashPanel, cashPanelTitle } from "./CashLegs";
 import { TokenLogo } from "./TokenLogo";
@@ -55,6 +56,25 @@ export function Home({
   onMore: () => void;
   runner?: boolean;
 }) {
+  const [viewState, setViewState] = useState(() => ({
+    hidden: typeof document !== "undefined" && document.visibilityState === "hidden",
+    visibleAt: Date.now(),
+  }));
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState === "hidden") {
+        setViewState((cur) => ({ ...cur, hidden: true }));
+        return;
+      }
+      setViewState({ hidden: false, visibleAt: Date.now() });
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("pageshow", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("pageshow", sync);
+    };
+  }, []);
   const real = desk.config.walletSwaps;
   const positions = real ? desk.positions.filter((p) => p.signature || (p.leverage ?? 1) > 1) : desk.positions;
   const trades = real ? desk.trades.filter((t) => t.signature) : desk.trades;
@@ -73,6 +93,9 @@ export function Home({
     portfolio: desk.portfolio,
     config: desk.config,
     pageStartedAt: pageStartedAt,
+    visibleAt: viewState.visibleAt,
+    hidden: viewState.hidden,
+    runner,
   });
   const statusNow = visibleActivity(activity);
   const results = homeResults(trades);
