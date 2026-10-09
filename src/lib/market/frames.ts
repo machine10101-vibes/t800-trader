@@ -37,12 +37,18 @@ export function jupiterInterval(frame: Frame): string {
 /**
  * One native series fills longer frames. 5-minute is always its own read — it cannot be
  * rolled up from 15-minute. Cronos 15-minute (1000 bars) covers the 1-hour and 4-hour
- * back-check. Solana 15-minute (300 bars) covers the 1-hour; the 4-hour still needs Jupiter.
+ * when it lands. Hour endpoints stay available if minute OHLCV 429s. Solana 15-minute
+ * covers the 1-hour; the 4-hour still needs Jupiter.
  */
 export function sourceFrame(chain: ChainId, frame: Frame): Frame {
   if (frame === "5m") return "5m";
-  if (chain === "cronos") return "15m";
+  if (chain === "cronos") return frame;
   return frame === "1h" ? "15m" : frame;
+}
+
+/** Cronos 15-minute first so a 5-minute 429 cannot starve the entry chart. */
+export function frameWarmOrder(chain: ChainId): Frame[] {
+  return chain === "cronos" ? ["15m", "5m", "1h", "4h"] : ["5m", "15m", "1h", "4h"];
 }
 
 /** Longer frames built from a shorter series. A thin roll-up is still better than an empty chart. */

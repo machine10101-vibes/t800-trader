@@ -2,7 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, FRAMES, geckoFrameUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoFrameUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
@@ -1012,9 +1012,8 @@ async function readFrameSource(mint: string, chain: ChainId, source: Frame): Pro
     const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
     if (!pool) return;
     const network = geckoNetwork(chain);
-    const read = source === "15m" || source === "4h" ? readOhlcvDirect : readOhlcv;
-    let rows = await read(geckoFrameUrl(network, pool, "pools", source));
-    if (!rows.length) rows = await read(geckoFrameUrl(network, mint, "tokens", source)).catch(() => rows);
+    let rows = await readOhlcv(geckoFrameUrl(network, pool, "pools", source));
+    if (!rows.length) rows = await readOhlcv(geckoFrameUrl(network, mint, "tokens", source)).catch(() => rows);
     if (!rows.length) throw new Error("empty");
     rememberFrames(chain, mint, source, rows);
     return;
@@ -1026,10 +1025,6 @@ async function readFrameSource(mint: string, chain: ChainId, source: Frame): Pro
   const rows = parseJupiterCandles(json.candles);
   if (!rows.length) throw new Error("empty");
   rememberFrames(chain, mint, source, rows);
-}
-
-function geckoWaitMs(): number {
-  return Math.max(0, geckoNotBefore - Date.now());
 }
 
 /** One native read fills every longer frame. An empty book waits for the feed instead of giving up. */
@@ -1049,13 +1044,9 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
     if (retry && enoughFrameBars(frame, retry.length)) return retry;
   }
   if (chain === "cronos") {
-    const wait = geckoWaitMs();
-    if (wait > 0) {
-      if (have && enoughFrameBars(frame, have.length)) return have;
-      await sleep(Math.min(wait, 8_000));
-      const after = cachedFrameChart(mint, chain, frame);
-      if (after && enoughFrameBars(frame, after.length)) return after;
-    }
+    const haveEnough = have && enoughFrameBars(frame, have.length);
+    if (haveEnough) return have;
+    // paceGecko waits out the 429 window. A capped sleep here raced the next minute read.
   }
   let run = frameInflight.get(key);
   if (!run) {
@@ -1075,12 +1066,7 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
   return cachedFrameChart(mint, chain, frame) ?? have ?? [];
 }
 
-/** 5-minute on load. 15-minute fills the 1-hour. Solana still reads a native 4-hour when the roll-up is thin. */
-export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
-  await loadFrameChart(mint, chain, "5m").catch(() => []);
-  await loadFrameChart(mint, chain, "15m").catch(() => []);
-  const four = cachedFrameChart(mint, chain, "4h");
-  if (!four || !enoughFrameBars("4h", four.length)) await loadFrameChart(mint, chain, "4h").catch(() => []);
+function frameSnapshot(mint: string, chain: ChainId): Record<Frame, Candle[]> {
   return {
     "5m": cachedFrameChart(mint, chain, "5m") ?? [],
     "15m": cachedFrameChart(mint, chain, "15m") ?? [],
@@ -1089,20 +1075,61 @@ export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Rec
   };
 }
 
-const WARM_FRAMES: Frame[] = ["5m", "15m", "4h"];
+/** Warm every logic chart. Cronos reads 15-minute first so a 5-minute 429 cannot empty the book. */
+export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
+  if (chain === "solana") {
+    await Promise.all(frameWarmOrder(chain).map((frame) => loadFrameChart(mint, chain, frame).catch(() => [])));
+    return frameSnapshot(mint, chain);
+  }
+  for (const frame of frameWarmOrder(chain)) {
+    const have = cachedFrameChart(mint, chain, frame);
+    if (have && enoughFrameBars(frame, have.length)) continue;
+    await loadFrameChart(mint, chain, frame).catch(() => []);
+  }
+  return frameSnapshot(mint, chain);
+}
 
-/** Keep the 5-minute, 15-minute, and 4-hour charts warm. The 1-hour is rolled up from the 15-minute. */
+let cronosWarm: Promise<void> = Promise.resolve();
+const cronosWarming = new Set<string>();
+
+function warmCronosMint(mint: string): Promise<void> {
+  if (!mint || cronosWarming.has(mint.toLowerCase())) return cronosWarm;
+  const ready = frameWarmOrder("cronos").every((frame) => {
+    const rows = cachedFrameChart(mint, "cronos", frame);
+    return Boolean(rows && enoughFrameBars(frame, rows.length));
+  });
+  if (ready) return Promise.resolve();
+  const key = mint.toLowerCase();
+  cronosWarming.add(key);
+  const run = cronosWarm.then(
+    () => loadFrameCharts(mint, "cronos").then(() => undefined, () => undefined),
+    () => undefined,
+  );
+  cronosWarm = run.finally(() => {
+    cronosWarming.delete(key);
+  });
+  return cronosWarm;
+}
+
+/** Keep every logic chart warm. Cronos goes one coin at a time through the Gecko queue. */
 export function requestFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): void {
-  const want = new Set<Frame>([...WARM_FRAMES, ...extra]);
+  if (chain === "cronos") {
+    for (const mint of mints) void warmCronosMint(mint);
+    return;
+  }
+  const want = new Set<Frame>([...frameWarmOrder(chain), ...extra]);
   for (const mint of mints) {
     if (!mint) continue;
     for (const frame of want) void loadFrameChart(mint, chain, frame);
   }
 }
 
-/** Login and refresh start here. Native 5-minute and 15-minute per coin, plus Solana's 4-hour when needed. */
+/** Login and refresh start here. Solana reads Jupiter in parallel. Cronos paces Gecko, 15-minute first. */
 export function prefetchFrameCharts(chain: ChainId): Promise<void> {
   const mints = bookMints(chain);
+  if (chain === "cronos") {
+    return mints.reduce((prev, mint) => prev.then(() => warmCronosMint(mint)), Promise.resolve());
+  }
   return Promise.all(mints.map((mint) => loadFrameCharts(mint, chain).catch(() => undefined))).then(() => undefined);
 }
 
