@@ -1,11 +1,13 @@
 "use client";
 
 import { ALL_TA_LAYERS, AnalysisChart, CandleChart, EquityPath, ScatterTape, TaNotes, VolumeBars, type ChartLayers, type ChartToken, type ChartTrade, type TaLayers } from "@/components/desk/charts";
+import { CashLegs, CashPanel, WalletUsdcChip, cashPanelTitle } from "@/components/desk/CashLegs";
 import { TokenLogo } from "@/components/desk/TokenLogo";
 import { ExecutionLog } from "@/components/desk/executions";
 import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
+import { deskCashLegs, type CashLeg } from "@/lib/cashHoldings";
 import { CHAIN_COPY, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
 import {
   adoptLiveEquity,
@@ -38,7 +40,7 @@ import { leadingTokenSymbol } from "@/lib/market/logos";
 import { bookTokens } from "@/lib/market/universe";
 import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
-import { croHoldings, formatCro, formatCroEvm } from "@/lib/cronos/balance";
+import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
@@ -829,6 +831,21 @@ function ChainDesk({
   const shownWallet =
     wallet ??
     (savedAddress && desk ? previewDeskSession(chain, savedAddress, desk.portfolio.equityUsd) : null);
+  const pageCash = desk && shownWallet
+    ? deskCashLegs({
+        chain,
+        live: desk.config.walletSwaps,
+        paperCashUsd: desk.portfolio.cashUsd,
+        nativePriceUsd: solPx || shownWallet.solPriceUsd,
+        trading,
+        wallet: shownWallet,
+        preferWallet:
+          !trading &&
+          desk.positions.length === 0 &&
+          desk.trades.length === 0 &&
+          (cronosHeld?.usd ?? shownWallet.equityUsd) > desk.portfolio.equityUsd,
+      })
+    : [];
   const switchChain = (next: ChainId) => {
     setWatchAddress(null);
     onSwitch(next);
@@ -1099,6 +1116,9 @@ function ChainDesk({
                         ? Math.max(desk.portfolio.equityUsd, cronosHeld?.usd ?? shownWallet.equityUsd)
                         : desk.portfolio.equityUsd
                   }
+                  cashLegs={pageCash}
+                  cashArmed={Boolean(trading)}
+                  walletUsdc={shownWallet.usdc}
                   busy={busy}
                   closingId={closingId}
                   closeError={closeError}
@@ -1117,6 +1137,13 @@ function ChainDesk({
                   trading={trading}
                   winRate={winRate}
                   focusMint={focusMint}
+                  cashLegs={pageCash}
+                  cashTitle={cashPanelTitle(desk.config.walletSwaps, Boolean(trading))}
+                  walletUsdc={shownWallet.usdc}
+                  cashTotalUsd={
+                    trading?.equityUsd ||
+                    (desk.config.walletSwaps ? shownWallet.equityUsd : desk.portfolio.cashUsd || shownWallet.equityUsd)
+                  }
                   chain={chain}
                   onFocus={setFocusMint}
                   onOpen={setThesis}
@@ -1329,25 +1356,21 @@ function Header({
   onDisconnect: () => void;
   onRefresh: () => void;
   onWatch: () => void;
-  trading: { equityUsd: number; sol?: number } | null;
+  trading: { equityUsd: number; sol?: number; usdc?: number } | null;
 }) {
   const armed = Boolean(desk?.bot.running);
   const holdings = chain === "cronos" ? croHoldings(wallet, solPx) : null;
-  const croEvm = trading && chain === "cronos" ? (trading.sol ?? 0) : holdings?.cro ?? 0;
-  const equity = holdings ? formatCroEvm(croEvm) : usd(trading ? trading.equityUsd : wallet.equityUsd);
-  const equityNote = holdings
-    ? trading
-      ? trading.equityUsd > 0
-        ? usd(trading.equityUsd)
-        : null
-      : holdings.onPos
-        ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.`
-        : holdings.usd > 0
-          ? usd(holdings.usd)
-          : holdings.cro === 0
-            ? "No CRO on Cronos EVM"
-            : null
-    : null;
+  const equity = usd(trading ? trading.equityUsd : holdings ? holdings.usd : wallet.equityUsd);
+  const equityNote = holdings?.onPos ? `${formatCro(holdings.pos)} on Cronos POS. Send it to Cronos EVM to trade.` : null;
+  const headerLegs = deskCashLegs({
+    chain,
+    live: Boolean(desk?.config.walletSwaps),
+    paperCashUsd: desk?.portfolio.cashUsd,
+    nativePriceUsd: solPx || wallet.solPriceUsd,
+    trading: trading && trading.usdc != null && trading.sol != null ? { usdc: trading.usdc, sol: trading.sol } : null,
+    wallet,
+    preferWallet: !trading,
+  });
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
@@ -1395,10 +1418,12 @@ function Header({
               <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
               {armed ? "Armed" : "Standby"}
             </Pill>
+            <WalletUsdcChip usdc={wallet.usdc} chain={chain} />
             <div className="text-right">
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
               <div className="num">{equity}</div>
               {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
+              <CashLegs legs={headerLegs} chain={chain} dense />
             </div>
             <button onClick={onDisconnect} className="header-chip text-[11px] uppercase tracking-[0.16em]">
               Disconnect
@@ -1421,10 +1446,12 @@ function Header({
         <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm sm:hidden">
           <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
           <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
+          <WalletUsdcChip usdc={wallet.usdc} chain={chain} />
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{trading ? "Trading" : "Wallet"}</div>
             <div className="num text-xs">{equity}</div>
             {equityNote ? <div className="text-[10px] text-[var(--faint)]">{equityNote}</div> : null}
+            <CashLegs legs={headerLegs} chain={chain} dense />
           </div>
           <button onClick={onRefresh} className="header-chip min-h-11 shrink-0 text-[11px] uppercase tracking-[0.14em]">
             Refresh
@@ -1691,6 +1718,10 @@ function Overview({
   trading,
   winRate,
   focusMint,
+  cashLegs,
+  cashTitle,
+  walletUsdc,
+  cashTotalUsd,
   chain,
   onFocus,
   onOpen,
@@ -1700,9 +1731,13 @@ function Overview({
 }: {
   desk: DeskPayload;
   wallet: DeskSession;
-  trading: { equityUsd: number } | null;
+  trading: { equityUsd: number; sol?: number; usdc?: number } | null;
   winRate: number;
   focusMint: string | null;
+  cashLegs: CashLeg[];
+  cashTitle: string;
+  walletUsdc: number;
+  cashTotalUsd: number;
   chain: ChainId;
   onFocus: (mint: string) => void;
   onOpen: (t: ResearchThesis) => void;
@@ -1779,6 +1814,7 @@ function Overview({
   const unrealized = swaps ? open.reduce((sum, position) => sum + rowPnl(position), 0) : desk.portfolio.unrealizedPnlUsd;
   return (
     <div className="space-y-3">
+      <CashPanel title={cashTitle} totalUsd={cashTotalUsd} legs={cashLegs} chain={chain} walletUsdc={walletUsdc} />
       {chartMint ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4" onClick={() => setChartMint(null)}>
           <div
@@ -2669,6 +2705,28 @@ function Book({
           </div>
         </div>
       </div>
+      <CashPanel
+        title={cashPanelTitle(swaps, Boolean(trading))}
+        totalUsd={trading ? trading.equityUsd : walletCro ? walletCro.usd || wallet.equityUsd : wallet.equityUsd}
+        legs={deskCashLegs({
+          chain,
+          live: swaps,
+          paperCashUsd: desk.portfolio.cashUsd,
+          nativePriceUsd: wallet.solPriceUsd,
+          trading,
+          wallet,
+          preferWallet: !trading,
+        })}
+        chain={chain}
+        walletUsdc={wallet.usdc}
+        note={
+          trading && profit >= 1
+            ? `Profit ${usd(profit)} · ${shortAddress(trading.address)}`
+            : walletCro?.onPos
+              ? `${formatCro(walletCro.pos)} on Cronos POS. Send it to Cronos EVM to trade.`
+              : undefined
+        }
+      />
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label={swaps ? "Signed tickets" : "Sim book"} value={swaps ? String(fills.length) : usd(desk.portfolio.equityUsd)} sub={<Spark values={equitySeries} />} />
         <Stat
@@ -2677,18 +2735,10 @@ function Book({
             trading
               ? usd(trading.equityUsd)
               : walletCro
-                ? formatCroEvm(walletCro.cro)
+                ? usd(walletCro.usd || wallet.equityUsd)
                 : usd(wallet.equityUsd)
           }
-          sub={
-            trading
-              ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC · profit ${usd(profit)} · ${shortAddress(trading.address)}`
-              : walletCro
-                ? walletCro.onPos
-                  ? `${formatCro(walletCro.pos)} on Cronos POS`
-                  : `${walletCro.usd > 0 ? usd(walletCro.usd) : "Price pending"} · ${wallet.usdc.toFixed(2)} USDC`
-                : `${wallet.sol.toFixed(3)} ${copy.native} · ${wallet.usdc.toFixed(2)} USDC`
-          }
+          sub={trading && profit >= 1 ? `Profit ${usd(profit)}` : walletCro?.onPos ? `${formatCro(walletCro.pos)} on POS` : undefined}
         />
         <Stat label="Hit rate" value={`${winRate.toFixed(0)}%`} sub={`${wins}W / ${losses}L`} />
         <Stat label="Expectancy" value={usd(stats.expectancyUsd)} sub={`PF ${stats.profitFactor === null ? "—" : Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"}`} />

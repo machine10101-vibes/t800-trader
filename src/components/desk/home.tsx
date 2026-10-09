@@ -1,11 +1,13 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
+import type { CashLeg } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { Pill } from "./bits";
+import { CashPanel, cashPanelTitle } from "./CashLegs";
 import { TokenLogo } from "./TokenLogo";
 
 const pageStartedAt = Date.now();
@@ -24,6 +26,9 @@ export function Home({
   desk,
   chain = "solana",
   balanceUsd,
+  cashLegs = [],
+  cashArmed = false,
+  walletUsdc,
   busy,
   closingId,
   closeError,
@@ -37,6 +42,9 @@ export function Home({
   desk: DeskPayload;
   chain?: ChainId;
   balanceUsd: number;
+  cashLegs?: CashLeg[];
+  cashArmed?: boolean;
+  walletUsdc?: number;
   busy: boolean;
   closingId: string | null;
   closeError: { id: string; message: string } | null;
@@ -135,6 +143,14 @@ export function Home({
           />
         </div>
       </section>
+
+      <CashPanel
+        title={cashPanelTitle(real, cashArmed)}
+        totalUsd={balanceUsd}
+        legs={cashLegs}
+        chain={chain}
+        walletUsdc={walletUsdc}
+      />
 
       <section className="neon p-5 sm:p-6" aria-label="What the bot is doing">
         <h3 className="text-lg font-medium">What the bot is doing</h3>
