@@ -100,10 +100,10 @@ export function decideRoute(
   vvsOut: bigint | null,
   enabled: Partial<Record<CronosVenue, boolean>> = {},
 ): { venue: CronosVenue; amountOut: bigint } | null {
-  const use = (venue: CronosVenue) => enabled[venue] !== false;
-  const wolf = use("wolfswap") && wolfOut && wolfOut > 0n ? wolfOut : null;
-  const vvs = use("vvs") && vvsOut && vvsOut > 0n ? vvsOut : null;
-  const cro = use("crotrade") && vvsOut && vvsOut > 0n ? afterFee(vvsOut, CRO_TRADE_FEE_BPS) : null;
+  const allowed = (venue: CronosVenue) => enabled[venue] !== false;
+  const wolf = allowed("wolfswap") && wolfOut && wolfOut > 0n ? wolfOut : null;
+  const vvs = allowed("vvs") && vvsOut && vvsOut > 0n ? vvsOut : null;
+  const cro = allowed("crotrade") && vvsOut && vvsOut > 0n ? afterFee(vvsOut, CRO_TRADE_FEE_BPS) : null;
   const picks: { venue: CronosVenue; amountOut: bigint }[] = [];
   if (wolf) picks.push({ venue: "wolfswap", amountOut: wolf });
   if (vvs) picks.push({ venue: "vvs", amountOut: vvs });
