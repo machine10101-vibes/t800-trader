@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { closedCandles, enoughFrameBars, sourceFrame } from "./frames";
+import { closedCandles, enoughFrameBars, frameWarmOrder, sourceFrame } from "./frames";
 import type { Candle } from "@/lib/types";
 
 function bar(time: number): Candle {
@@ -19,6 +19,14 @@ describe("closedCandles", () => {
   it("always reads a native 5-minute series", () => {
     assert.equal(sourceFrame("solana", "5m"), "5m");
     assert.equal(sourceFrame("cronos", "5m"), "5m");
+    assert.equal(sourceFrame("cronos", "15m"), "15m");
+    assert.equal(sourceFrame("cronos", "1h"), "1h");
+    assert.equal(sourceFrame("cronos", "4h"), "4h");
+  });
+
+  it("warms Cronos 15-minute before 5-minute so a minute 429 cannot empty the book", () => {
+    assert.deepEqual(frameWarmOrder("cronos"), ["15m", "5m", "1h", "4h"]);
+    assert.deepEqual(frameWarmOrder("solana"), ["5m", "15m", "1h", "4h"]);
   });
 
   it("accepts a short 4-hour tape before thirty bars exist", () => {

@@ -82,7 +82,8 @@ describe("frame roll-up", () => {
     assert.ok((filled["4h"]?.length ?? 0) >= 30);
     assert.equal(sourceFrame("cronos", "5m"), "5m");
     assert.equal(sourceFrame("cronos", "15m"), "15m");
-    assert.equal(sourceFrame("cronos", "4h"), "15m");
+    assert.equal(sourceFrame("cronos", "1h"), "1h");
+    assert.equal(sourceFrame("cronos", "4h"), "4h");
     assert.equal(sourceFrame("solana", "5m"), "5m");
     assert.equal(sourceFrame("solana", "1h"), "15m");
     assert.equal(sourceFrame("solana", "4h"), "4h");
