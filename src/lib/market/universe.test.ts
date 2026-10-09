@@ -29,6 +29,8 @@ describe("Solana universe", () => {
     assert.equal(isStable("USDC"), true);
     assert.equal(isQuote("SOL"), true);
     assert.equal(isQuote("WSOL"), true);
+    assert.equal(isQuote("CRO"), true);
+    assert.equal(isQuote("WCRO"), true);
     assert.equal(isQuote("BONK"), false);
     assert.equal(classifySector("JUP", "Jupiter"), "DEX");
     assert.equal(classifySector("BONK", "Bonk"), "Meme");

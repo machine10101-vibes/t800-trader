@@ -124,7 +124,7 @@ const WATCH_BY_MINT = new Map(WATCHLIST.map((t) => [t.mint, t]));
 const WATCH_BY_SYMBOL = new Map(WATCHLIST.map((t) => [t.symbol.toUpperCase(), t]));
 
 const STABLE_SYMS = new Set(["USDC", "USDT", "USD1", "PYUSD", "USDS", "DAI", "FDUSD", "CASH"]);
-const QUOTE_SYMS = new Set(["SOL", "WSOL", "USDC", "USDT"]);
+const QUOTE_SYMS = new Set(["SOL", "WSOL", "USDC", "USDT", "CRO", "WCRO"]);
 const WRAPPED_OR_FOREIGN = new Set([
   "WETH",
   "ETH",

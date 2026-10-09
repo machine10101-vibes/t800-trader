@@ -60,14 +60,21 @@ export function armButton(running: boolean): { action: "start" | "stop"; label: 
   return running ? { action: "stop", label: "Disarm the bot" } : { action: "start", label: "Arm the bot" };
 }
 
-/** Real saved book, with research left empty until the tape returns. Does not invent prices or equity. */
-export function shellDesk(state: AppState): DeskPayload {
+/** Real saved book. A later runner or resume pass can keep the last scored tape. */
+export function shellDesk(
+  state: AppState,
+  keep?: Pick<
+    DeskPayload,
+    "research" | "tapes" | "tapeDots" | "regime" | "universeSize" | "eliminated" | "candidatesScanned" | "whatCouldBeWrong"
+  > | null,
+): DeskPayload {
+  const scored = Boolean(keep?.research?.length);
   return {
-    regime: loadingRegime(),
-    research: [],
-    universeSize: 0,
-    eliminated: 0,
-    candidatesScanned: 0,
+    regime: scored && keep?.regime ? keep.regime : loadingRegime(),
+    research: keep?.research ?? [],
+    universeSize: keep?.universeSize ?? 0,
+    eliminated: keep?.eliminated ?? 0,
+    candidatesScanned: keep?.candidatesScanned ?? 0,
     portfolio: state.portfolio,
     positions: state.positions,
     trades: state.trades,
@@ -75,9 +82,9 @@ export function shellDesk(state: AppState): DeskPayload {
     bot: state.bot,
     config: state.config,
     equityCurve: state.equityCurve,
-    whatCouldBeWrong: [],
-    tapeDots: [],
-    tapes: [],
+    whatCouldBeWrong: keep?.whatCouldBeWrong ?? [],
+    tapeDots: keep?.tapeDots ?? [],
+    tapes: keep?.tapes ?? [],
     stats: bookStats(state.trades, state.portfolio, state.equityCurve),
     learning: learningReport(state.memory),
     generatedAt: new Date().toISOString(),
