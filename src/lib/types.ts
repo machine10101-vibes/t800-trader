@@ -177,7 +177,7 @@ export interface Signal {
   researchScore: number | null;
   createdAt: string;
   /** Which chart produced the setup. Margin can wait for a 4-hour one. */
-  setupFrame?: "15m" | "4h";
+  setupFrame?: "5m" | "15m" | "1h" | "4h";
 }
 
 export interface Position {
@@ -294,6 +294,11 @@ export interface BotConfig {
   solTradeMode: "spot" | "margin" | "both";
   /** When on, SOL margin waits for a 4-hour structure setup, not a 15-minute continuation. */
   marginOnFourHour: boolean;
+  /**
+   * Charts the bot uses to find and confirm a buy. The shortest one that is on
+   * finds the setup. Longer ones that stay on must not fight it.
+   */
+  logicFrames: Array<"5m" | "15m" | "1h" | "4h">;
   /**
    * Books saved before live swaps were the default have no rev and are switched on once.
    * After that, an explicit off stays off.

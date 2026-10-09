@@ -2,13 +2,16 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   commitTicketCap,
+  logicFramesRule,
   multipliersForMode,
   nextSettingsDraft,
   normalizeArmFundsUsd,
   normalizeBuySizeUsd,
   normalizeCronosQuote,
+  normalizeLogicFrames,
   normalizeMarginOnFourHour,
   resolveSolTradeMode,
+  toggleLogicFrame,
   usdcToLoad,
 } from "./deskSettings";
 import { DEFAULT_CONFIG, normalizeConfig } from "./store";
@@ -37,6 +40,25 @@ describe("sol trade mode", () => {
     assert.deepEqual(multipliersForMode("spot", []), []);
     assert.deepEqual(multipliersForMode("margin", []), [5, 10]);
     assert.deepEqual(multipliersForMode("both", [10]), [10]);
+  });
+});
+
+describe("logic frames", () => {
+  it("keeps the 15-minute path when a book never stored the setting", () => {
+    assert.deepEqual(normalizeLogicFrames(undefined), ["15m", "1h", "4h"]);
+    assert.deepEqual(normalizeLogicFrames([]), ["15m", "1h", "4h"]);
+    assert.deepEqual(normalizeLogicFrames(["4h", "nope", "5m", "4h"]), ["5m", "4h"]);
+    assert.deepEqual(normalizeConfig({}).logicFrames, ["15m", "1h", "4h"]);
+    assert.deepEqual(normalizeConfig({ logicFrames: ["5m"] }).logicFrames, ["5m"]);
+  });
+
+  it("will not turn off the last chart", () => {
+    assert.deepEqual(toggleLogicFrame(["15m"], "15m", false), ["15m"]);
+    assert.deepEqual(toggleLogicFrame(["15m", "4h"], "15m", false), ["4h"]);
+    assert.deepEqual(toggleLogicFrame(["15m"], "5m", true), ["5m", "15m"]);
+    assert.match(logicFramesRule(["15m", "1h", "4h"]), /15-minute chart/);
+    assert.match(logicFramesRule(["4h"]), /4-hour chart/);
+    assert.doesNotMatch(logicFramesRule(["4h"]), /then checks/);
   });
 });
 

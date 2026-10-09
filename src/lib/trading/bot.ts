@@ -335,11 +335,15 @@ export async function tickBot(
           const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
           const decision = deskEntrySignals(
             token,
-            { m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
+            { m5: frames["5m"], m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
             token.researchScore,
             false,
             tapeCtx,
-            { mode, marginOnFourHour: chain === "solana" && next.config.marginOnFourHour },
+            {
+              mode,
+              marginOnFourHour: chain === "solana" && next.config.marginOnFourHour,
+              logicFrames: next.config.logicFrames,
+            },
           );
           if (decision.missing) {
             blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
@@ -348,7 +352,9 @@ export async function tickBot(
           const found = decision.signals.filter(
             (signal) =>
               signal.side === "long" &&
-              (signal.setupFrame === "4h" ? true : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
+              (signal.setupFrame === "4h" || signal.setupFrame === "1h"
+                ? true
+                : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
           );
           signals.push(...found);
           if (!found.length) {

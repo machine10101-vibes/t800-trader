@@ -96,6 +96,8 @@ describe("home", () => {
     assert.match(alwaysOnNote(false), /npm run desk/);
     assert.match(alwaysOnNote(true), /desk runner/);
     assert.match(alwaysOnNote(true), /close this browser/);
+    assert.ok(planRules({ ...solanaDefaults(), logicFrames: ["4h"] }).some((r) => r.includes("4-hour chart") && !r.includes("then checks")));
+    assert.ok(planRules({ ...solanaDefaults(), logicFrames: ["5m", "15m"] }).some((r) => r.includes("5-minute chart") && r.includes("15-minute")));
   });
 
   it("sums closed results and words every exit", () => {
