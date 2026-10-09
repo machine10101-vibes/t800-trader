@@ -69,7 +69,7 @@ export function paintRegime(facts: RegimeFacts): Pick<
   }
   crowded.push(cronos ? "Boosted or launchpad Cronos tape" : "Paid Dexscreener boosts / launchpad tape");
   overlooked.push(
-    cronos ? "Liquid VVS and cro.trade books with measurable usage" : "Fee-switch / LST / perps venues with measurable usage",
+    cronos ? "Liquid WolfSwap, VVS, and cro.trade books with measurable usage" : "Fee-switch / LST / perps venues with measurable usage",
   );
 
   const stanceWhy =
@@ -97,7 +97,7 @@ export function paintRegime(facts: RegimeFacts): Pick<
   const narratives =
     stance === "risk-on"
       ? cronos
-        ? ["CRO beta", "VVS / cro.trade flow", "Selective memes only with liquidity"]
+        ? ["CRO beta", "WolfSwap / VVS flow", "Selective memes only with liquidity"]
         : ["SOL beta", "DEX flow", "Selective memes only with liquidity"]
       : stance === "defensive"
         ? cronos

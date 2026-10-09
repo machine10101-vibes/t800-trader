@@ -18,6 +18,7 @@ import {
   quoteCronos,
   type CronosRoute,
 } from "./route";
+import { buildVvsCall } from "./vvs";
 import {
   ARM_ALREADY_FUNDED,
   DISARM_RETURN,
@@ -191,6 +192,20 @@ async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeI
     await ensureAllowance(account, src, call.to, route.amountIn);
     return sendFrom(account, call);
   }
+  if (route.venue === "vvs") {
+    const src = route.path[0];
+    if (!src) throw new Error("VVS quote has no input token");
+    const call = buildVvsCall({
+      method: "swapExactTokensForTokens",
+      amountIn: route.amountIn,
+      amountOutMin: croTradeMinOut(route.amountOut),
+      path: route.path,
+      recipient: account.address,
+      deadline: deadline(),
+    });
+    await ensureAllowance(account, src, call.to, route.amountIn);
+    return sendFrom(account, call);
+  }
   const call = buildCroTradeCall({
     amountIn: route.amountIn,
     amountOutMin: croTradeMinOut(route.amountOut),
@@ -211,7 +226,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   const account = cronosTradingAccount(session.address);
   if (!account) throw new Error("Arm the bot and approve the wallet signature before a swap can be sent.");
   if (order.side === "short") {
-    throw new Error("WolfSwap and cro.trade are spot buys and sells. A live short is not sent.");
+    throw new Error("WolfSwap, VVS, and cro.trade are spot buys and sells. A live short is not sent.");
   }
   const mint = order.mint as `0x${string}`;
   if (!mint.toLowerCase().startsWith("0x")) throw new Error("This ticket is not a Cronos token");

@@ -9,7 +9,8 @@ export const PAPER_SLIP_BPS = 8;
  * Jupiter perps charge about 6 bps of size per side. SOL/USDC routes are a few bps.
  * Smaller Solana names route through 0.25% pools.
  * Cronos quotes already include the pool. WolfSwap's own fee estimate is 0.5% of output,
- * so a practice fill pays that. cro.trade's 0.9% is only used when that quote is the one sent.
+ * so a practice fill pays that. A direct VVS fill uses the pool quote. cro.trade's 0.9%
+ * is only used when that quote is the one sent.
  */
 export const CRONOS_VENUE_FEE_BPS = 50;
 
