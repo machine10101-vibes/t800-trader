@@ -10,7 +10,7 @@ import { rMultiple } from "@/lib/trading/risk";
 import { useEffect, useState, type ReactNode } from "react";
 import { cashLegs } from "@/lib/cashHoldings";
 import { Label, Pill, Spark, Stat, Tone } from "./bits";
-import { CashLegs, WalletUsdcChip } from "./CashLegs";
+import { CashPanel, WalletUsdcChip } from "./CashLegs";
 import { TokenLogo } from "./TokenLogo";
 
 export function WatchScreen({
@@ -101,25 +101,25 @@ export function WatchScreen({
           <p className="text-sm text-[var(--muted)]">Reading {shortAddress(address)}…</p>
         ) : (
           <>
+            {view.sol !== null ? (
+              <CashPanel
+                title="Wallet cash"
+                totalUsd={view.walletEquityUsd ?? undefined}
+                legs={cashLegs({
+                  chain,
+                  usdc: view.usdc ?? 0,
+                  native: view.sol,
+                  nativePriceUsd: view.solPriceUsd,
+                })}
+                chain={chain}
+                walletUsdc={view.usdc ?? 0}
+              />
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat
                 label="Wallet mark"
                 value={view.walletEquityUsd === null ? "—" : usd(view.walletEquityUsd)}
-                sub={
-                  view.sol === null ? (
-                    "Chain read pending"
-                  ) : (
-                    <CashLegs
-                      legs={cashLegs({
-                        chain,
-                        usdc: view.usdc ?? 0,
-                        native: view.sol,
-                        nativePriceUsd: view.solPriceUsd,
-                      })}
-                      chain={chain}
-                    />
-                  )
-                }
+                sub={view.sol === null ? "Chain read pending" : undefined}
               />
               <Stat label="Paper equity" value={view.paperEquityUsd === null ? "—" : usd(view.paperEquityUsd)} sub={<Spark values={view.equityCurve} />} />
               <Stat

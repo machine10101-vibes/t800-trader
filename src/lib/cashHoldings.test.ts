@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cashLegLine, cashLegs, deskCashLegs, formatCashAmount, formatCashUsd, nativeCashSymbol } from "./cashHoldings";
+import { cashDeskLabel, cashLegLine, cashLegs, deskCashLegs, formatCashAmount, formatCashUsd, nativeCashSymbol } from "./cashHoldings";
 
 describe("cash holdings", () => {
   it("lists USDC and SOL on Solana, USDC and CRO on Cronos", () => {
@@ -82,5 +82,11 @@ describe("cash holdings", () => {
       emptyPaperShowsWallet.map((leg) => leg.amount),
       [9, 2],
     );
+  });
+
+  it("labels practice, wallet, and trading cash", () => {
+    assert.equal(cashDeskLabel(false, false), "Practice cash");
+    assert.equal(cashDeskLabel(true, false), "Wallet cash");
+    assert.equal(cashDeskLabel(true, true), "Trading cash");
   });
 });

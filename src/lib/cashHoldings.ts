@@ -51,6 +51,12 @@ export function cashLegLine(leg: CashLeg): string {
   return `${qty} · ${formatCashUsd(leg.usd)}`;
 }
 
+export function cashDeskLabel(live: boolean, armed: boolean): "Trading cash" | "Wallet cash" | "Practice cash" {
+  if (armed) return "Trading cash";
+  if (live) return "Wallet cash";
+  return "Practice cash";
+}
+
 /** Trading key first, then the connected wallet, then paper cash as USDC. */
 export function deskCashLegs(input: {
   chain: ChainId;
