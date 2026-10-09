@@ -263,7 +263,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
           );
         }
       }
-      const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "cro" });
+      const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "cro", venues: order.venues });
       const signature = await sendRoute(account, route, nativeIn);
       const qty = Number(formatUnits(route.amountOut, 18));
       const price = qty > 0 ? order.notionalUsd / qty : mark;
@@ -275,7 +275,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
       );
     }
     const amountIn = units(order.notionalUsd, 6);
-    const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "usdc" });
+    const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "usdc", venues: order.venues });
     const signature = await sendRoute(account, route, false);
     const qty = Number(formatUnits(route.amountOut, 18));
     const price = qty > 0 ? order.notionalUsd / qty : mark;
@@ -294,7 +294,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
     }
   }
   if (amountIn <= 0n) throw new Error("ALREADY_FLAT: trading key does not hold this token");
-  const route = await quoteCronos({ token: mint, amountIn, side: "sell", quote });
+  const route = await quoteCronos({ token: mint, amountIn, side: "sell", quote, venues: order.venues });
   const signature = await sendRoute(account, { ...route, amountIn }, nativeIn);
   const out = Number(formatUnits(route.amountOut, cronosQuoteDecimals(quote)));
   const qty = Number(formatUnits(amountIn, 18));

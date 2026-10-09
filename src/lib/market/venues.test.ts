@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVenues, venueAllowed, venueForDex, venueSummary } from "./venues";
+import {
+  cronosVenueFlags,
+  cronosVenuesOn,
+  normalizeVenues,
+  venueAllowed,
+  venueForDex,
+  venueOptionsFor,
+  venueSummary,
+} from "./venues";
 
 describe("venueForDex", () => {
   it("folds pool ids into the platforms a user can pick", () => {
@@ -13,6 +21,8 @@ describe("venueForDex", () => {
     assert.equal(venueForDex("pump-fun"), "pump");
     assert.equal(venueForDex("jupiter"), "jupiter");
     assert.equal(venueForDex("vvs"), "vvs");
+    assert.equal(venueForDex("wolfswap"), "wolfswap");
+    assert.equal(venueForDex("cro.trade"), "crotrade");
     assert.equal(venueForDex("phoenix"), "other");
     assert.equal(venueForDex("manifest"), "other");
   });
@@ -35,6 +45,7 @@ describe("normalizeVenues", () => {
     assert.equal(normalizeVenues(undefined).includes("raydium"), true);
     assert.equal(normalizeVenues(undefined).includes("pump"), true);
     assert.deepEqual(normalizeVenues(["orca", "nope", "orca"]), ["orca"]);
+    assert.deepEqual(normalizeVenues(["vvs", "wolfswap", "nope"]), ["vvs", "wolfswap"]);
     assert.deepEqual(normalizeVenues([]), []);
   });
 
@@ -42,5 +53,27 @@ describe("normalizeVenues", () => {
     assert.equal(venueSummary(normalizeVenues(undefined)), "all venues");
     assert.equal(venueSummary(["orca", "raydium"]), "Raydium, Orca");
     assert.equal(venueSummary([]), "no venue");
+    assert.equal(venueSummary(["wolfswap", "vvs", "crotrade"], "cronos"), "all venues");
+    assert.equal(venueSummary(["vvs"], "cronos"), "VVS Finance");
+    assert.equal(venueSummary(["raydium", "orca"], "cronos"), "all venues");
+    assert.equal(venueSummary([], "cronos"), "no venue");
+  });
+
+  it("treats a saved Solana venue list as every Cronos DEX on", () => {
+    assert.deepEqual(cronosVenuesOn(["raydium", "orca"]), ["wolfswap", "vvs", "crotrade"]);
+    assert.deepEqual(cronosVenuesOn(["vvs"]), ["vvs"]);
+    assert.deepEqual(cronosVenuesOn([]), []);
+    assert.deepEqual(cronosVenueFlags(["crotrade"]), { wolfswap: false, vvs: false, crotrade: true });
+  });
+
+  it("lists Solana DEXes on Solana and Cronos DEXes on Cronos", () => {
+    assert.deepEqual(
+      venueOptionsFor("solana").map((row) => row.id),
+      ["raydium", "orca", "meteora", "jupiter", "pump", "other"],
+    );
+    assert.deepEqual(
+      venueOptionsFor("cronos").map((row) => row.id),
+      ["wolfswap", "vvs", "crotrade"],
+    );
   });
 });

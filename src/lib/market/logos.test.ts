@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CRIMECAT_MINT, CRONOS_USDC, SOL_MINT, ULTCAT_MINT, WCRO_MINT, bookTokens } from "./universe";
-import { leadingTokenSymbol, tokenInitials, tokenLogoUrl } from "./logos";
+import { leadingTokenSymbol, tokenInitials, tokenLogoUrl, venueLogoUrl } from "./logos";
 
 describe("token logos", () => {
   it("maps every book token on Solana and Cronos to a logo", () => {
@@ -35,5 +35,17 @@ describe("token logos", () => {
     assert.equal(leadingTokenSymbol("SOL: 4-hour chart has not loaded"), "SOL");
     assert.equal(leadingTokenSymbol("CRIMECAT limit bid at 0.001"), "CRIMECAT");
     assert.equal(leadingTokenSymbol("Emergency stop is on"), null);
+  });
+
+  it("maps every Settings DEX to its actual logo", () => {
+    for (const id of ["raydium", "orca", "meteora", "jupiter", "pump", "wolfswap", "vvs", "crotrade"]) {
+      const url = venueLogoUrl(id);
+      assert.ok(url, `${id} needs a logo`);
+      assert.match(url, /\/t800-trader\/logos\//);
+    }
+    assert.equal(venueLogoUrl("other"), null);
+    assert.match(venueLogoUrl("wolfswap") ?? "", /wolfswap\.svg$/);
+    assert.match(venueLogoUrl("vvs") ?? "", /vvs\.jpg$/);
+    assert.match(venueLogoUrl("crotrade") ?? "", /crotrade\.png$/);
   });
 });

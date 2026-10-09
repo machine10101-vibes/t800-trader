@@ -109,3 +109,21 @@ export function tokenInitials(symbol: string): string {
   if (clean.length <= 2) return clean || "?";
   return clean.slice(0, 2);
 }
+
+const BASE = "/t800-trader/logos";
+
+/** Official DEX marks shipped with the desk. */
+const VENUE_LOGO: Record<string, string> = {
+  raydium: `${BASE}/raydium.jpg`,
+  orca: `${BASE}/orca.jpg`,
+  meteora: `${BASE}/meteora.png`,
+  jupiter: `${BASE}/jupiter.jpg`,
+  pump: `${BASE}/pump.jpg`,
+  wolfswap: `${BASE}/wolfswap.svg`,
+  vvs: `${BASE}/vvs.jpg`,
+  crotrade: `${BASE}/crotrade.png`,
+};
+
+export function venueLogoUrl(id: string): string | null {
+  return VENUE_LOGO[id] ?? null;
+}

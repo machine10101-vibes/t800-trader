@@ -1,4 +1,5 @@
 import { encodeFunctionData, type Hex } from "viem";
+import { cronosVenueFlags } from "@/lib/market/venues";
 import { minOut } from "./arm";
 import { CRO_TRADE_FEE_BPS, CRO_TRADE_ROUTER, SLIPPAGE_BPS, USDC, VVS_ROUTER, WCRO } from "./constants";
 import { cronosClient } from "./wallet";
@@ -193,17 +194,19 @@ export async function quoteCronos(input: {
   amountIn: bigint;
   side: "buy" | "sell";
   quote?: "usdc" | "cro";
+  venues?: string[];
 }): Promise<CronosRoute> {
   const path = cronosSwapPath(input.token, input.side, input.quote === "cro" ? "cro" : "usdc");
   const src = path[0];
   const dst = path[path.length - 1];
   if (!src || !dst) throw new Error("This ticket has no Cronos path");
+  const enabled = cronosVenueFlags(input.venues);
   const [wolf, vvs] = await Promise.all([
-    quoteWolfswap(src, dst, input.amountIn).catch(() => null),
-    quoteVvs(input.amountIn, path),
+    enabled.wolfswap ? quoteWolfswap(src, dst, input.amountIn).catch(() => null) : Promise.resolve(null),
+    enabled.vvs || enabled.crotrade ? quoteVvs(input.amountIn, path) : Promise.resolve(null),
   ]);
-  const picked = decideRoute(wolf?.amountOut ?? null, vvs);
-  if (!picked) throw new Error("WolfSwap, VVS, and cro.trade have no route for this ticket");
+  const picked = decideRoute(wolf?.amountOut ?? null, vvs, enabled);
+  if (!picked) throw new Error("No enabled DEX has a route for this ticket");
   return {
     venue: picked.venue,
     side: input.side,

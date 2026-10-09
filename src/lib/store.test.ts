@@ -127,6 +127,7 @@ describe("store", () => {
     assert.equal(next.venues.includes("raydium"), true);
     assert.equal(next.venues.includes("pump"), true);
     assert.deepEqual(normalizeConfig({ venues: ["orca", "nope"] }).venues, ["orca"]);
+    assert.deepEqual(normalizeConfig({ venues: ["vvs", "wolfswap", "nope"] }).venues, ["vvs", "wolfswap"]);
     assert.deepEqual(normalizeConfig({ venues: [] }).venues, []);
     assert.equal(next.allowShorts, false);
     assert.equal(normalizeConfig({ allowShorts: true }).allowShorts, false);

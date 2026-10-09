@@ -818,6 +818,11 @@ html[data-desk="cronos"] .desk-scroll::-webkit-scrollbar-thumb {
   box-shadow: 0 0 0 1px rgba(7, 24, 51, 0.08);
 }
 
+.venue-logo {
+  object-fit: contain;
+  background: #0b1220;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
