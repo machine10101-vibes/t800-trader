@@ -1,4 +1,4 @@
-import type { ChainId } from "@/lib/chain";
+import { sameMint, type ChainId } from "@/lib/chain";
 import { cachedOhlcv, loadMarket } from "@/lib/market/providers";
 import { foldCandles, tapeRead } from "@/lib/market/tape";
 import { bookTokens, isActiveBook, SOL_MINT } from "@/lib/market/universe";
@@ -323,7 +323,7 @@ export async function runResearch(
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const named = bookTokens(chain);
   const memeCap = chain === "cronos" ? named.filter((token) => token.sector === "Meme").length : config.allowMemes ? 2 : 0;
-  const finalists = pickFinalists(scored, memeCap, Math.max(6, named.length));
+  const finalists = keepNamedScores(scored, pickFinalists(scored, memeCap, Math.max(6, named.length)), chain);
   const research = finalists.map((c) => thesisFrom(c, market.regime));
 
   const value = {
@@ -348,11 +348,31 @@ function screenKey(config: BotConfig): string {
   ].join("|");
 }
 
+/** Named book tokens stay on the Coins tab even when the finalist cap would drop them. */
+export function keepNamedScores(
+  scored: ScoredCandidate[],
+  picked: ScoredCandidate[],
+  chain: ChainId,
+): ScoredCandidate[] {
+  const out = [...picked];
+  const seen = new Set(out.map((row) => row.mint.toLowerCase()));
+  for (const token of bookTokens(chain)) {
+    const key = token.mint.toLowerCase();
+    if (seen.has(key)) continue;
+    const extra = scored.find((row) => sameMint(row.mint, token.mint));
+    if (!extra) continue;
+    out.push(extra);
+    seen.add(key);
+  }
+  return out;
+}
+
 function collapseMints(rows: TokenCandidate[]): TokenCandidate[] {
   const best = new Map<string, TokenCandidate>();
   for (const row of rows) {
-    const prev = best.get(row.mint);
-    if (!prev || row.liquidityUsd > prev.liquidityUsd) best.set(row.mint, row);
+    const key = row.mint.startsWith("0x") || row.mint.startsWith("0X") ? row.mint.toLowerCase() : row.mint;
+    const prev = best.get(key);
+    if (!prev || row.liquidityUsd > prev.liquidityUsd) best.set(key, row);
   }
   return [...best.values()];
 }

@@ -168,6 +168,8 @@ function ChainDesk({
   const lastTradeId = useRef<string | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
+  const deskRef = useRef(desk);
+  deskRef.current = desk;
   const busyRef = useRef(false);
   const controlGen = useRef(0);
   const runnerHostRef = useRef(false);
@@ -217,8 +219,9 @@ function ChainDesk({
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!wallet) return;
+    if (!wallet && !getActiveWallet(chain) && !readLastWallet(chain)) return;
     try {
+      if (!getActiveWallet(chain) && readLastWallet(chain)) await resumeSavedBook(chain);
       applyDesk(await loadDesk(false, chain));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Desk refresh failed");
@@ -307,6 +310,9 @@ function ChainDesk({
     void resumeSavedBook(chain).then((book) => {
       if (cancelled || !book) return;
       applyDesk(shellDesk(book));
+      void loadDesk(false, chain).then((next) => {
+        if (!cancelled) applyDesk(next);
+      }).catch(() => undefined);
     });
     return () => {
       cancelled = true;
@@ -374,11 +380,11 @@ function ChainDesk({
   }, [applyDesk, chain, disconnect, wallet]);
 
   useEffect(() => {
-    if (!wallet) return;
+    if (!wallet && !getActiveWallet(chain) && !readLastWallet(chain)) return;
     void refresh();
     const id = setInterval(refresh, 20_000);
     return () => clearInterval(id);
-  }, [refresh, wallet]);
+  }, [chain, refresh, wallet]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -457,7 +463,7 @@ function ChainDesk({
       try {
         await attachWallet(book.wallet, Math.max(0, book.state.portfolio.equityUsd), chain);
         await saveState(book.state, chain);
-        if (!busyRef.current) applyDesk(shellDesk(book.state), { keepError: true });
+        if (!busyRef.current) applyDesk(shellDesk(book.state, deskRef.current), { keepError: true });
       } catch {
         // The runner keeps the book. The next poll retries.
       }
@@ -2225,7 +2231,9 @@ function Overview({
 
 function coinRows(desk: DeskPayload, chain: ChainId) {
   return bookTokens(chain).map((token) => {
-    const research = desk.research.find((row) => sameMint(row.candidate.mint, token.mint));
+    const research = desk.research.find(
+      (row) => sameMint(row.candidate.mint, token.mint) || row.ticker === token.symbol,
+    );
     const tape = desk.tapes.find((row) => sameMint(row.mint, token.mint));
     const signal = desk.signals.find((row) => row.symbol === token.symbol || sameMint(row.mint, token.mint));
     const blocked = (desk.bot.blocked ?? []).find((line) => line.startsWith(`${token.symbol}:`));

@@ -56,6 +56,21 @@ describe("shellDesk", () => {
     const fresh = shellDesk(emptyState());
     assert.equal(fresh.bot.running, false);
     assert.equal(fresh.tapes.length, 0);
+
+    const kept = shellDesk(armed, {
+      research: [{ ticker: "CRO", researchScore: 54.3, candidate: { mint: WCRO_MINT } }] as never,
+      tapes: [{ mint: WCRO_MINT, symbol: "CRO", poolAddress: "pool", change15m: 0.4 }],
+      tapeDots: [],
+      regime: shell.regime,
+      universeSize: 6,
+      eliminated: 0,
+      candidatesScanned: 6,
+      whatCouldBeWrong: [],
+    });
+    assert.equal(kept.research[0]?.ticker, "CRO");
+    assert.equal(kept.research[0]?.researchScore, 54.3);
+    assert.equal(kept.tapes[0]?.symbol, "CRO");
+    assert.equal(kept.bot.running, true);
   });
 });
 
