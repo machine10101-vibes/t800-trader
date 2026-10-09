@@ -1,7 +1,8 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
-import { tokenInitials, tokenLogoUrl } from "@/lib/market/logos";
+import { tokenInitials, tokenLogoUrl, venueLogoUrl } from "@/lib/market/logos";
+import { venueLabel } from "@/lib/market/venues";
 import { useState } from "react";
 
 export type TokenLogoSize = "xs" | "sm" | "md" | "lg" | "xl";
@@ -42,6 +43,44 @@ export function TokenLogo({
   }
   return (
     // Static export talks to CoinGecko and a local CRIMECAT mark. next/image cannot rewrite those.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      title={label}
+      width={36}
+      height={36}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className={box}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+export function VenueLogo({
+  id,
+  size = "sm",
+  className = "",
+}: {
+  id: string;
+  size?: TokenLogoSize;
+  className?: string;
+}) {
+  const src = venueLogoUrl(id);
+  const [failed, setFailed] = useState(false);
+  const label = venueLabel(id);
+  const box = `token-logo venue-logo ${SIZE[size]} ${className}`.trim();
+  if (!src || failed) {
+    return (
+      <span className={`${box} token-logo-fallback`} aria-hidden title={label}>
+        {tokenInitials(label)}
+      </span>
+    );
+  }
+  return (
+    // Static export serves these from /t800-trader/logos.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}

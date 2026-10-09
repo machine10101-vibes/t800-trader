@@ -277,7 +277,7 @@ export interface BotConfig {
   staleMin: number;
   memeStaleMin: number;
   scratchEnabled: boolean;
-  /** Platform ids from VENUE_OPTIONS. New tickets only open on these pools. */
+  /** Platform ids from the desk's DEX list. New tickets only open on these venues. */
   venues: string[];
   /** When on, buys and sells ask the connected wallet to sign a Jupiter swap. */
   walletSwaps: boolean;

@@ -3,11 +3,11 @@
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
 import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, logicFramesRule, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES, toggleLogicFrame } from "@/lib/deskSettings";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
-import { VENUE_OPTIONS } from "@/lib/market/venues";
+import { cronosVenuesOn, venueOptionsFor, venueSummary, venuesOnFor } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { TokenLogo } from "./TokenLogo";
+import { TokenLogo, VenueLogo } from "./TokenLogo";
 
 export function SettingsPanel({
   chain = "solana",
@@ -73,7 +73,7 @@ export function SettingsPanel({
           {local.allowMemes ? " · meme coins on" : " · meme coins off"}
           {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
-          {chain === "cronos" ? "WolfSwap, VVS, and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
+          {venueSummary(local.venues, chain)}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
@@ -300,58 +300,45 @@ export function SettingsPanel({
         </Section>
       )}
 
-      {chain === "cronos" ? (
-        <Section
-          title="Where it buys"
-          hint={
-            local.cronosQuote === "cro"
-              ? "Every Cronos buy and sell quotes WolfSwap, VVS, and cro.trade. The one that returns more is sent. A buy spends CRO. A sell turns the coin back into CRO."
-              : "Every Cronos buy and sell quotes WolfSwap, VVS, and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
-          }
-        >
-          <Toggle
-            label="WolfSwap"
-            hint="This stays on. The quote is compared with VVS and cro.trade."
-            checked
-            onChange={() => {}}
-          />
-          <Toggle
-            label="VVS Finance"
-            hint="This stays on. The desk sends the VVS router when that quote is the best."
-            checked
-            onChange={() => {}}
-          />
-          <Toggle
-            label="cro.trade"
-            hint="This stays on. Its 0.9% fee is taken off the VVS quote before the comparison."
-            checked
-            onChange={() => {}}
-          />
-        </Section>
-      ) : (
-        <Section
-          title="Where it buys"
-          hint="New buys only use the places you leave on. A buy you already hold stays until it sells, even if you turn that place off."
-        >
-          {VENUE_OPTIONS.map((venue) => (
+      <Section
+        title="Where it buys"
+        hint={
+          chain === "cronos"
+            ? local.cronosQuote === "cro"
+              ? "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends CRO. A ticket you already hold still sells if you turn that place off."
+              : "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends USDC. A ticket you already hold still sells if you turn that place off."
+            : "New buys only use the places you leave on. A buy you already hold stays until it sells, even if you turn that place off."
+        }
+      >
+        {venueOptionsFor(chain).map((venue) => {
+          const on = venuesOnFor(local.venues, chain).includes(venue.id);
+          return (
             <Toggle
               key={venue.id}
               label={venue.label}
               hint={plainVenueHint(venue.id, venue.hint)}
-              checked={local.venues.includes(venue.id)}
-              onChange={(on) => {
-                const venues = on ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
+              mark={<VenueLogo id={venue.id} size="md" />}
+              checked={on}
+              onChange={(next) => {
+                if (chain === "cronos") {
+                  const current = cronosVenuesOn(local.venues);
+                  set({
+                    venues: next ? [...current, venue.id] : current.filter((id) => id !== venue.id),
+                  });
+                  return;
+                }
+                const venues = next ? [...local.venues, venue.id] : local.venues.filter((id) => id !== venue.id);
                 set({ venues });
               }}
             />
-          ))}
-          {local.venues.length === 0 ? (
-            <p className="text-sm text-[var(--crimson)] md:col-span-2">
-              Nothing is turned on, so the next check will not buy anything.
-            </p>
-          ) : null}
-        </Section>
-      )}
+          );
+        })}
+        {venuesOnFor(local.venues, chain).length === 0 ? (
+          <p className="text-sm text-[var(--crimson)] md:col-span-2">
+            Nothing is turned on, so the next check will not buy anything.
+          </p>
+        ) : null}
+      </Section>
 
       <Section title="How often it checks" hint="How often it looks for a new buy, and how many new buys one check can add.">
         <Field
@@ -668,12 +655,15 @@ function logicChartHint(frame: Frame, enabled: Frame[]): string {
 
 function plainVenueHint(id: string, fallback: string): string {
   const hints: Record<string, string> = {
-    raydium: "Buys can use Raydium.",
-    orca: "Buys can use Orca.",
-    meteora: "Buys can use Meteora.",
-    jupiter: "Buys can use Jupiter. The trade still settles on Raydium, Orca, or Meteora.",
-    pump: "Buys can use Pump.fun coins.",
-    other: "Buys can use any other pool, including Phoenix and Lifinity.",
+    raydium: "On lets new buys use Raydium.",
+    orca: "On lets new buys use Orca.",
+    meteora: "On lets new buys use Meteora.",
+    jupiter: "On lets new buys use Jupiter. The trade still settles on Raydium, Orca, or Meteora.",
+    pump: "On lets new buys use Pump.fun coins.",
+    other: "On lets new buys use any other pool, including Phoenix and Lifinity.",
+    wolfswap: "On quotes WolfSwap and can send that swap when it returns the most.",
+    vvs: "On quotes VVS Finance and can send that swap when it returns the most.",
+    crotrade: "On quotes cro.trade after its 0.9% fee and can send that swap when it returns the most.",
   };
   return hints[id] ?? fallback;
 }
@@ -867,11 +857,13 @@ function Toggle({
   hint,
   checked,
   onChange,
+  mark,
 }: {
   label: string;
   hint: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  mark?: ReactNode;
 }) {
   return (
     <button
@@ -879,9 +871,12 @@ function Toggle({
       onClick={() => onChange(!checked)}
       className="flex items-start justify-between gap-3 rounded-2xl border border-[var(--line)] bg-black/20 p-3 text-left"
     >
-      <span>
-        <span className="block text-sm">{label}</span>
-        <span className="mt-1 block text-xs leading-5 text-[var(--faint)]">{hint}</span>
+      <span className="flex min-w-0 items-start gap-3">
+        {mark}
+        <span className="min-w-0">
+          <span className="block text-sm">{label}</span>
+          <span className="mt-1 block text-xs leading-5 text-[var(--faint)]">{hint}</span>
+        </span>
       </span>
       <span
         className={`num mt-0.5 shrink-0 rounded-full px-2 py-1 text-[11px] ${checked ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}

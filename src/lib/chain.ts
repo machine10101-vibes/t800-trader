@@ -74,9 +74,9 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     native: "CRO",
     bookLabel: "CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI",
     walletBook: "CRO + USDC",
-    swapHint: "WolfSwap, VVS, and cro.trade",
+    swapHint: "the DEXes you leave on",
     connectBlurb:
-      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. Settings picks USDC or CRO for each buy. WolfSwap, VVS, and cro.trade are all quoted, and the better one is sent. About 3 CRO on Cronos EVM is enough to arm.",
+      "No demo book. No fallback equity. The Crypto.com Onchain extension approves this origin and switches to Cronos, then the desk reads your real CRO and USDC and sizes the book from that. Settings picks USDC or CRO for each buy, and which DEXes to quote. The better one that is on is sent. About 3 CRO on Cronos EVM is enough to arm.",
     connectFallback: "Connect Cronos wallet",
     installHint: "Install the Crypto.com Onchain extension, then reload this page.",
     armBlurb:
@@ -97,9 +97,9 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
       "No live tickets yet. A swap from the trading key shows up here with a Cronoscan link. The bot trades a 15-minute setup once the 1-hour and 4-hour charts agree, so a quiet day can pass with no trade.",
     explorerName: "Cronoscan",
     settingsWallet:
-      "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes WolfSwap, VVS, and cro.trade and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
+      "On: Arm asks the Crypto.com Onchain extension to sign and moves spare CRO and USDC to a browser trading key. That key quotes the DEXes you leave on and sends the better swap. Arming again while that key still holds a balance asks for a signature and does not move more CRO. Disarm asks the extension to sign, sells open tickets, then returns leftover CRO and USDC. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
     settingsMultiplier:
-      "Pick USDC or CRO in Trading money. A buy spends that coin on WolfSwap, VVS, or cro.trade, and a sell returns the same coin. CRO itself is skipped when the desk spends CRO. Extra size is not used.",
+      "Pick USDC or CRO in Trading money. A buy spends that coin on the DEXes you leave on, and a sell returns the same coin. CRO itself is skipped when the desk spends CRO. Extra size is not used.",
     settingsFive: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsTen: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live CRO and USDC mark.",
