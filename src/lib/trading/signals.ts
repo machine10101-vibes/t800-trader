@@ -5,6 +5,13 @@ import { clamp, id, mean, stdev } from "@/lib/utils";
 export type AtrBand = readonly [number, number];
 export const FOUR_HOUR_ATR: AtrBand = [0.45, 5.2];
 export const FIFTEEN_MIN_ATR: AtrBand = [0.12, 3.2];
+/** Cronos memes print 5–10% 15-minute ranges. The Solana 3.2% cap left that book with no setups. */
+export const CRONOS_FIFTEEN_ATR: AtrBand = [0.08, 14];
+
+export function setupAtrBand(token: Pick<TokenCandidate, "chain">, frame: "5m" | "15m" | "1h" | "4h"): AtrBand {
+  if (frame === "4h") return FOUR_HOUR_ATR;
+  return token.chain === "cronos" ? CRONOS_FIFTEEN_ATR : FIFTEEN_MIN_ATR;
+}
 
 export interface SignalContext {
   stance: MarketRegime["stance"];
@@ -227,7 +234,7 @@ export function buildSignals(
     heldLow &&
     tech.rsi14 >= 46 &&
     tech.rsi14 <= 66 &&
-    ext < 3.2 &&
+    ext < (token.chain === "cronos" ? Math.max(3.2, atr * 1.1) : 3.2) &&
     (tech.closeStrength ?? 0) >= 0.45 &&
     tape >= 0.49 &&
     h1 > -0.5 &&
@@ -342,11 +349,12 @@ function fifteenWatchlist(
   const stance = typeof ctx === "string" ? ctx : ctx.stance;
   if (!token.watchlist) return [];
   if (!tech.lastClose || !tech.rsi14 || !tech.ema9 || !tech.ema21 || !tech.atrPct) return [];
-  if (!atrTradeable(tech.atrPct, FIFTEEN_MIN_ATR)) return [];
+  if (!atrTradeable(tech.atrPct, setupAtrBand(token, "15m"))) return [];
   const price = tech.lastClose;
   const atr = Math.max(tech.atrPct, 0.35);
   const volZ = tech.volumeZ ?? 0;
   const ext = tech.extensionPct ?? 0;
+  const extCap = token.chain === "cronos" ? Math.max(3.5, atr * 1.15) : 3.5;
   const close = tech.closeStrength ?? 0.5;
   const heldLow = tech.priorLow === null || price >= tech.priorLow;
   const underHigh = tech.priorHigh === null || price <= tech.priorHigh;
@@ -366,7 +374,7 @@ function fifteenWatchlist(
     tech.rsi14 >= 48 &&
     tech.rsi14 <= 68 &&
     close >= 0.4 &&
-    ext < 3.5 &&
+    ext < extCap &&
     volZ > -1.2 &&
     heldLow
   ) {
@@ -398,7 +406,7 @@ export function candleSetups(
   if (!tech) return [];
   void allowShorts;
   const found = buildSignals(token, tech, researchScore, false, ctx, band);
-  const extra = band === FIFTEEN_MIN_ATR ? fifteenWatchlist(token, tech, researchScore, false, ctx) : [];
+  const extra = band[0] <= FIFTEEN_MIN_ATR[0] ? fifteenWatchlist(token, tech, researchScore, false, ctx) : [];
   return [...found, ...extra].filter((signal) => signal.side === "long").sort((a, b) => b.confidence - a.confidence);
 }
 

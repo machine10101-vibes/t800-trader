@@ -1,6 +1,6 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
+import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline, withFrameTape } from "@/lib/market/tape";
 import { GAS_CRO } from "@/lib/cronos/constants";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
@@ -332,11 +332,12 @@ export async function tickBot(
             return;
           }
           const frames = charts[i];
+          const marked = chain === "cronos" ? withFrameTape(token, frames) : token;
           const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
           const decision = deskEntrySignals(
-            token,
+            marked,
             { m5: frames["5m"], m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
-            token.researchScore,
+            marked.researchScore,
             false,
             tapeCtx,
             {
@@ -354,7 +355,7 @@ export async function tickBot(
               signal.side === "long" &&
               (signal.setupFrame === "4h" || signal.setupFrame === "1h"
                 ? true
-                : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
+                : solanaKeepEntry(signal.side, marked.flows.m15.priceChangePct)),
           );
           signals.push(...found);
           if (!found.length) {

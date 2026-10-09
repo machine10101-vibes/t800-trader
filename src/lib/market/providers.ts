@@ -20,7 +20,7 @@ import {
   POPULAR_CANDLE_MS,
   poolsToCandle,
 } from "./ohlcvPlan";
-import { pushTapeMark, withCandleTape } from "./tape";
+import { pushTapeMark, withCandleTape, withFrameTape } from "./tape";
 import {
   bookMints,
   bookPools,
@@ -1193,6 +1193,26 @@ async function drainCharts(): Promise<void> {
   }
 }
 
+async function stampVvsBook(candidates: TokenCandidate[]): Promise<TokenCandidate[]> {
+  return Promise.all(
+    candidates.map(async (candidate) => {
+      const book = await loadVvsFrames(candidate.mint).catch(() => null);
+      if (!book) return candidate;
+      const marked = withFrameTape(candidate, {
+        "5m": book.five,
+        "15m": vvsSeries(book, "15m"),
+        "1h": book.hourly,
+        "4h": vvsSeries(book, "4h"),
+      });
+      const minutes = book.minutes.length ? withCandleTape(marked, book.minutes) : marked;
+      if (minutes.priceUsd > 0 && !(candidate.priceUsd > 0)) {
+        return { ...minutes, sources: [...minutes.sources, "vvs:price"] };
+      }
+      return minutes;
+    }),
+  );
+}
+
 async function loadMarketOnce(chain: ChainId): Promise<{
   candidates: TokenCandidate[];
   regime: MarketRegime;
@@ -1248,6 +1268,8 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   );
   if (chain === "solana") {
     candidates = candidates.map((candidate) => applyJupiterTape(candidate, tapes.get(candidate.mint) ?? null));
+  } else {
+    candidates = await stampVvsBook(candidates);
   }
   const stamped = withYields(regime, crossed.yields);
   if (bookComplete(candidates, chain)) markets[chain].cache = { at: Date.now(), candidates, regime: stamped };

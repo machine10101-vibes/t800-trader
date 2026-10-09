@@ -9,7 +9,7 @@ import { analyzeChart, frameBias, type Bias } from "@/lib/market/analysis";
 import { closedCandles, FRAME_LABEL, FRAME_SECONDS, MIN_FOUR_HOUR_BARS, MIN_FRAME_BARS, type Frame } from "@/lib/market/frames";
 import { SOL_MINT } from "@/lib/market/universe";
 import type { BotConfig, Candle, MarketRegime, Signal, TechnicalSnapshot, TokenCandidate } from "@/lib/types";
-import { candleSetups, FIFTEEN_MIN_ATR, FOUR_HOUR_ATR, snapshotTechnical, type SignalContext } from "./signals";
+import { candleSetups, FOUR_HOUR_ATR, setupAtrBand, snapshotTechnical, type SignalContext } from "./signals";
 
 export interface FrameSet {
   m5?: Candle[] | null;
@@ -24,13 +24,6 @@ export interface BackCheck {
 }
 
 const MIN_BARS = MIN_FRAME_BARS;
-
-const ATR_FOR: Record<Frame, typeof FIFTEEN_MIN_ATR> = {
-  "5m": FIFTEEN_MIN_ATR,
-  "15m": FIFTEEN_MIN_ATR,
-  "1h": FIFTEEN_MIN_ATR,
-  "4h": FOUR_HOUR_ATR,
-};
 
 function biasWord(bias: Bias): string {
   return bias === "range" ? "ranging" : bias;
@@ -156,7 +149,7 @@ export function logicEntrySignals(
   }
 
   const tech = snapshotTechnical(rows.slice(-180));
-  const found = candleSetups(token, tech, researchScore, allowShorts, ctx, ATR_FOR[entry]);
+  const found = candleSetups(token, tech, researchScore, allowShorts, ctx, setupAtrBand(token, entry));
   const entryName = FRAME_LABEL[entry];
   if (!found.length) return { signals: [], pass: `${token.symbol}: ${entryName} chart is in, no setup yet (${setupGap(tech)})`, missing: null };
 

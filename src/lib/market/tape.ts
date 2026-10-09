@@ -22,7 +22,41 @@ export function withCandleTape(candidate: TokenCandidate, candles: Candle[] | nu
   apply("m15", 15);
   apply("m30", 30);
   apply("h1", 60);
-  return { ...candidate, flows };
+  const last = candles[candles.length - 1]?.close ?? 0;
+  return {
+    ...candidate,
+    flows,
+    priceUsd: candidate.priceUsd > 0 ? candidate.priceUsd : last > 0 ? last : candidate.priceUsd,
+  };
+}
+
+/** Overlay VVS (or any logic-frame) closes onto a book row Gecko left at $0. */
+export function withFrameTape<T extends TokenCandidate>(
+  candidate: T,
+  frames: Partial<Record<"5m" | "15m" | "1h" | "4h", Candle[]>>,
+): T {
+  const five = frames["5m"] ?? [];
+  const last =
+    five.at(-1)?.close ||
+    frames["15m"]?.at(-1)?.close ||
+    frames["1h"]?.at(-1)?.close ||
+    frames["4h"]?.at(-1)?.close ||
+    0;
+  const flows = { ...candidate.flows };
+  const change = (bars: number): number | null => {
+    if (five.length <= bars) return null;
+    const cur = five[five.length - 1]!.close;
+    const prev = five[five.length - 1 - bars]!.close;
+    if (!(cur > 0) || !(prev > 0)) return null;
+    return Number((((cur - prev) / prev) * 100).toFixed(4));
+  };
+  const m5 = change(1);
+  const m15 = change(3);
+  const h1 = change(12);
+  if (m5 !== null) flows.m5 = { ...flows.m5, priceChangePct: m5 };
+  if (m15 !== null) flows.m15 = { ...flows.m15, priceChangePct: m15 };
+  if (h1 !== null) flows.h1 = { ...flows.h1, priceChangePct: h1 };
+  return { ...candidate, flows, priceUsd: last > 0 ? last : candidate.priceUsd };
 }
 
 /**
