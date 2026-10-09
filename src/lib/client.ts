@@ -1,5 +1,5 @@
 import type { ChainId } from "@/lib/chain";
-import { armButton, buildDesk, shellDesk } from "@/lib/desk";
+import { armButton, buildDesk, shellDesk, startNeedsLiveSignature } from "@/lib/desk";
 import {
   authorizeTrading,
   reclaimTrading,
@@ -28,7 +28,7 @@ import type { AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/type
 import { tickSessionFor } from "@/lib/deskHost";
 import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
 
-export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, tradingProfitUsd };
+export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
 export type DeskSession = WalletSession | CronosSession;
 
@@ -223,8 +223,10 @@ export async function controlBot(
   let auth: ArmAuth | null = null;
   if (action === "start" && session) {
     const state = await loadState(chain);
-    if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd, state.config.cronosQuote);
-    else if (state.config.walletSwaps) auth = await authorizeTrading(solana as WalletSession, state.config.armFundsUsd);
+    if (startNeedsLiveSignature(state.config.walletSwaps)) {
+      if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd, state.config.cronosQuote);
+      else auth = await authorizeTrading(solana as WalletSession, state.config.armFundsUsd);
+    }
   }
 
   await mutateState((state) => {

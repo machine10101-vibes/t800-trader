@@ -64,6 +64,33 @@ describe("learn", () => {
     assert.match(learningReport(undefined).summary, /No graded/);
   });
 
+  it("does not fade the first ticket from tape reads on a book that has never traded", () => {
+    const fadedReads = Array.from({ length: 6 }, (_, i) => ({
+      id: `r${i}`,
+      at: new Date().toISOString(),
+      kind: "read" as const,
+      key: "read:Meme",
+      symbol: "ULTCAT",
+      sector: "Meme",
+      hit: i === 0,
+      r: -2,
+      note: "faded",
+    }));
+    const unread = advise(signal({ confidence: 63 }), { lessons: fadedReads, pendingReads: [] }, "mixed");
+    assert.equal(unread.block, null);
+    assert.equal(unread.confidenceDelta, 0);
+    assert.equal(unread.sizeMul, 1);
+
+    const traded = rememberClose(emptyState(), {
+      position: position(),
+      pnlUsd: -1,
+      r: -0.4,
+      exitReason: "stop",
+    });
+    const afterTrade = advise(signal({ confidence: 63 }), { ...traded.memory, lessons: [...traded.memory.lessons, ...fadedReads] }, "mixed");
+    assert.ok(afterTrade.confidenceDelta < 0);
+  });
+
   it("fades a setup only after repeated losses and favors one that pays", () => {
     let book = emptyState();
     book = lose(book);
@@ -125,6 +152,14 @@ describe("learn", () => {
     const reads = state.memory.lessons.filter((lesson) => lesson.key === "read:L1");
     assert.equal(reads.length, 5);
     assert.ok(reads.every((lesson) => !lesson.hit));
+    const unread = advise(signal({ symbol: "SOL", sector: "L1", reason: "reclaim" }), state.memory, "mixed");
+    assert.equal(unread.confidenceDelta, 0);
+    state = rememberClose(state, {
+      position: position({ symbol: "SOL", sector: "L1" }),
+      pnlUsd: 1,
+      r: 0.4,
+      exitReason: "target",
+    });
     const advice = advise(signal({ symbol: "SOL", sector: "L1", reason: "reclaim" }), state.memory, "mixed");
     assert.ok(advice.confidenceDelta < 0);
     assert.ok(advice.sizeMul < 1);

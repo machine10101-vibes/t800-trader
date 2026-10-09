@@ -23,6 +23,7 @@ import {
   loadDesk,
   setPaperMode,
   shellDesk,
+  startNeedsLiveSignature,
   tradingProfitUsd,
   tradingSnapshot,
   withdrawTradingProfit,
@@ -611,7 +612,13 @@ function ChainDesk({
   }, [desk?.config.walletSwaps, desk?.trades]);
 
   const control = async (action: "start" | "stop" | "reset" | "tick" | "flatten" | "kill") => {
-    if (!wallet) {
+    const bookAddress = wallet?.address ?? savedAddress ?? getActiveWallet(chain) ?? readLastWallet(chain);
+    const paperSession = bookAddress
+      ? previewDeskSession(chain, bookAddress, desk?.portfolio.equityUsd ?? 50)
+      : null;
+    const session = wallet ?? paperSession;
+    const live = Boolean(desk?.config.walletSwaps);
+    if (!session || (live && !wallet && action !== "tick" && action !== "kill")) {
       setError(copy.needWallet);
       return;
     }
@@ -637,12 +644,11 @@ function ChainDesk({
                 ...cur.bot,
                 running: true,
                 lastError: null,
-                lastNote:
-                  chain === "cronos"
+                lastNote: startNeedsLiveSignature(cur.config.walletSwaps)
+                  ? chain === "cronos"
                     ? "Approve the wallet signature to arm."
-                    : cur.config.walletSwaps || isLiveSessionArmed()
-                      ? "Armed — approve the wallet if it asks."
-                      : "Armed — first tick incoming",
+                    : "Armed — approve the wallet if it asks."
+                  : "Armed — first tick incoming",
               },
             }
           : cur,
@@ -650,10 +656,17 @@ function ChainDesk({
     }
     try {
       if (action === "start" || action === "reset") {
-        const session = await refreshDesk(chain, wallet);
-        setWallet(session);
-        if (action === "start" && desk?.config.walletSwaps && session.equityUsd < MIN_TRADE_USD && chain !== "cronos") {
-          const funded = await tradingSnapshot(session.address, chain);
+        let nextSession = session;
+        if (wallet) {
+          try {
+            nextSession = await refreshDesk(chain, wallet);
+            setWallet(nextSession);
+          } catch (error) {
+            if (live) throw error;
+          }
+        }
+        if (action === "start" && desk?.config.walletSwaps && nextSession.equityUsd < MIN_TRADE_USD && chain !== "cronos") {
+          const funded = await tradingSnapshot(nextSession.address, chain);
           if (!funded || funded.equityUsd < MIN_TRADE_USD) {
             const message = `Wallet needs at least $${MIN_TRADE_USD} of ${copy.needFunds} to trade.`;
             setError(message);
@@ -661,11 +674,17 @@ function ChainDesk({
             return;
           }
         }
-        if (action === "start") await attachWallet(session.address, Math.max(session.equityUsd, trading?.equityUsd ?? 0), chain);
-        applyDesk(await controlBot(action, session, chain));
-        setTrading(await tradingSnapshot(session.address, chain).catch(() => null));
+        if (action === "start") {
+          await attachWallet(
+            nextSession.address,
+            Math.max(nextSession.equityUsd, trading?.equityUsd ?? 0, desk?.portfolio.equityUsd ?? 0),
+            chain,
+          );
+        }
+        applyDesk(await controlBot(action, nextSession, chain));
+        setTrading(await tradingSnapshot(nextSession.address, chain).catch(() => null));
         if (action === "reset") {
-          await adoptLiveEquity(session.equityUsd, chain);
+          await adoptLiveEquity(nextSession.equityUsd, chain);
           const next = await loadDesk(false, chain);
           applyDesk(next);
           if (next.portfolio.equityUsd < MIN_TRADE_USD) {
@@ -674,8 +693,8 @@ function ChainDesk({
         }
         return;
       }
-      applyDesk(await controlBot(action, wallet, chain));
-      setTrading(await tradingSnapshot(wallet.address, chain).catch(() => null));
+      applyDesk(await controlBot(action, session, chain));
+      setTrading(await tradingSnapshot(session.address, chain).catch(() => null));
     } catch (e) {
       const message = e instanceof Error ? e.message : "Control failed";
       setError(message);

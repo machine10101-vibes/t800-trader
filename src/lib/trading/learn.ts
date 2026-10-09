@@ -118,26 +118,27 @@ export function advise(signal: Signal, memory: PlayMemory | undefined, stance: M
     notes.push(`${signal.symbol} has paid this book`);
   }
 
+  const traded = mem.lessons.some((row) => row.kind === "trade");
   const readSmooth = smooth(reads);
-  if (reads.length >= 5 && readSmooth.hitRate < 0.45) {
+  if (traded && reads.length >= 5 && readSmooth.hitRate < 0.45) {
     confidenceDelta -= 5;
     sizeMul *= 0.9;
     notes.push(`${sector} reads have been early`);
-  } else if (reads.length >= 5 && readSmooth.hitRate > 0.62) {
+  } else if (traded && reads.length >= 5 && readSmooth.hitRate > 0.62) {
     confidenceDelta += 3;
     notes.push(`${sector} reads have followed through`);
   }
 
   const stanceSmooth = smooth(stanceRows);
-  if (stanceRows.length >= 4 && stance === "defensive" && stanceSmooth.hitRate > 0.6) {
+  if (traded && stanceRows.length >= 4 && stance === "defensive" && stanceSmooth.hitRate > 0.6) {
     confidenceDelta -= 2;
     sizeMul *= 0.92;
     notes.push("defensive reads have been right");
-  } else if (stanceRows.length >= 4 && stance !== "defensive" && stanceSmooth.hitRate < 0.45) {
+  } else if (traded && stanceRows.length >= 4 && stance !== "defensive" && stanceSmooth.hitRate < 0.45) {
     confidenceDelta -= 3;
     sizeMul *= 0.9;
     notes.push("risk-on reads have been early");
-  } else if (stanceRows.length >= 4 && stance !== "defensive" && stanceSmooth.hitRate > 0.62) {
+  } else if (traded && stanceRows.length >= 4 && stance !== "defensive" && stanceSmooth.hitRate > 0.62) {
     confidenceDelta += 2;
     notes.push("risk-on reads have followed through");
   }

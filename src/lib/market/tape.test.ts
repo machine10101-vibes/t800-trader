@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Candle, TokenCandidate } from "../types";
-import { assetCall, candleChangePct, cashExit, foldCandles, keepEntry, printClose, pushTapeMark, solanaKeepEntry, solanaPass, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape } from "./tape";
+import { assetCall, candleChangePct, cashExit, foldCandles, keepEntry, printClose, pushTapeMark, solanaKeepEntry, solanaPass, tapeInCash, tapeRead, tickHeadline, tickPass, withCandleTape, withFrameTape } from "./tape";
 
 function bar(close: number, index: number): Candle {
   return { time: index * 60, open: close, high: close, low: close, close, volume: 1 };
@@ -80,6 +80,14 @@ describe("candle tape", () => {
     assert.ok(stamped.flows.m15.priceChangePct > 1.9);
     assert.equal(stamped.flows.h1.priceChangePct, 4);
     assert.equal(stamped.flows.h24.priceChangePct, 3);
+    const priced = withCandleTape({ ...candidate, priceUsd: 0 }, candles);
+    assert.equal(priced.priceUsd, 1.02);
+    const kept = withCandleTape({ ...candidate, priceUsd: 9 }, candles);
+    assert.equal(kept.priceUsd, 9);
+    const five = Array.from({ length: 13 }, (_, i) => bar(i === 12 ? 1.1 : 1, i));
+    const framed = withFrameTape({ ...candidate, priceUsd: 0 }, { "5m": five });
+    assert.equal(framed.priceUsd, 1.1);
+    assert.ok(framed.flows.m15.priceChangePct > 9);
   });
 
   it("keeps a red 15-minute tape in cash and lets a flat one take 5x or 10x", () => {

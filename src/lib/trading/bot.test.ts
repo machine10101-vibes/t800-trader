@@ -28,6 +28,14 @@ function signal(over: Partial<Signal> = {}): Signal {
 const config = emptyState().config;
 
 describe("bot control", () => {
+  it("arms a Cronos paper book without flipping it to LIVE", () => {
+    const started = applyControl(emptyState({ ...config, startingEquity: 50, walletSwaps: false }), "start", "cronos");
+    assert.equal(started.bot.running, true);
+    assert.equal(started.config.walletSwaps, false);
+    assert.equal(started.config.executionMode, "paper");
+    assert.match(started.bot.lastNote ?? "", /first tick incoming/);
+  });
+
   it("arms, disarms, and resets the paper book without touching a chain", () => {
     const started = applyControl(emptyState({ ...config, startingEquity: 1_000 }), "start");
     assert.equal(started.bot.running, true);

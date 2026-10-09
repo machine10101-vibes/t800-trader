@@ -1,6 +1,6 @@
 import { sameMint, type ChainId } from "@/lib/chain";
 import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
-import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline } from "@/lib/market/tape";
+import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline, withFrameTape } from "@/lib/market/tape";
 import { GAS_CRO } from "@/lib/cronos/constants";
 import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
@@ -284,7 +284,7 @@ export async function tickBot(
       if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
-        next = studyTape(next, research.candidates, market.regime.stance);
+        if (next.bot.running) next = studyTape(next, research.candidates, market.regime.stance);
         const spendable = priced ? payableUsd(priced, payOpts) : 0;
         const marked = priced ? walletMarkUsd(priced) : 0;
         const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
@@ -332,11 +332,12 @@ export async function tickBot(
             return;
           }
           const frames = charts[i];
+          const marked = chain === "cronos" ? withFrameTape(token, frames) : token;
           const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
           const decision = deskEntrySignals(
-            token,
+            marked,
             { m5: frames["5m"], m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
-            token.researchScore,
+            marked.researchScore,
             false,
             tapeCtx,
             {
@@ -349,13 +350,13 @@ export async function tickBot(
             blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
             return;
           }
-          const found = decision.signals.filter(
-            (signal) =>
-              signal.side === "long" &&
-              (signal.setupFrame === "4h" || signal.setupFrame === "1h"
-                ? true
-                : solanaKeepEntry(signal.side, token.flows.m15.priceChangePct)),
-          );
+          const found = decision.signals.filter((signal) => {
+            if (signal.side !== "long") return false;
+            // Cronos already back-checked the 15-minute chart against 1-hour and 4-hour.
+            // The Solana 15-minute flow gate was throwing those longs away.
+            if (chain === "cronos" || signal.setupFrame === "4h" || signal.setupFrame === "1h") return true;
+            return solanaKeepEntry(signal.side, marked.flows.m15.priceChangePct);
+          });
           signals.push(...found);
           if (!found.length) {
             blocked.push(decision.pass ?? solanaPass(token.symbol, token.flows.m15.priceChangePct));

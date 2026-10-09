@@ -60,6 +60,11 @@ export function armButton(running: boolean): { action: "start" | "stop"; label: 
   return running ? { action: "stop", label: "Disarm the bot" } : { action: "start", label: "Arm the bot" };
 }
 
+/** LIVE Arm asks the wallet to sign. PAPER must not — that blocked every Cronos paper fill. */
+export function startNeedsLiveSignature(walletSwaps: boolean): boolean {
+  return Boolean(walletSwaps);
+}
+
 /** Real saved book. A later runner or resume pass can keep the last scored tape. */
 export function shellDesk(
   state: AppState,

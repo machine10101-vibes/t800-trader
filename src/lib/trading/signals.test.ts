@@ -5,12 +5,14 @@ import {
   buildFlowSignals,
   buildSignals,
   candleSetups,
+  CRONOS_FIFTEEN_ATR,
   ema,
   entrySignals,
   FIFTEEN_MIN_ATR,
   FOUR_HOUR_ATR,
   rewardToRisk,
   rsi,
+  setupAtrBand,
   snapshotTechnical,
   solanaEntrySignals,
 } from "./signals";
@@ -60,6 +62,10 @@ describe("indicators", () => {
     assert.equal(atrTradeable(0.2), false);
     assert.equal(atrTradeable(8), false);
     assert.equal(atrTradeable(1.4), true);
+    assert.equal(atrTradeable(8.7, FIFTEEN_MIN_ATR), false);
+    assert.equal(atrTradeable(8.7, CRONOS_FIFTEEN_ATR), true);
+    assert.equal(setupAtrBand({ chain: "cronos" }, "15m"), CRONOS_FIFTEEN_ATR);
+    assert.equal(setupAtrBand({ chain: "solana" }, "15m"), FIFTEEN_MIN_ATR);
   });
 
   it("treats a thin single-print bar as a neutral close, not a weak one", () => {
@@ -109,6 +115,37 @@ describe("indicators", () => {
     } as TechnicalSnapshot;
     const shorts = candleSetups(token, shortTech, 62, true, { stance: "mixed", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR);
     assert.equal(shorts.some((signal) => signal.side === "short"), false);
+  });
+
+  it("lets a Cronos meme continue when 15-minute ATR is a real meme range", () => {
+    const flow = { buys: 50, sells: 50, buyers: 20, sellers: 20, volumeUsd: 1, priceChangePct: 0.8 };
+    const token = {
+      chain: "cronos",
+      symbol: "ULTI",
+      mint: "ulti",
+      poolAddress: "pool",
+      sector: "Meme",
+      watchlist: true,
+      flows: { m5: flow, m15: flow, m30: flow, h1: { ...flow, priceChangePct: 1.2 }, h6: flow, h24: flow },
+    } as TokenCandidate;
+    const tech = {
+      rsi14: 59,
+      ema9: 1.04,
+      ema21: 1,
+      vwap: 1,
+      atrPct: 8.5,
+      volumeZ: 0.13,
+      lastClose: 1.076,
+      extensionPct: 7.6,
+      closeStrength: 0.54,
+      priorHigh: 1.2,
+      priorLow: 0.9,
+      barsAboveEma9: 3,
+    } as TechnicalSnapshot;
+    const solToken = { ...token, chain: "solana" as const };
+    assert.equal(candleSetups(solToken, tech, 50, false, { stance: "risk-on", fearGreed: 55, solChange: 0 }, FIFTEEN_MIN_ATR).length, 0);
+    const cro = candleSetups(token, tech, 50, false, { stance: "risk-on", fearGreed: 55, solChange: 0 }, CRONOS_FIFTEEN_ATR);
+    assert.equal(cro.some((signal) => signal.side === "long" && signal.reason === "reclaim"), true);
   });
 
   it("lets a liquid watchlist name continue when the 5m range is held", () => {
