@@ -203,6 +203,23 @@ describe("home", () => {
       ["RAY: price feeds disagree"],
     );
 
+    const unread = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 2,
+      blocked: ["Could not read the trading balance, so no new ticket was sent"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+    });
+    assert.equal(unread.walls.length, 1);
+    assert.match(unread.walls[0]!.text, /trading balance/);
+
     const stuck = botActivity({
       running: true,
       killSwitch: false,

@@ -11,6 +11,7 @@ import { USDC_MINT } from "@/lib/market/universe";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "@/lib/trading/leverage";
 import { MIN_TRADE_USD, SOL_FEE_RESERVE } from "@/lib/trading/risk";
 import { readSecret, solanaSignerKey, writeSecret } from "@/lib/keystore";
+import { rememberBudget } from "@/lib/trading/budgetCache";
 import { broadcastTransaction, readBalances, solanaRpc, type WalletSession } from "./wallet";
 
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -290,10 +291,23 @@ function tradingKeyCoversArm(held: TradingSnap | null, armFundsUsd: number): boo
   return tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD) && (held?.usdc ?? 0) + 0.5 >= armFundsUsd;
 }
 
+function noteSolanaBudget(
+  address: string,
+  held: { sol: number; usdc: number; solPriceUsd?: number | null } | null,
+): void {
+  if (!held) return;
+  rememberBudget("solana", address, {
+    usdc: held.usdc,
+    sol: held.sol,
+    solPriceUsd: held.solPriceUsd ?? 0,
+  });
+}
+
 async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number): Promise<ArmAuth> {
   const existing = tradingKeypair(session.address);
   if (existing) {
     const held = await readBalances(existing.publicKey.toBase58()).catch(() => null);
+    noteSolanaBudget(existing.publicKey.toBase58(), held);
     if (!held) {
       throw new Error("Could not read the trading account, so no more SOL or USDC was moved.");
     }
@@ -314,6 +328,7 @@ async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number)
   const sol = Number(userChain.lamports) / 1_000_000_000;
   const usdc = Number(userChain.usdc) / 1_000_000;
   const held = await readBalances(botAddress).catch(() => null);
+  noteSolanaBudget(botAddress, held);
   let plan: ArmPlan;
   try {
     plan = planAuthorization(sol, usdc, { armFundsUsd, alreadyUsdc: held?.usdc ?? 0, alreadyNative: held?.sol ?? 0 });
@@ -369,6 +384,7 @@ async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number)
   ]);
   await confirmSignature(signature);
   const after = await readBalances(botAddress).catch(() => null);
+  noteSolanaBudget(botAddress, after);
   const equityUsd = after?.equityUsd ?? 0;
   const depositedUsd = Math.max(0, equityUsd - (before?.equityUsd ?? 0));
   return { signature, botAddress, reused: false, equityUsd, depositedUsd };
@@ -562,6 +578,13 @@ export async function tradingSnapshot(owner: string): Promise<TradingSnap | null
   const bot = tradingKeypair(owner);
   if (!bot) return null;
   const held = await readBalances(bot.publicKey.toBase58()).catch(() => null);
+  if (held) {
+    rememberBudget("solana", held.address, {
+      usdc: held.usdc,
+      sol: held.sol,
+      solPriceUsd: held.solPriceUsd ?? 0,
+    });
+  }
   if (!held || (held.usdc < 1 && held.sol < BOT_MIN_SOL)) return null;
   return { address: held.address, sol: held.sol, usdc: held.usdc, equityUsd: held.equityUsd };
 }

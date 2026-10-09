@@ -27,6 +27,8 @@ import {
   requestPersonalSign,
 } from "./provider";
 import { cronosSignerKey, readSecret, writeSecret } from "@/lib/keystore";
+import { getActiveWallet } from "@/lib/store";
+import { freshBudget, recallBudget, rememberBudget } from "@/lib/trading/budgetCache";
 import { cronosClient, currentCronosProvider, ensureCronos, readCronosBalances, type CronosSession } from "./wallet";
 
 const depositAbi = [
@@ -291,14 +293,32 @@ export function cronosExecutor(session: CronosSession): ChainExecutor {
 }
 
 export async function cronosBudget(session?: CronosSession | null): Promise<WalletBudget | null> {
-  if (!session) return null;
-  const account = cronosTradingAccount(session.address);
-  const address = account?.address ?? session.address;
+  const owner = session?.address ?? getActiveWallet("cronos");
+  if (!owner) return null;
+  const account = cronosTradingAccount(owner);
+  const address = account?.address ?? owner;
+  const cached = freshBudget("cronos", address);
+  if (cached) return cached;
+  const provider = session?.provider ?? currentCronosProvider();
   try {
-    const live = await readCronosBalances(address);
-    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0, wcro: live.wcro };
+    const live = await readCronosBalances(address, provider);
+    return rememberBudget("cronos", address, {
+      usdc: live.usdc,
+      sol: live.sol,
+      solPriceUsd: live.solPriceUsd ?? session?.solPriceUsd ?? 0,
+      wcro: live.wcro,
+    });
   } catch (error) {
-    if (!account) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0, wcro: session.wcro };
+    const stale = recallBudget("cronos", address);
+    if (stale) return stale;
+    if (!account) {
+      return {
+        usdc: session?.usdc ?? 0,
+        sol: session?.sol ?? 0,
+        solPriceUsd: session?.solPriceUsd ?? 0,
+        wcro: session?.wcro,
+      };
+    }
     const message = error instanceof Error ? error.message : "balance read failed";
     throw new Error(`Could not read the CRO trading key, so no swap was sent. ${message}`);
   }
@@ -311,7 +331,15 @@ export async function authorizeCronos(
 ): Promise<ArmAuth> {
   const quote = normalizeCronosQuote(opts?.cronosQuote);
   const existing = cronosTradingAccount(session.address);
-  const before = existing ? await readCronosBalances(existing.address).catch(() => null) : null;
+  const before = existing ? await readCronosBalances(existing.address, session.provider).catch(() => null) : null;
+  if (existing && before) {
+    rememberBudget("cronos", existing.address, {
+      usdc: before.usdc,
+      sol: before.sol,
+      solPriceUsd: before.solPriceUsd ?? session.solPriceUsd ?? 0,
+      wcro: before.wcro,
+    });
+  }
   if (existing && !before) {
     throw new Error("Could not read the trading account, so no more CRO or USDC was moved.");
   }
@@ -365,7 +393,15 @@ export async function authorizeCronos(
     signature = await userSend(session, USDC, undefined, data);
   }
   await new Promise((resolve) => setTimeout(resolve, 1200));
-  const after = await readCronosBalances(account.address).catch(() => before);
+  const after = await readCronosBalances(account.address, session.provider).catch(() => before);
+  if (after) {
+    rememberBudget("cronos", account.address, {
+      usdc: after.usdc,
+      sol: after.sol,
+      solPriceUsd: after.solPriceUsd ?? session.solPriceUsd ?? 0,
+      wcro: after.wcro,
+    });
+  }
   const equityUsd = after?.equityUsd ?? 0;
   const depositedUsd = Math.max(0, equityUsd - (before?.equityUsd ?? 0));
   return { signature: signature || "reused", botAddress: account.address, reused: false, equityUsd, depositedUsd };
@@ -446,9 +482,19 @@ export async function sendCronosProfit(
 export async function cronosSnapshot(owner: string): Promise<TradingSnap | null> {
   const account = cronosTradingAccount(owner);
   if (!account) return null;
-  const held = await readCronosBalances(account.address).catch(() => null);
-  if (!held || (held.usdc < 1 && held.sol < BOT_MIN_CRO)) return null;
-  return { address: account.address, sol: held.sol, usdc: held.usdc, equityUsd: held.equityUsd };
+  const held = await readCronosBalances(account.address, currentCronosProvider()).catch(() => null);
+  if (held) {
+    rememberBudget("cronos", held.address, {
+      usdc: held.usdc,
+      sol: held.sol,
+      solPriceUsd: held.solPriceUsd ?? 0,
+      wcro: held.wcro,
+    });
+  }
+  const cached = held ?? recallBudget("cronos", account.address);
+  if (!cached || (cached.usdc < 1 && cached.sol < BOT_MIN_CRO)) return null;
+  const equityUsd = held?.equityUsd ?? cached.usdc + (cached.sol + (cached.wcro ?? 0)) * (cached.solPriceUsd || 0);
+  return { address: account.address, sol: cached.sol, usdc: cached.usdc, equityUsd };
 }
 
 export function cronosBudgetAddress(owner: string): string {

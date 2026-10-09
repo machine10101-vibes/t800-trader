@@ -14,16 +14,44 @@ import {
 } from "@/lib/solana/phantomLink";
 
 const RPCS = [
-  "https://solana.publicnode.com",
-  "https://solana-rpc.publicnode.com",
   "https://public.rpc.solanavibestation.com",
   "https://rpc.solanatracker.io/public",
+  "https://solana.publicnode.com",
+  "https://solana-rpc.publicnode.com",
 ];
 
 export function solanaRpcs(): string[] {
   const extra = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SOLANA_RPC?.trim() : "";
   if (extra && !RPCS.includes(extra)) return [extra, ...RPCS];
   return [...RPCS];
+}
+
+/** The last node that answered stays first so a tick does not blast every public RPC. */
+export function orderRpcUrls(urls: readonly string[], lastGood?: string | null): string[] {
+  const list = [...urls];
+  if (!lastGood || !list.includes(lastGood)) return list;
+  return [lastGood, ...list.filter((url) => url !== lastGood)];
+}
+
+/**
+ * SOL is required to know the key is alive. A USDC-only print still counts when
+ * the native read missed. Zero USDC with no SOL is unknown, not an empty book.
+ */
+export function mergeSolanaReads(input: {
+  sol: number | null;
+  usdc: number | null;
+  solPriceUsd: number | null;
+}): { sol: number; usdc: number; solPriceUsd: number | null; equityUsd: number } | null {
+  if (input.sol == null && !(input.usdc != null && input.usdc > 0)) return null;
+  const sol = input.sol ?? 0;
+  const usdc = input.usdc ?? 0;
+  const solPriceUsd = input.solPriceUsd;
+  return {
+    sol,
+    usdc,
+    solPriceUsd,
+    equityUsd: usdc + (solPriceUsd != null ? sol * solPriceUsd : 0),
+  };
 }
 
 export interface WalletSession {
@@ -321,7 +349,9 @@ interface RpcResult<T> {
   error?: { message?: string };
 }
 
-const RPC_TIMEOUT_MS = 4_000;
+const RPC_TIMEOUT_MS = 8_000;
+const STICKY_RPC_TIMEOUT_MS = 3_000;
+let lastGoodRpc = "";
 
 export function isForbiddenRpc(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -352,17 +382,21 @@ async function rpcOnce<T>(url: string, method: string, params: unknown[], signal
   return json.result;
 }
 
-/** First healthy endpoint wins. A hung public RPC no longer blocks the next one. */
-export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T> {
+async function raceSolanaRpc<T>(urls: string[], method: string, params: unknown[]): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), RPC_TIMEOUT_MS);
   try {
     return await new Promise<T>((resolve, reject) => {
-      let pending = RPCS.length;
+      let pending = urls.length;
       const errors: unknown[] = [];
-      for (const url of RPCS) {
+      if (!pending) {
+        reject(new Error("No Solana RPC is configured."));
+        return;
+      }
+      for (const url of urls) {
         rpcOnce<T>(url, method, params, ctrl.signal)
           .then((result) => {
+            lastGoodRpc = url;
             ctrl.abort();
             resolve(result);
           })
@@ -378,6 +412,24 @@ export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T
   }
 }
 
+/** Last healthy endpoint first. A hung public RPC no longer blocks the next one. */
+export async function solanaRpc<T>(method: string, params: unknown[]): Promise<T> {
+  const urls = orderRpcUrls(solanaRpcs(), lastGoodRpc);
+  if (lastGoodRpc && urls[0] === lastGoodRpc) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), STICKY_RPC_TIMEOUT_MS);
+    try {
+      const result = await rpcOnce<T>(lastGoodRpc, method, params, ctrl.signal);
+      return result;
+    } catch {
+      // The rest of the list still includes this node.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return raceSolanaRpc(urls, method, params);
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let text = "";
   for (const byte of bytes) text += String.fromCharCode(byte);
@@ -388,16 +440,18 @@ function bytesToBase64(bytes: Uint8Array): string {
 export async function broadcastTransaction(bytes: Uint8Array): Promise<string> {
   const raw = bytesToBase64(bytes);
   const errors: unknown[] = [];
-  for (const url of RPCS) {
+  for (const url of orderRpcUrls(solanaRpcs(), lastGoodRpc)) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12_000);
     try {
-      return await rpcOnce<string>(
+      const signature = await rpcOnce<string>(
         url,
         "sendTransaction",
         [raw, { encoding: "base64", skipPreflight: false, maxRetries: 3 }],
         ctrl.signal,
       );
+      lastGoodRpc = url;
+      return signature;
     } catch (error) {
       errors.push(error);
     } finally {
@@ -417,16 +471,30 @@ function usdcAta(owner: PublicKey): PublicKey {
   )[0];
 }
 
-async function readUsdc(owner: PublicKey): Promise<number> {
-  const ata = usdcAta(owner);
-  const acc = await solanaRpc<{
-    value?: {
-      data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
-    } | null;
-  }>("getAccountInfo", [ata.toBase58(), { encoding: "jsonParsed" }]);
-  if (!acc.value) return 0;
-  const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
-  return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+async function readUsdc(owner: PublicKey): Promise<number | null> {
+  try {
+    const ata = usdcAta(owner);
+    const acc = await solanaRpc<{
+      value?: {
+        data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } };
+      } | null;
+    }>("getAccountInfo", [ata.toBase58(), { encoding: "jsonParsed" }]);
+    if (!acc.value) return 0;
+    const amt = acc.value.data?.parsed?.info?.tokenAmount?.uiAmount;
+    return typeof amt === "number" && Number.isFinite(amt) ? amt : 0;
+  } catch {
+    return null;
+  }
+}
+
+async function readLamports(address: string): Promise<number | null> {
+  try {
+    const lamports = await solanaRpc<{ value: number }>("getBalance", [address]);
+    if (typeof lamports.value !== "number" || !Number.isFinite(lamports.value)) return null;
+    return lamports.value / 1_000_000_000;
+  } catch {
+    return null;
+  }
 }
 
 export function associatedUsdcAddress(owner: string): string {
@@ -507,14 +575,14 @@ export async function confirmSignature(signature: string, timeoutMs = 60_000): P
 
 export async function readBalances(address: string): Promise<Omit<WalletSession, "provider">> {
   const pk = new PublicKey(address);
-  const [lamports, usdc, solPriceUsd] = await Promise.all([
-    solanaRpc<{ value: number }>("getBalance", [pk.toBase58()]),
+  const [sol, usdc, solPriceUsd] = await Promise.all([
+    readLamports(pk.toBase58()),
     readUsdc(pk),
-    liveSolPrice(),
+    liveSolPrice().catch(() => null),
   ]);
-  const sol = lamports.value / 1_000_000_000;
-  const equityUsd = usdc + (solPriceUsd !== null ? sol * solPriceUsd : 0);
-  return { address: pk.toBase58(), sol, usdc, solPriceUsd, equityUsd };
+  const merged = mergeSolanaReads({ sol, usdc, solPriceUsd });
+  if (!merged) throw new Error("Could not read the SOL trading key balance.");
+  return { address: pk.toBase58(), ...merged };
 }
 
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");

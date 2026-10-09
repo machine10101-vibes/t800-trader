@@ -19,6 +19,7 @@ import type { CronosSession } from "@/lib/cronos/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
+import { freshBudget, recallBudget, rememberBudget } from "@/lib/trading/budgetCache";
 import { applyHandClose, isAlreadyFlat } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import { takeCronosProfitShare } from "@/lib/cronos/share";
@@ -65,18 +66,33 @@ async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Pro
 }
 
 async function budgetFor(session?: WalletSession | null): Promise<WalletBudget | null> {
-  if (!session) return null;
-  const bot = tradingKeypair(session.address);
-  const address = tradingBudgetAddress(session.address);
+  const owner = session?.address ?? getActiveWallet("solana");
+  if (!owner) return null;
+  const bot = tradingKeypair(owner);
+  const address = tradingBudgetAddress(owner);
+  const cached = freshBudget("solana", address);
+  if (cached) return cached;
   try {
     let live = await readBalances(address);
     if (bot && live.usdc < 1 && live.sol < 0.01) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       live = await readBalances(address);
     }
-    return { usdc: live.usdc, sol: live.sol, solPriceUsd: live.solPriceUsd ?? session.solPriceUsd ?? 0 };
+    return rememberBudget("solana", address, {
+      usdc: live.usdc,
+      sol: live.sol,
+      solPriceUsd: live.solPriceUsd ?? session?.solPriceUsd ?? 0,
+    });
   } catch (error) {
-    if (!bot) return { usdc: session.usdc, sol: session.sol, solPriceUsd: session.solPriceUsd ?? 0 };
+    const stale = recallBudget("solana", address);
+    if (stale) return stale;
+    if (!bot) {
+      return {
+        usdc: session?.usdc ?? 0,
+        sol: session?.sol ?? 0,
+        solPriceUsd: session?.solPriceUsd ?? 0,
+      };
+    }
     const message = error instanceof Error ? error.message : "balance read failed";
     throw new Error(`Could not read the SOL trading key, so no swap was sent. ${message}`);
   }
@@ -151,7 +167,13 @@ export async function controlBot(
       try {
         funds = await budget();
       } catch {
-        funds = null;
+        const owner = session?.address ?? getActiveWallet(chain);
+        const address = owner
+          ? chain === "cronos"
+            ? (await import("@/lib/cronos/trade")).cronosBudgetAddress(owner)
+            : tradingBudgetAddress(owner)
+          : "";
+        funds = address ? recallBudget(chain, address) : null;
       }
     }
     await tickBot(executor, funds, live ? maker : null, chain);
