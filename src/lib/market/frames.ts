@@ -48,8 +48,8 @@ export function sourceFrame(chain: ChainId, frame: Frame): Frame {
 }
 
 /** 5-minute first. One successful Cronos 5-minute read fills every longer chart. */
-export function frameWarmOrder(_chain: ChainId): Frame[] {
-  return ["5m", "15m", "1h", "4h"];
+export function frameWarmOrder(chain: ChainId): Frame[] {
+  return chain === "cronos" ? ["5m", "15m", "1h", "4h"] : ["5m", "15m", "1h", "4h"];
 }
 
 /** Longer frames built from a shorter series. A thin roll-up is still better than an empty chart. */
