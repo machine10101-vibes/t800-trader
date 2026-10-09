@@ -284,7 +284,7 @@ export async function tickBot(
       if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
       if (!dayLossBreached(risk.portfolio, next.config)) {
         const research = await runResearch(next.config, false, chain);
-        next = studyTape(next, research.candidates, market.regime.stance);
+        if (next.bot.running) next = studyTape(next, research.candidates, market.regime.stance);
         const spendable = priced ? payableUsd(priced, payOpts) : 0;
         const marked = priced ? walletMarkUsd(priced) : 0;
         const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
