@@ -2,7 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoFrameUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoFrameUrl, geckoMinuteUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
@@ -255,14 +255,16 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string,
 }
 
 const GECKO_GAP_MS = 2_100;
+/** Two minute OHLCV reads 2.1s apart 429. Space those farther than pool stats. */
+const GECKO_MINUTE_GAP_MS = 4_500;
 const GECKO_COOL_MS = 8_000;
 let geckoTail: Promise<void> = Promise.resolve();
 let geckoNotBefore = 0;
 
-function noteGeckoResult(error?: unknown): void {
+function noteGeckoResult(error?: unknown, opts?: { minute?: boolean }): void {
   const message = error instanceof Error ? error.message : "";
   if (message.startsWith("429")) geckoNotBefore = Date.now() + GECKO_COOL_MS;
-  else geckoNotBefore = Math.max(geckoNotBefore, Date.now() + GECKO_GAP_MS);
+  else geckoNotBefore = Math.max(geckoNotBefore, Date.now() + (opts?.minute ? GECKO_MINUTE_GAP_MS : GECKO_GAP_MS));
 }
 
 /** True while GeckoTerminal is in the 429 cool-down. Solana can scan from Jupiter instead. */
@@ -271,16 +273,16 @@ export function geckoIsCooling(): boolean {
 }
 
 /** One GeckoTerminal call at a time. A 429 pauses the whole book so candles are not burned. */
-function paceGecko<T>(task: () => Promise<T>): Promise<T> {
+function paceGecko<T>(task: () => Promise<T>, opts?: { minute?: boolean }): Promise<T> {
   const run = geckoTail.then(async () => {
     const wait = geckoNotBefore - Date.now();
     if (wait > 0) await sleep(wait);
     try {
       const value = await task();
-      noteGeckoResult();
+      noteGeckoResult(undefined, opts);
       return value;
     } catch (error) {
-      noteGeckoResult(error);
+      noteGeckoResult(error, opts);
       throw error;
     }
   });
@@ -492,10 +494,12 @@ function candlesFromOhlcv(json: {
 }
 
 async function readOhlcv(url: string): Promise<Candle[]> {
-  const json = await paceGecko(() =>
-    fetchJson<{
-      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-    }>(url, { timeoutMs: 8_000, retries: 0 }),
+  const json = await paceGecko(
+    () =>
+      fetchJson<{
+        data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+      }>(url, { timeoutMs: 8_000, retries: 0 }),
+    { minute: geckoMinuteUrl(url) },
   );
   return candlesFromOhlcv(json);
 }
@@ -1075,7 +1079,7 @@ function frameSnapshot(mint: string, chain: ChainId): Record<Frame, Candle[]> {
   };
 }
 
-/** Warm every logic chart. Cronos reads 15-minute first so a 5-minute 429 cannot empty the book. */
+/** Warm every logic chart. Cronos reads 5-minute first so one minute call fills the book. */
 export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
   if (chain === "solana") {
     await Promise.all(frameWarmOrder(chain).map((frame) => loadFrameChart(mint, chain, frame).catch(() => [])));
@@ -1124,7 +1128,7 @@ export function requestFrameCharts(mints: string[], chain: ChainId, extra: Frame
   }
 }
 
-/** Login and refresh start here. Solana reads Jupiter in parallel. Cronos paces Gecko, 15-minute first. */
+/** Login and refresh start here. Solana reads Jupiter in parallel. Cronos paces Gecko, 5-minute first. */
 export function prefetchFrameCharts(chain: ChainId): Promise<void> {
   const mints = bookMints(chain);
   if (chain === "cronos") {

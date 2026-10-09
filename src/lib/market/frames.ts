@@ -36,9 +36,10 @@ export function jupiterInterval(frame: Frame): string {
 
 /**
  * One native series fills longer frames. 5-minute is always its own read — it cannot be
- * rolled up from 15-minute. Cronos 15-minute (1000 bars) covers the 1-hour and 4-hour
- * when it lands. Hour endpoints stay available if minute OHLCV 429s. Solana 15-minute
- * covers the 1-hour; the 4-hour still needs Jupiter.
+ * rolled up from 15-minute. A Cronos 5-minute read (1000 bars) covers 15-minute, 1-hour,
+ * and 4-hour. Native 15-minute is the backup when 5-minute 429s. Hour endpoints stay
+ * available if every minute OHLCV 429s. Solana 15-minute covers the 1-hour; the 4-hour
+ * still needs Jupiter.
  */
 export function sourceFrame(chain: ChainId, frame: Frame): Frame {
   if (frame === "5m") return "5m";
@@ -46,9 +47,9 @@ export function sourceFrame(chain: ChainId, frame: Frame): Frame {
   return frame === "1h" ? "15m" : frame;
 }
 
-/** Cronos 15-minute first so a 5-minute 429 cannot starve the entry chart. */
-export function frameWarmOrder(chain: ChainId): Frame[] {
-  return chain === "cronos" ? ["15m", "5m", "1h", "4h"] : ["5m", "15m", "1h", "4h"];
+/** 5-minute first. One successful Cronos 5-minute read fills every longer chart. */
+export function frameWarmOrder(_chain: ChainId): Frame[] {
+  return ["5m", "15m", "1h", "4h"];
 }
 
 /** Longer frames built from a shorter series. A thin roll-up is still better than an empty chart. */
@@ -70,6 +71,11 @@ export function derivedFrames(rows: Candle[], source: Frame): Partial<Record<Fra
 export function geckoFrameUrl(network: string, address: string, kind: "pools" | "tokens", frame: Frame): string {
   const path = frame === "5m" ? "minute?aggregate=5" : frame === "15m" ? "minute?aggregate=15" : frame === "1h" ? "hour?aggregate=1" : "hour?aggregate=4";
   return `https://api.geckoterminal.com/api/v2/networks/${network}/${kind}/${address}/ohlcv/${path}&limit=1000&currency=usd`;
+}
+
+/** Minute OHLCV needs a longer Gecko gap than pool stats or hour bars. */
+export function geckoMinuteUrl(url: string): boolean {
+  return url.includes("/ohlcv/minute");
 }
 
 /** Bucket bars into a longer frame on UTC boundaries. Gaps in thin pools just leave fewer bars. */

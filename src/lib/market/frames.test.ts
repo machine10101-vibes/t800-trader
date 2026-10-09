@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { closedCandles, enoughFrameBars, frameWarmOrder, sourceFrame } from "./frames";
+import { closedCandles, derivedFrames, enoughFrameBars, frameWarmOrder, geckoFrameUrl, geckoMinuteUrl, sourceFrame } from "./frames";
 import type { Candle } from "@/lib/types";
 
 function bar(time: number): Candle {
@@ -24,9 +24,18 @@ describe("closedCandles", () => {
     assert.equal(sourceFrame("cronos", "4h"), "4h");
   });
 
-  it("warms Cronos 15-minute before 5-minute so a minute 429 cannot empty the book", () => {
-    assert.deepEqual(frameWarmOrder("cronos"), ["15m", "5m", "1h", "4h"]);
+  it("warms 5-minute first so one Cronos minute read fills every longer chart", () => {
+    assert.deepEqual(frameWarmOrder("cronos"), ["5m", "15m", "1h", "4h"]);
     assert.deepEqual(frameWarmOrder("solana"), ["5m", "15m", "1h", "4h"]);
+    const five = Array.from({ length: 1000 }, (_, i) => bar(1_700_000_000 + i * 300));
+    const filled = derivedFrames(five, "5m");
+    assert.equal(enoughFrameBars("5m", five.length), true);
+    assert.equal(enoughFrameBars("15m", filled["15m"]!.length), true);
+    assert.equal(enoughFrameBars("1h", filled["1h"]!.length), true);
+    assert.equal(enoughFrameBars("4h", filled["4h"]!.length), true);
+    assert.equal(geckoMinuteUrl(geckoFrameUrl("cro", "0xpool", "pools", "5m")), true);
+    assert.equal(geckoMinuteUrl(geckoFrameUrl("cro", "0xpool", "pools", "15m")), true);
+    assert.equal(geckoMinuteUrl(geckoFrameUrl("cro", "0xpool", "pools", "1h")), false);
   });
 
   it("accepts a short 4-hour tape before thirty bars exist", () => {
