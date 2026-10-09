@@ -1,7 +1,8 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
-import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES } from "@/lib/deskSettings";
+import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, logicFramesRule, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES, toggleLogicFrame } from "@/lib/deskSettings";
+import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
 import { VENUE_OPTIONS } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
@@ -76,6 +77,7 @@ export function SettingsPanel({
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
+          {` · charts ${local.logicFrames.join(", ")}`}
           {chain === "cronos"
             ? ` · spends ${local.cronosQuote === "cro" ? "CRO" : "USDC"} · no extra size`
             : local.solTradeMode === "spot"
@@ -165,6 +167,22 @@ export function SettingsPanel({
         />
       </Section>
 
+      <Section
+        title="Charts the bot uses"
+        hint="Turn each chart on or off. The shortest chart that is on finds the buy. Longer charts that stay on must not fight that buy. At least one chart stays on. This is the same on Solana and Cronos."
+      >
+        {FRAMES.map((frame) => (
+          <Toggle
+            key={frame}
+            label={`${FRAME_LABEL[frame]} chart`}
+            hint={logicChartHint(frame, local.logicFrames)}
+            checked={local.logicFrames.includes(frame)}
+            onChange={(on) => set({ logicFrames: toggleLogicFrame(local.logicFrames, frame, on) })}
+          />
+        ))}
+        <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">{logicFramesRule(local.logicFrames)}</p>
+      </Section>
+
       <details className="neon p-5 sm:p-6">
         <summary className="cursor-pointer text-lg font-medium">More settings</summary>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">
@@ -244,7 +262,11 @@ export function SettingsPanel({
           {local.solTradeMode !== "spot" ? (
             <Toggle
               label="Margin only on solid 4-hour setups"
-              hint="On waits for a 4-hour structure setup before a SOL perp. A 15-minute SOL fill stays a spot swap if Both is selected."
+              hint={
+                local.logicFrames.includes("4h")
+                  ? "On waits for a 4-hour structure setup before a SOL perp. A shorter-chart SOL fill stays a spot swap if Both is selected."
+                  : "Turn the 4-hour chart on above if you want SOL margin to wait for that setup."
+              }
               checked={local.marginOnFourHour}
               onChange={(marginOnFourHour) => set({ marginOnFourHour })}
             />
@@ -614,6 +636,28 @@ export function SettingsPanel({
       </div>
     </div>
   );
+}
+
+function logicChartHint(frame: Frame, enabled: Frame[]): string {
+  const on = enabled.includes(frame);
+  if (frame === "5m") {
+    return on
+      ? "On. This is the fastest chart. If it is the shortest one left on, it finds the buy."
+      : "Off. Turn it on if you want the bot to hunt on the 5-minute chart.";
+  }
+  if (frame === "15m") {
+    return on
+      ? "On. This is the usual entry chart. If a shorter chart is also on, this one back-checks that buy."
+      : "Off. The bot will not use the 15-minute chart until you turn it back on.";
+  }
+  if (frame === "1h") {
+    return on
+      ? "On. A buy must not fight the 1-hour trend."
+      : "Off. The bot will not wait for the 1-hour chart.";
+  }
+  return on
+    ? "On. A buy must not fight the 4-hour trend. SOL margin can also wait for a setup on this chart."
+    : "Off. The bot will not wait for the 4-hour chart.";
 }
 
 function plainVenueHint(id: string, fallback: string): string {

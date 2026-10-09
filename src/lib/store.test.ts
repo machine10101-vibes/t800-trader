@@ -166,6 +166,8 @@ describe("store", () => {
     assert.equal(normalizeConfig({ multipliers: [] }).solTradeMode, "spot");
     assert.equal(normalizeConfig({ solTradeMode: "margin", multipliers: [] }).solTradeMode, "margin");
     assert.equal(normalizeConfig({ solTradeMode: "both", marginOnFourHour: true }).marginOnFourHour, true);
+    assert.deepEqual(normalizeConfig({}).logicFrames, ["15m", "1h", "4h"]);
+    assert.deepEqual(normalizeConfig({ logicFrames: ["5m", "4h"] }).logicFrames, ["5m", "4h"]);
     assert.equal(normalizeConfig({ startingEquity: 6 }).solTradeMode, "spot");
   });
 

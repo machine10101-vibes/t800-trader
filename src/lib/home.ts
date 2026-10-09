@@ -1,4 +1,5 @@
 import type { ChainId } from "@/lib/chain";
+import { logicFramesRule } from "@/lib/deskSettings";
 import { feeHurdlePct } from "@/lib/trading/fees";
 import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
@@ -74,17 +75,19 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour" | "cronosQuote">,
+  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour" | "cronosQuote" | "logicFrames">,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
-  const fourHourMargin = chain === "solana" && config.marginOnFourHour && config.solTradeMode !== "spot";
+  const fourOn = (config.logicFrames ?? ["15m", "1h", "4h"]).includes("4h");
+  const fourHourMargin = chain === "solana" && config.marginOnFourHour && config.solTradeMode !== "spot" && fourOn;
+  const charts = logicFramesRule(config.logicFrames ?? ["15m", "1h", "4h"]);
   const rules = [
     fourHourMargin && config.solTradeMode === "margin"
       ? "Finds SOL margin trades on a solid 4-hour setup. Other names are skipped."
       : fourHourMargin
-        ? "Finds spot trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. SOL margin waits for a solid 4-hour setup."
-        : "Finds its trades on the 15-minute chart, then checks the 1-hour and 4-hour charts. If either higher chart points the other way, it skips the trade.",
+        ? `${charts} SOL margin waits for a solid 4-hour setup.`
+        : charts,
     `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
     `Holds at most ${config.maxPositions} coins at once.`,

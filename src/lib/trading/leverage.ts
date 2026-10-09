@@ -73,7 +73,7 @@ export function tradeLeverage(args: {
   mint: string;
   mode?: BotConfig["solTradeMode"];
   marginOnFourHour?: boolean;
-  setupFrame?: "15m" | "4h";
+  setupFrame?: "5m" | "15m" | "1h" | "4h";
 }): 1 | Multiplier {
   const mode = args.mode ?? "spot";
   if (mode === "spot") return 1;

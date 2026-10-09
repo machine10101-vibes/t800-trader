@@ -1,3 +1,4 @@
+import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
 import type { BotConfig } from "@/lib/types";
 import { normalizeMultipliers } from "@/lib/trading/leverage";
 
@@ -43,6 +44,49 @@ export function resolveSolTradeMode(input?: Partial<BotConfig> | null, multiplie
 
 export function normalizeMarginOnFourHour(value: unknown): boolean {
   return typeof value === "boolean" ? value : false;
+}
+
+/** Older books that never stored this keep the current 15-minute entry plus 1-hour and 4-hour checks. */
+export const DEFAULT_LOGIC_FRAMES: Frame[] = ["15m", "1h", "4h"];
+
+export function isLogicFrame(value: unknown): value is Frame {
+  return value === "5m" || value === "15m" || value === "1h" || value === "4h";
+}
+
+export function normalizeLogicFrames(value: unknown): Frame[] {
+  if (!Array.isArray(value)) return [...DEFAULT_LOGIC_FRAMES];
+  const on = new Set(value.filter(isLogicFrame));
+  const next = FRAMES.filter((frame) => on.has(frame));
+  return next.length ? next : [...DEFAULT_LOGIC_FRAMES];
+}
+
+/** Keep at least one chart on. Turning the last one off leaves it on. */
+export function toggleLogicFrame(current: readonly Frame[], frame: Frame, on: boolean): Frame[] {
+  const next = on ? [...current, frame] : current.filter((item) => item !== frame);
+  const normalized = normalizeLogicFrames(next);
+  if (!on && current.length === 1 && current[0] === frame) return [frame];
+  return normalized;
+}
+
+export function entryLogicFrame(frames: readonly Frame[]): Frame {
+  return normalizeLogicFrames(frames)[0] ?? "15m";
+}
+
+export function confirmLogicFrames(frames: readonly Frame[]): Frame[] {
+  return normalizeLogicFrames(frames).slice(1);
+}
+
+export function logicFramesRule(frames: readonly Frame[]): string {
+  const enabled = normalizeLogicFrames(frames);
+  const entry = FRAME_LABEL[entryLogicFrame(enabled)];
+  const confirm = confirmLogicFrames(enabled).map((frame) => FRAME_LABEL[frame]);
+  if (!confirm.length) return `Finds its trades on the ${entry} chart.`;
+  if (confirm.length === 1) {
+    return `Finds its trades on the ${entry} chart, then checks the ${confirm[0]} chart. If that higher chart points the other way, it skips the trade.`;
+  }
+  const last = confirm[confirm.length - 1];
+  const head = confirm.slice(0, -1).join(", ");
+  return `Finds its trades on the ${entry} chart, then checks the ${head} and ${last} charts. If a higher chart that is on points the other way, it skips the trade.`;
 }
 
 export const CRONOS_QUOTES = ["usdc", "cro"] as const;

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { backCheck, deskEntrySignals, fourHourEntrySignals, frameEntrySignals, levelBlock } from "./mtf";
+import { backCheck, deskEntrySignals, fourHourEntrySignals, frameEntrySignals, levelBlock, logicEntrySignals } from "./mtf";
 import type { Candle, TokenCandidate } from "../types";
 
 function trend(n: number, step: number, start: number, sec: number, breakout = false): Candle[] {
@@ -190,5 +190,57 @@ describe("4-hour margin setups and spot vs margin mode", () => {
       marginOnFourHour: true,
     });
     assert.equal(decision.signals[0]?.setupFrame, "15m");
+  });
+});
+
+describe("user-selected logic charts", () => {
+  const up4h = trend(180, 0.001, 60, 14_400, true);
+  const up1h = trend(180, 0.002, 60, 3600);
+  const breakout5m = trend(120, 0.0003, 100, 300, true);
+
+  it("skips the 1-hour and 4-hour wait when those charts are off", () => {
+    const decision = logicEntrySignals(
+      token,
+      { m15: breakout15m, h1: trend(180, -0.002, 160, 3600), h4: trend(180, -0.002, 160, 14_400) },
+      70,
+      true,
+      ctx,
+      ["15m"],
+    );
+    assert.equal(decision.signals.length, 1);
+    assert.equal(decision.signals[0]?.setupFrame, "15m");
+    assert.match(decision.signals[0]?.thesis ?? "", /^15-minute long breakout\./);
+  });
+
+  it("finds the buy on the 5-minute chart when that is the shortest one on", () => {
+    const decision = logicEntrySignals(
+      token,
+      { m5: breakout5m, m15: trend(180, 0.002, 60, 900), h1: up1h, h4: up4h },
+      70,
+      true,
+      ctx,
+      ["5m", "15m", "1h", "4h"],
+    );
+    assert.equal(decision.signals[0]?.setupFrame, "5m");
+    assert.match(decision.signals[0]?.thesis ?? "", /^5-minute long breakout\. Back-check passed:/);
+  });
+
+  it("uses only the 4-hour chart when that is the one chart left on", () => {
+    const decision = logicEntrySignals(token, { m15: breakout15m, h1: up1h, h4: up4h }, 70, true, ctx, ["4h"]);
+    assert.equal(decision.signals[0]?.setupFrame, "4h");
+    assert.match(decision.signals[0]?.thesis ?? "", /Solid 4-hour structure/);
+  });
+
+  it("still respects a 4-hour fight when 4-hour stays on and 1-hour is off", () => {
+    const decision = logicEntrySignals(
+      token,
+      { m15: breakout15m, h1: trend(180, -0.002, 160, 3600), h4: trend(180, -0.002, 160, 14_400) },
+      70,
+      true,
+      ctx,
+      ["15m", "4h"],
+    );
+    assert.equal(decision.signals.length, 0);
+    assert.match(decision.pass ?? "", /4-hour trend is down/);
   });
 });
