@@ -41,7 +41,7 @@ const croAbi = [
   },
 ] as const;
 
-export type CronosVenue = "wolfswap" | "crotrade";
+export type CronosVenue = "wolfswap" | "vvs" | "crotrade";
 
 export interface CronosRoute {
   venue: CronosVenue;
@@ -92,15 +92,29 @@ export function cronosSwapPath(
 
 /**
  * WolfSwap's amount out already includes its route.
- * cro.trade is the VVS quote after the published 0.9% fee.
- * A tie stays on WolfSwap.
+ * VVS is the raw router quote. cro.trade is that same quote after the published 0.9% fee.
+ * A tie stays on WolfSwap, then VVS, then cro.trade.
  */
-export function decideRoute(wolfOut: bigint | null, vvsOut: bigint | null): { venue: CronosVenue; amountOut: bigint } | null {
-  const wolf = wolfOut && wolfOut > 0n ? wolfOut : null;
-  const cro = vvsOut && vvsOut > 0n ? afterFee(vvsOut, CRO_TRADE_FEE_BPS) : null;
-  if (!wolf && (!cro || cro <= 0n)) return null;
-  if (wolf && (!cro || wolf >= cro)) return { venue: "wolfswap", amountOut: wolf };
-  return { venue: "crotrade", amountOut: cro as bigint };
+export function decideRoute(
+  wolfOut: bigint | null,
+  vvsOut: bigint | null,
+  enabled: Partial<Record<CronosVenue, boolean>> = {},
+): { venue: CronosVenue; amountOut: bigint } | null {
+  const allowed = (venue: CronosVenue) => enabled[venue] !== false;
+  const wolf = allowed("wolfswap") && wolfOut && wolfOut > 0n ? wolfOut : null;
+  const vvs = allowed("vvs") && vvsOut && vvsOut > 0n ? vvsOut : null;
+  const cro = allowed("crotrade") && vvsOut && vvsOut > 0n ? afterFee(vvsOut, CRO_TRADE_FEE_BPS) : null;
+  const picks: { venue: CronosVenue; amountOut: bigint }[] = [];
+  if (wolf) picks.push({ venue: "wolfswap", amountOut: wolf });
+  if (vvs) picks.push({ venue: "vvs", amountOut: vvs });
+  if (cro && cro > 0n) picks.push({ venue: "crotrade", amountOut: cro });
+  if (!picks.length) return null;
+  const rank: Record<CronosVenue, number> = { wolfswap: 2, vvs: 1, crotrade: 0 };
+  picks.sort((a, b) => {
+    if (a.amountOut === b.amountOut) return rank[b.venue] - rank[a.venue];
+    return a.amountOut > b.amountOut ? -1 : 1;
+  });
+  return picks[0]!;
 }
 
 export function buildCroTradeCall(input: {
@@ -189,7 +203,7 @@ export async function quoteCronos(input: {
     quoteVvs(input.amountIn, path),
   ]);
   const picked = decideRoute(wolf?.amountOut ?? null, vvs);
-  if (!picked) throw new Error("WolfSwap and cro.trade have no route for this ticket");
+  if (!picked) throw new Error("WolfSwap, VVS, and cro.trade have no route for this ticket");
   return {
     venue: picked.venue,
     side: input.side,

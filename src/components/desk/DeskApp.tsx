@@ -1271,7 +1271,7 @@ function LiveConfirmModal({
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
       <div className="neon w-full max-w-lg p-6">
-        <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
+        <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap, VVS, and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
           {chain === "cronos"
             ? "PAPER stays the default. LIVE spends real USDC or CRO from the trading key after you arm, whichever you pick in Settings. You can lose that money plus CRO fees. The bot only buys and sells."
@@ -2704,12 +2704,12 @@ function Book({
       <div className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <Label>{swaps ? (chain === "cronos" ? "LIVE WolfSwap book" : "LIVE Jupiter book") : "PAPER book"}</Label>
+            <Label>{swaps ? (chain === "cronos" ? "LIVE WolfSwap, VVS, and cro.trade book" : "LIVE Jupiter book") : "PAPER book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
                 ? copy.bookArm
                 : chain === "cronos"
-                  ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends WolfSwap or cro.trade swaps."
+                  ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends WolfSwap, VVS, or cro.trade swaps."
                   : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
             </p>
           </div>

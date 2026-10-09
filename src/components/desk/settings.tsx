@@ -73,7 +73,7 @@ export function SettingsPanel({
           {local.allowMemes ? " · meme coins on" : " · meme coins off"}
           {local.oneTicketPerTick ? " · two new buys per check" : " · several new buys per check"}
           {" · "}
-          {chain === "cronos" ? "WolfSwap and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
+          {chain === "cronos" ? "WolfSwap, VVS, and cro.trade" : local.venues.length ? `${local.venues.length} buy places` : "no buy places"}
           {local.walletSwaps ? " · real money" : " · practice"}
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
@@ -237,8 +237,8 @@ export function SettingsPanel({
         <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
           <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
             {local.cronosQuote === "cro"
-              ? "A buy spends CRO on WolfSwap or cro.trade. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
-              : "A buy spends USDC on WolfSwap or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos."}
+              ? "A buy spends CRO on WolfSwap, VVS, or cro.trade. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
+              : "A buy spends USDC on WolfSwap, VVS, or cro.trade. A sell turns the coin back into USDC. There is no extra size on Cronos."}
           </p>
         </Section>
       ) : (
@@ -305,19 +305,25 @@ export function SettingsPanel({
           title="Where it buys"
           hint={
             local.cronosQuote === "cro"
-              ? "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends CRO. A sell turns the coin back into CRO."
-              : "Every Cronos buy and sell quotes WolfSwap and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
+              ? "Every Cronos buy and sell quotes WolfSwap, VVS, and cro.trade. The one that returns more is sent. A buy spends CRO. A sell turns the coin back into CRO."
+              : "Every Cronos buy and sell quotes WolfSwap, VVS, and cro.trade. The one that returns more is sent. A buy spends USDC. A sell turns the coin back into USDC."
           }
         >
           <Toggle
             label="WolfSwap"
-            hint="This stays on. The quote is compared with cro.trade."
+            hint="This stays on. The quote is compared with VVS and cro.trade."
+            checked
+            onChange={() => {}}
+          />
+          <Toggle
+            label="VVS Finance"
+            hint="This stays on. The desk sends the VVS router when that quote is the best."
             checked
             onChange={() => {}}
           />
           <Toggle
             label="cro.trade"
-            hint="This stays on. Its 0.9% fee is taken off the quote before the comparison."
+            hint="This stays on. Its 0.9% fee is taken off the VVS quote before the comparison."
             checked
             onChange={() => {}}
           />

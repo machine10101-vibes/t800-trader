@@ -72,6 +72,39 @@ describe("VVS routing", () => {
     assert.equal(call.value, 3n);
   });
 
+  it("sends a meme buy through WCRO on the VVS router", () => {
+    const token = "0xbf19931ebf1bc9fb85820aa8f6ba29030a9b9a27" as const;
+    const call = buildVvsCall({
+      method: "swapExactTokensForTokens",
+      amountIn: 10_000_000n,
+      amountOutMin: 1n,
+      path: [USDC, WCRO, token],
+      recipient: RECIPIENT,
+      deadline: 10n,
+    });
+    assert.equal(call.to, VVS_ROUTER);
+    const decoded = decodeFunctionData({
+      abi: [
+        {
+          name: "swapExactTokensForTokens",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "amountIn", type: "uint256" },
+            { name: "amountOutMin", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+          ],
+          outputs: [],
+        },
+      ],
+      data: call.data,
+    });
+    const path = (decoded.args[2] as readonly string[]).map((item) => item.toLowerCase());
+    assert.deepEqual(path, [USDC, WCRO, token]);
+  });
+
   it("sells wrapped CRO through the VVS router", () => {
     const plan = planVvsSell(1, 4);
     assert.equal(plan.method, "swapExactTokensForTokens");

@@ -26,9 +26,15 @@ describe("Cronos routes", () => {
   it("picks the venue that returns more after cro.trade's fee", () => {
     assert.equal(decideRoute(1000n, 1000n)?.venue, "wolfswap");
     assert.equal(decideRoute(1000n, null)?.venue, "wolfswap");
-    const croWins = decideRoute(900n, 1000n);
+    const vvsWins = decideRoute(900n, 1000n);
+    assert.equal(vvsWins?.venue, "vvs");
+    assert.equal(vvsWins?.amountOut, 1000n);
+    const croWins = decideRoute(900n, 1000n, { vvs: false });
     assert.equal(croWins?.venue, "crotrade");
     assert.equal(croWins?.amountOut, afterFee(1000n, 90));
+    assert.equal(decideRoute(null, 1000n)?.venue, "vvs");
+    assert.equal(decideRoute(2000n, 1000n, { wolfswap: false })?.venue, "vvs");
+    assert.equal(decideRoute(null, 1000n, { vvs: false, crotrade: false }), null);
     assert.equal(decideRoute(null, null), null);
     assert.equal(decideRoute(0n, 0n), null);
   });

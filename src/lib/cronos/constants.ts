@@ -14,7 +14,7 @@ export const CRONOS_POS_LCDS = [
 
 export const WCRO = "0x5c7f8a570d578ed84e63fdfa7b1ee72deae1ae23" as const;
 export const USDC = "0xc21223249ca28397b4b6541dffaecc539bff0c59" as const;
-/** VVS V2 router. cro.trade sends this path when its quote wins. */
+/** VVS V2 router. Direct VVS fills go here. cro.trade wraps this same path when its quote wins. */
 export const VVS_ROUTER = "0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae" as const;
 /**
  * cro.trade spot router. It takes a path and a DEX router.

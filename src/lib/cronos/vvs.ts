@@ -98,11 +98,12 @@ export function buildVvsCall(input: {
   method: VvsMethod;
   amountIn: bigint;
   amountOutMin: bigint;
-  path: readonly [`0x${string}`, `0x${string}`];
+  path: readonly `0x${string}`[];
   recipient: `0x${string}`;
   deadline: bigint;
 }): { to: typeof VVS_ROUTER; data: Hex; value: bigint } {
-  const path = [input.path[0], input.path[1]] as [`0x${string}`, `0x${string}`];
+  if (input.path.length < 2) throw new Error("VVS needs a token path");
+  const path = [...input.path] as `0x${string}`[];
   if (input.method === "swapExactETHForTokens") {
     return {
       to: VVS_ROUTER,
