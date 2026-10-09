@@ -350,13 +350,13 @@ export async function tickBot(
             blocked.push(`${token.symbol}: ${decision.missing} chart has not loaded`);
             return;
           }
-          const found = decision.signals.filter(
-            (signal) =>
-              signal.side === "long" &&
-              (signal.setupFrame === "4h" || signal.setupFrame === "1h"
-                ? true
-                : solanaKeepEntry(signal.side, marked.flows.m15.priceChangePct)),
-          );
+          const found = decision.signals.filter((signal) => {
+            if (signal.side !== "long") return false;
+            // Cronos already back-checked the 15-minute chart against 1-hour and 4-hour.
+            // The Solana 15-minute flow gate was throwing those longs away.
+            if (chain === "cronos" || signal.setupFrame === "4h" || signal.setupFrame === "1h") return true;
+            return solanaKeepEntry(signal.side, marked.flows.m15.priceChangePct);
+          });
           signals.push(...found);
           if (!found.length) {
             blocked.push(decision.pass ?? solanaPass(token.symbol, token.flows.m15.priceChangePct));
