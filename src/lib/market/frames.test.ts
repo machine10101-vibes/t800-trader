@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { closedCandles, enoughFrameBars } from "./frames";
+import { closedCandles, enoughFrameBars, sourceFrame } from "./frames";
 import type { Candle } from "@/lib/types";
 
 function bar(time: number): Candle {
@@ -14,6 +14,11 @@ describe("closedCandles", () => {
     const closed = closedCandles(rows, 900, now);
     assert.equal(closed.length, 1);
     assert.equal(closed[0]?.time, 1_700_000_000 - 900);
+  });
+
+  it("always reads a native 5-minute series", () => {
+    assert.equal(sourceFrame("solana", "5m"), "5m");
+    assert.equal(sourceFrame("cronos", "5m"), "5m");
   });
 
   it("accepts a short 4-hour tape before thirty bars exist", () => {

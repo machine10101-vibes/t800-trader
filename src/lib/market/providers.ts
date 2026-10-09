@@ -1075,8 +1075,9 @@ export async function loadFrameChart(mint: string, chain: ChainId, frame: Frame)
   return cachedFrameChart(mint, chain, frame) ?? have ?? [];
 }
 
-/** 15-minute first. The 1-hour and 4-hour come from that series unless a longer native chart is already in. */
+/** 5-minute on load. 15-minute fills the 1-hour. Solana still reads a native 4-hour when the roll-up is thin. */
 export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Record<Frame, Candle[]>> {
+  await loadFrameChart(mint, chain, "5m").catch(() => []);
   await loadFrameChart(mint, chain, "15m").catch(() => []);
   const four = cachedFrameChart(mint, chain, "4h");
   if (!four || !enoughFrameBars("4h", four.length)) await loadFrameChart(mint, chain, "4h").catch(() => []);
@@ -1088,18 +1089,18 @@ export async function loadFrameCharts(mint: string, chain: ChainId): Promise<Rec
   };
 }
 
-const DECISION_FRAMES: Frame[] = ["15m", "4h"];
+const WARM_FRAMES: Frame[] = ["5m", "15m", "4h"];
 
-/** Keep the 15-minute and 4-hour charts warm. The 1-hour is rolled up from the 15-minute. */
+/** Keep the 5-minute, 15-minute, and 4-hour charts warm. The 1-hour is rolled up from the 15-minute. */
 export function requestFrameCharts(mints: string[], chain: ChainId, extra: Frame[] = []): void {
-  const want = new Set<Frame>([...DECISION_FRAMES, ...extra.filter((frame) => frame === "5m")]);
+  const want = new Set<Frame>([...WARM_FRAMES, ...extra]);
   for (const mint of mints) {
     if (!mint) continue;
     for (const frame of want) void loadFrameChart(mint, chain, frame);
   }
 }
 
-/** Login and refresh start here. One 15-minute read per coin, plus Solana's native 4-hour. */
+/** Login and refresh start here. Native 5-minute and 15-minute per coin, plus Solana's 4-hour when needed. */
 export function prefetchFrameCharts(chain: ChainId): Promise<void> {
   const mints = bookMints(chain);
   return Promise.all(mints.map((mint) => loadFrameCharts(mint, chain).catch(() => undefined))).then(() => undefined);
