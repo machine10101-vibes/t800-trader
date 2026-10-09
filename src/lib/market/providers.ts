@@ -994,48 +994,51 @@ function rememberFrames(chain: ChainId, mint: string, source: Frame, rows: Candl
     if (four.length) {
       const key = decisionKey(chain, mint);
       const hit = decisionCache.get(key);
-      if (!hit?.rows.length || source === "4h") decisionCache.set(key, { at, rows: four.slice(-FRAME_BARS) });
+      if (!hit?.rows.length || source === "4h" || four.length > hit.rows.length) {
+        decisionCache.set(key, { at, rows: four.slice(-FRAME_BARS) });
+      }
     }
   }
 }
 
+function longerSeries(a: Candle[] | null | undefined, b: Candle[] | null | undefined): Candle[] | null {
+  if (a?.length && b?.length) return a.length >= b.length ? a : b;
+  return a?.length ? a : b?.length ? b : null;
+}
+
 function cachedRows(mint: string, chain: ChainId, frame: Frame): Candle[] | null {
-  if (frame === "4h") {
-    const decision = cachedDecisionChart(mint, chain);
-    if (decision?.length) return decision;
-  }
   const hit = frameCache.get(frameKey(chain, mint, frame));
-  return hit?.rows.length ? hit.rows : null;
+  const cached = hit?.rows.length ? hit.rows : null;
+  if (frame === "4h") return longerSeries(cachedDecisionChart(mint, chain), cached);
+  return cached;
 }
 
 /** Native bars, or a longer frame rolled up from a shorter series already in memory. */
 export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Candle[] | null {
   const direct = cachedRows(mint, chain, frame);
-  if (direct?.length) return direct;
-  if (frame === "15m") return derivedFrames(cachedRows(mint, chain, "5m") ?? [], "5m")["15m"] ?? null;
+  if (frame === "15m") return direct?.length ? direct : derivedFrames(cachedRows(mint, chain, "5m") ?? [], "5m")["15m"] ?? null;
   if (frame === "1h") {
+    if (direct?.length) return direct;
     const from15 = derivedFrames(cachedRows(mint, chain, "15m") ?? [], "15m")["1h"];
     if (from15?.length) return from15;
     return derivedFrames(cachedRows(mint, chain, "5m") ?? [], "5m")["1h"] ?? null;
   }
   if (frame === "4h") {
     const from1 = derivedFrames(cachedRows(mint, chain, "1h") ?? [], "1h")["4h"];
-    if (from1 && enoughFrameBars("4h", from1.length)) return from1;
     const from15 = derivedFrames(cachedRows(mint, chain, "15m") ?? [], "15m")["4h"];
-    if (from15 && enoughFrameBars("4h", from15.length)) return from15;
+    const best = longerSeries(longerSeries(direct, from1), from15);
+    return best?.length ? best : null;
   }
-  return null;
+  return direct;
 }
 
 async function readFrameSource(mint: string, chain: ChainId, source: Frame): Promise<void> {
   if (chain === "cronos") {
     const book = await loadVvsFrames(mint);
     if (!book) throw new Error("empty");
-    if (book.five.length) rememberFrames(chain, mint, "5m", book.five);
+    // Hour bars first so a thin 5-minute roll-up cannot pin the 4-hour tape at eight bars.
     if (book.hourly.length) rememberFrames(chain, mint, "1h", book.hourly);
-    else if (book.five.length && (source === "1h" || source === "4h")) {
-      rememberFrames(chain, mint, "5m", book.five);
-    }
+    if (book.five.length) rememberFrames(chain, mint, "5m", book.five);
     if (!cachedFrameChart(mint, chain, source)?.length && !book.five.length && !book.hourly.length) throw new Error("empty");
     return;
   }
