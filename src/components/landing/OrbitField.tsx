@@ -96,7 +96,11 @@ export function OrbitField() {
       const orbit = ((now - started) / 1000) * speed;
       const px = pointer.current.x * 10;
       const py = pointer.current.y * 6;
-      world.style.transform = `rotateX(${14 + py}deg) rotateY(${-22 + px}deg)`;
+      const tiltX = 14 + py;
+      const tiltY = -22 + px;
+      world.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+      const machine = stage.querySelector<HTMLElement>(".machine");
+      if (machine) machine.style.transform = `rotateY(${-tiltY}deg) rotateX(${-tiltX}deg)`;
       ring.style.transform = `rotateX(58deg) rotateY(${orbit}deg)`;
       const step = 360 / tokens.length;
       const front = Math.round((((-orbit % 360) + 360) % 360) / step) % tokens.length;

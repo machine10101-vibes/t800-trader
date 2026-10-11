@@ -291,16 +291,19 @@
 .machine {
   position: absolute;
   left: 50%;
-  top: 48%;
-  width: min(300px, 34vw);
-  margin-left: calc(min(300px, 34vw) / -2);
-  margin-top: -210px;
+  top: 46%;
+  width: min(400px, 42vw);
+  margin-left: calc(min(400px, 42vw) / -2);
+  margin-top: -220px;
+  transform: rotateY(22deg) rotateX(-14deg);
+  pointer-events: none;
 }
 
-.machine-svg {
+.machine-photo {
   width: 100%;
   height: auto;
   display: block;
+  filter: drop-shadow(0 28px 36px rgba(0, 0, 0, 0.55));
 }
 
 .ring {
@@ -682,9 +685,9 @@
   }
 
   .machine {
-    width: 210px;
-    margin-left: -105px;
-    margin-top: -150px;
+    width: min(250px, 70vw);
+    margin-left: calc(min(250px, 70vw) / -2);
+    margin-top: -120px;
   }
 }
 
