@@ -47,6 +47,7 @@ import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDes
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
 import { MIN_TRADE_USD, rMultiple } from "@/lib/trading/risk";
@@ -915,7 +916,9 @@ function ChainDesk({
       <div className="min-h-dvh overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-xl">
         <div className="neon boot-fade w-full max-w-xl p-5 sm:p-10">
-          <div className="orb mb-6 grid place-items-center text-lg font-semibold text-[var(--accent-ink)]">T8</div>
+          <Link href="/" aria-label="Back to the landing" className="orb mb-6 grid place-items-center text-lg font-semibold text-[var(--accent-ink)] no-underline">
+            T8
+          </Link>
           <div className="mb-5 flex justify-end">
             <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
           </div>
@@ -1421,7 +1424,7 @@ function Header({
     <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--header)] pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <Link href="/" className="flex min-w-0 items-center gap-2 sm:gap-3">
             <div className="brand-mark grid h-9 w-9 shrink-0 place-items-center rounded-xl text-sm font-semibold text-[var(--magenta)]">
               T8
             </div>
@@ -1429,7 +1432,7 @@ function Header({
               <div className="truncate text-sm font-medium">T-800 Trader</div>
               <div className="hidden text-[11px] uppercase tracking-[0.2em] text-[var(--faint)] sm:block">Live stream</div>
             </div>
-          </div>
+          </Link>
           <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={onSwitch} />
           <div className="hidden items-center gap-5 md:flex">
             <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
