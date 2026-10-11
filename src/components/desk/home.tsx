@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
+import { appliedScanSeconds } from "@/lib/deskSettings";
 import type { CashLeg } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
@@ -87,7 +88,7 @@ export function Home({
     lastTickAt: desk.bot.lastTickAt,
     ticks: desk.bot.ticks,
     blocked: desk.bot.blocked,
-    scanSeconds: desk.config.scanSeconds,
+    scanSeconds: appliedScanSeconds(desk.config),
     positions,
     trades,
     portfolio: desk.portfolio,

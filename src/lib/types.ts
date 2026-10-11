@@ -1,3 +1,5 @@
+import type { RulesOn } from "@/lib/deskSettings";
+
 export type Timeframe = "m5" | "m15" | "m30" | "h1" | "h6" | "h24";
 
 export type Sector =
@@ -205,6 +207,10 @@ export interface Position {
   scaled: boolean;
   /** Stop and target were locked at entry. Later setting changes do not move them. */
   bracketPreset?: boolean;
+  /** False when sell-if-it-falls was off at entry. Missing means the stop is on. */
+  stopEnabled?: boolean;
+  /** False when sell-if-it-rises was off at entry. Missing means the target is on. */
+  targetEnabled?: boolean;
   /** Preset loss as a percent of the ticket price (qty × entry). */
   stopLossPct?: number;
   /** Preset profit as a percent of the ticket price (qty × entry). */
@@ -325,6 +331,11 @@ export interface BotConfig {
   minSolForFees: number;
   /** When on, new LIVE tickets are refused. Open signed tickets can still close. */
   killSwitch: boolean;
+  /**
+   * On/off for each adjustable rule. Missing keys stay on.
+   * Solana and Cronos each keep their own copy on that desk's book.
+   */
+  rulesOn: RulesOn;
 }
 
 export interface ChainOrder {
@@ -343,6 +354,10 @@ export interface ChainOrder {
   positionPubkey?: string;
   /** Cronos quote this ticket spends and returns. */
   cronosQuote?: "usdc" | "cro";
+  /** Quote wiggle room in basis points. Missing uses the built-in 80. */
+  slippageBps?: number;
+  /** Native coin a buy must leave behind for fees. Missing uses the built-in cushion. */
+  minNativeForFees?: number;
 }
 
 export interface ChainFill {

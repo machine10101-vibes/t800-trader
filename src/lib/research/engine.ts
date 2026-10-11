@@ -1,4 +1,5 @@
 import { sameMint, type ChainId } from "@/lib/chain";
+import { ruleOn } from "@/lib/deskSettings";
 import { cachedOhlcv, loadMarket, skeletonBook } from "@/lib/market/providers";
 import { foldCandles, tapeRead } from "@/lib/market/tape";
 import { bookTokens, isActiveBook, SOL_MINT } from "@/lib/market/universe";
@@ -282,9 +283,9 @@ export async function runResearch(
   ];
   const screen = bookScreen(
     {
-      minLiquidityUsd: config.minLiquidityUsd,
-      minVolume24hUsd: config.minVolume24hUsd,
-      minAgeHours: config.minAgeHours,
+      minLiquidityUsd: ruleOn(config, "liquidity") ? config.minLiquidityUsd : 0,
+      minVolume24hUsd: ruleOn(config, "volume") ? config.minVolume24hUsd : 0,
+      minAgeHours: ruleOn(config, "poolAge") ? config.minAgeHours : 0,
       allowMemes: config.allowMemes,
       venues: config.venues,
     },
@@ -343,9 +344,9 @@ export async function runResearch(
 
 function screenKey(config: BotConfig): string {
   return [
-    config.minLiquidityUsd,
-    config.minVolume24hUsd,
-    config.minAgeHours,
+    ruleOn(config, "liquidity") ? config.minLiquidityUsd : 0,
+    ruleOn(config, "volume") ? config.minVolume24hUsd : 0,
+    ruleOn(config, "poolAge") ? config.minAgeHours : 0,
     config.allowMemes ? 1 : 0,
     venueSummary(config.venues ?? []),
     [...(config.venues ?? [])].slice().sort().join(","),

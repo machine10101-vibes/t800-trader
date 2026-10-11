@@ -11,11 +11,14 @@ import {
   DEFAULT_CRONOS_QUOTE,
   DEFAULT_LOGIC_FRAMES,
   DEFAULT_SOL_TRADE_MODE,
+  armedFundsUsd,
   normalizeArmFundsUsd,
   normalizeBuySizeUsd,
   normalizeCronosQuote,
+  defaultRulesOn,
   normalizeLogicFrames,
   normalizeMarginOnFourHour,
+  normalizeRulesOn,
   resolveSolTradeMode,
 } from "@/lib/deskSettings";
 import { MIN_TRADE_USD, POLICY } from "@/lib/trading/risk";
@@ -47,6 +50,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   cronosQuote: DEFAULT_CRONOS_QUOTE,
   minSolForFees: 0.02,
   killSwitch: false,
+  rulesOn: defaultRulesOn(),
 };
 
 function clampNum(value: unknown, fallback: number, min: number, max: number, round = false): number {
@@ -108,6 +112,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     cronosQuote: normalizeCronosQuote(src.cronosQuote),
     minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
     killSwitch: asBool(src.killSwitch, false),
+    rulesOn: normalizeRulesOn(input?.rulesOn),
     strategyRev: clampNum(input?.strategyRev, 0, 0, 99, true),
     ...liveSwapChoice(input, src),
   };
@@ -395,7 +400,7 @@ function dropStaleLiveLock(state: AppState): AppState {
 
 export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppState {
   if (!isIdleEmptyBook(state)) return state;
-  const target = state.config.armFundsUsd;
+  const target = armedFundsUsd(state.config);
   if (state.config.walletSwaps && liveEquityUsd < MIN_TRADE_USD) return state;
   if (target < MIN_TRADE_USD) return state;
   return keepRunningBot(state, emptyState({ ...state.config, startingEquity: target }));
@@ -404,7 +409,7 @@ export function seedFromLiveEquity(state: AppState, liveEquityUsd: number): AppS
 /** Flat book only. A sub-$3 live read leaves an already funded book alone. */
 export function freshBook(state: AppState, liveEquityUsd: number): AppState {
   if (state.positions.length > 0 || state.trades.length > 0) return state;
-  const target = state.config.armFundsUsd;
+  const target = armedFundsUsd(state.config);
   if (state.config.walletSwaps && liveEquityUsd < MIN_TRADE_USD) return state;
   if (target < MIN_TRADE_USD) return state;
   return keepRunningBot(state, emptyState({ ...state.config, startingEquity: target }));

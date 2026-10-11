@@ -1,3 +1,4 @@
+import { ruleOn, ticketBuyUsd } from "@/lib/deskSettings";
 import type { BotConfig, MarketRegime, Portfolio, Position, Signal, Trade } from "@/lib/types";
 import { feeHurdlePct, targetAboveFees } from "./fees";
 import { JUPITER_MIN_COLLATERAL_USD, PERP_MIN_COLLATERAL_USD, PERP_RENT_SOL } from "./leverage";
@@ -61,6 +62,7 @@ export function sizeCapPct(equity: number, stance: MarketRegime["stance"]): numb
 }
 
 export function dayLossBreached(portfolio: Portfolio, config: BotConfig): boolean {
+  if (!ruleOn(config, "dailyLoss")) return false;
   const dd = ((portfolio.dayStartEquity - portfolio.equityUsd) / Math.max(portfolio.dayStartEquity, 1)) * 100;
   return dd >= config.dailyLossLimitPct;
 }
@@ -112,8 +114,8 @@ export function sizePosition(args: {
   if (price <= 0 || stopPct <= 0) return { qty: 0, notional: 0 };
 
   const capPct = sizeCapPct(equity, regime.stance);
-  const target = Math.max(MIN_TICKET_USD, config.buySizeUsd || 0);
-  const liveCap = config.maxLiveNotionalUsd > 0 ? config.maxLiveNotionalUsd : target;
+  const target = Math.max(MIN_TICKET_USD, ticketBuyUsd(config));
+  const liveCap = ruleOn(config, "maxNotional") && config.maxLiveNotionalUsd > 0 ? config.maxLiveNotionalUsd : target;
   const notional = Math.min(target, liveCap, equity * capPct);
   if (notional < MIN_TICKET_USD) return { qty: 0, notional: 0 };
   const qty = notional / price;
@@ -240,20 +242,25 @@ export function canOpen(args: {
     return "Micro book rides two tickets";
   }
   if (positions.some((p) => p.mint === signal.mint)) return "Already in this mint";
-  if (config.maxPositions > 0 && positions.length >= config.maxPositions) {
+  if (ruleOn(config, "maxPositions") && config.maxPositions > 0 && positions.length >= config.maxPositions) {
     return `Holding ${config.maxPositions} coins, the most allowed at once`;
   }
   if (dayLossBreached(portfolio, config)) return "Daily loss limit";
   const minCash = args.minCashUsd ?? MIN_TRADE_USD;
   if (portfolio.cashUsd < minCash) return "Insufficient cash";
   const breakoutScore = policyNum(config.defensiveBreakoutScore, POLICY.defensiveBreakoutScore);
-  if (stance === "defensive" && signal.reason === "breakout" && (signal.researchScore ?? 0) < breakoutScore) {
+  if (
+    ruleOn(config, "defensiveScore") &&
+    stance === "defensive" &&
+    signal.reason === "breakout" &&
+    (signal.researchScore ?? 0) < breakoutScore
+  ) {
     return `Breakouts need a ${breakoutScore}+ score when defensive`;
   }
   const sector = signal.sector ?? "Unknown";
   const sameSector = positions.filter((p) => (p.sector ?? "Unknown") === sector).length;
   const sectorCap = Math.max(1, policyNum(config.maxPerSector, POLICY.maxPerSector));
-  if (sameSector >= sectorCap) return `Sector cap of ${sectorCap} reached for ${sector}`;
+  if (ruleOn(config, "maxPerSector") && sameSector >= sectorCap) return `Sector cap of ${sectorCap} reached for ${sector}`;
   if (sector === "Meme" && stance === "defensive") return "Memes are flattened in a defensive tape, so none are opened";
   if (sector === "Meme" && positions.filter((p) => p.sector === "Meme").length >= 1 && stance !== "risk-on") {
     return "Meme cluster capped off risk-on";
@@ -261,18 +268,18 @@ export function canOpen(args: {
   const lastStop = trades.find(
     (t) => t.mint === signal.mint && t.action === "close" && (t.reason === "stop" || t.reason === "time" || t.reason === "risk-off"),
   );
-  const cooldownMin = Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes));
+  const cooldownMin = ruleOn(config, "cooldown") ? Math.max(0, policyNum(config.cooldownMinutes, POLICY.cooldownMinutes)) : 0;
   const cooldownMs = cooldownMin * 60_000;
   if (cooldownMs > 0 && lastStop && Date.now() - Date.parse(lastStop.at) < cooldownMs) {
     return "Cooldown after a stop/time-out on this mint";
   }
-  const streakCap = policyNum(config.lossStreakPause, POLICY.lossStreakPause);
+  const streakCap = ruleOn(config, "lossStreak") ? policyNum(config.lossStreakPause, POLICY.lossStreakPause) : 0;
   if (lossStreakPaused(trades, streakCap)) return `Cooling for an hour after ${streakCap} straight losses`;
   const budget = policyNum(config.dayBudgetPct, POLICY.dayBudgetPct) / 100;
-  if (dayLossUsedPct(portfolio, config) >= budget) return "Protect remaining day budget";
+  if (ruleOn(config, "dayBudget") && dayLossUsedPct(portfolio, config) >= budget) return "Protect remaining day budget";
   const floor = policyNum(config.minConfidence, POLICY.minConfidence);
   const need = signal.sector === "Meme" || signal.sector === "Unknown" ? floor + 4 : floor;
-  if (signal.confidence < need) return "Confidence below the quality floor";
+  if (ruleOn(config, "confidence") && signal.confidence < need) return "Confidence below the quality floor";
   return null;
 }
 
@@ -340,18 +347,20 @@ export function exitReason(
   const { usd } = unrealizedPnl(position);
   const ageMin = positionAgeMin(position, nowMs);
   const fallback = (position.sector ?? "Unknown") === "Meme" ? POLICY.memeTimeCapMin : POLICY.timeCapMin;
-  const timeCap = policyNum(timeCapMin, fallback);
+  const timeCap = timeCapMin === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : policyNum(timeCapMin, fallback);
   const trailFrac = (position.leverage ?? 1) >= 5 ? 0.35 : 0.55;
+  const stopOn = position.stopEnabled !== false;
+  const targetOn = position.targetEnabled !== false;
   if (position.side === "long") {
-    if (position.markPrice <= position.stopPrice) return "stop";
-    if (position.markPrice >= position.targetPrice) return "target";
+    if (stopOn && position.markPrice <= position.stopPrice) return "stop";
+    if (targetOn && position.markPrice >= position.targetPrice) return "target";
     const locked = position.entryPrice + (position.targetPrice - position.entryPrice) * trailFrac;
-    if (usd > 0 && position.highWater >= locked && position.markPrice < locked) return "trail";
+    if (targetOn && usd > 0 && position.highWater >= locked && position.markPrice < locked) return "trail";
   } else {
-    if (position.markPrice >= position.stopPrice) return "stop";
-    if (position.markPrice <= position.targetPrice) return "target";
+    if (stopOn && position.markPrice >= position.stopPrice) return "stop";
+    if (targetOn && position.markPrice <= position.targetPrice) return "target";
     const locked = position.entryPrice - (position.entryPrice - position.targetPrice) * trailFrac;
-    if (usd > 0 && position.highWater <= locked && position.markPrice > locked) return "trail";
+    if (targetOn && usd > 0 && position.highWater <= locked && position.markPrice > locked) return "trail";
   }
   if (ageMin > timeCap) return "time";
   return null;
@@ -450,7 +459,14 @@ export function presetBracket(position: Position, config?: Partial<BotConfig>): 
     position.leverage ?? 1,
     policyNum(config?.targetProfitPct, POLICY.targetProfitPct),
   );
-  return { ...alignBracket(position, { ...config, targetProfitPct }), bracketPreset: true, stopLossPct, targetProfitPct };
+  return {
+    ...alignBracket(position, { ...config, targetProfitPct }),
+    bracketPreset: true,
+    stopLossPct,
+    targetProfitPct,
+    stopEnabled: ruleOn(config, "stopLoss"),
+    targetEnabled: ruleOn(config, "targetProfit"),
+  };
 }
 
 /** True when a sale at this mark would net more than the open fee and the close fee together. */
@@ -482,18 +498,26 @@ export function managePosition(
 ): { nextStop?: number; exit?: "stop" | "target" | "trail" | "time" | "risk-off"; scale?: boolean; feeHold?: boolean } {
   const pnlPct = unrealizedPnl(position).pct;
   const clears = profitClearsFees(position);
-  if (typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) {
+  const stopOn = position.stopEnabled !== false;
+  const targetOn = position.targetEnabled !== false;
+  if (targetOn && typeof position.targetProfitPct === "number" && pnlPct >= position.targetProfitPct - 1e-6) {
     if (pnlPct <= 0 || clears) return { exit: "target" };
     return { feeHold: true };
   }
-  if (typeof position.stopLossPct === "number" && pnlPct <= -position.stopLossPct + 1e-6) return { exit: "stop" };
+  if (stopOn && typeof position.stopLossPct === "number" && pnlPct <= -position.stopLossPct + 1e-6) return { exit: "stop" };
   const meme = (position.sector ?? "Unknown") === "Meme";
-  const timeCap = meme
-    ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)
-    : policyNum(config?.timeCapMin, POLICY.timeCapMin);
-  const staleMin = meme
-    ? policyNum(config?.memeStaleMin, POLICY.memeStaleMin)
-    : policyNum(config?.staleMin, POLICY.staleMin);
+  const timeOn = ruleOn(config, meme ? "memeTimeCap" : "timeCap");
+  const staleOn = ruleOn(config, meme ? "memeStale" : "staleExit");
+  const timeCap = timeOn
+    ? meme
+      ? policyNum(config?.memeTimeCapMin, POLICY.memeTimeCapMin)
+      : policyNum(config?.timeCapMin, POLICY.timeCapMin)
+    : Number.POSITIVE_INFINITY;
+  const staleMin = staleOn
+    ? meme
+      ? policyNum(config?.memeStaleMin, POLICY.memeStaleMin)
+      : policyNum(config?.staleMin, POLICY.staleMin)
+    : Number.POSITIVE_INFINITY;
   const speed = leverageHurry(position.leverage);
   const hurriedCap = timeCap * (speed < 1 ? Math.max(speed, 0.5) : 1);
   const hurriedStale = staleMin * speed;
@@ -507,26 +531,31 @@ export function managePosition(
   if (stale) return { exit: "time" };
   if (hard) return { exit: hard };
 
+  const protectOn = ruleOn(config, "protectGain");
+  const scaleOn = ruleOn(config, "scaleOut");
+  const lockOn = ruleOn(config, "lockProfit");
   const beR = policyNum(config?.beR, POLICY.beR) * speed;
   const scaleAt = policyNum(config?.scaleAtR, POLICY.scaleAtR) * speed;
   const lockAt = policyNum(config?.lockAtR, POLICY.lockAtR) * (speed < 1 ? Math.min(speed + 0.2, 1) : 1);
   const lockProfit = policyNum(config?.lockProfitR, POLICY.lockProfitR);
   const risk = Math.abs(position.entryPrice - (position.initialStop || position.stopPrice));
-  const lockR = r >= lockAt ? lockProfit : 0.05;
+  const armedBe = protectOn && r >= beR;
+  const armedLock = lockOn && r >= lockAt;
+  const lockR = armedLock ? lockProfit : 0.05;
   let be = position.side === "long" ? position.entryPrice + risk * lockR : position.entryPrice - risk * lockR;
   const hurdle = feeHurdlePct(position.mint, position.symbol, position.leverage ?? 1);
   if (hurdle > 0 && clears) {
     const floor = priceFromEntry(position.entryPrice, position.side, hurdle, "target");
     be = position.side === "long" ? Math.max(be, floor) : Math.min(be, floor);
   }
-  if (r >= beR && (hurdle === 0 || clears)) {
+  if ((armedBe || armedLock) && (hurdle === 0 || clears)) {
     const tighter = position.side === "long" ? Math.max(position.stopPrice, be) : Math.min(position.stopPrice, be);
     if (position.side === "long" ? tighter > position.stopPrice : tighter < position.stopPrice) {
-      if (r >= scaleAt && !position.scaled) return { nextStop: tighter, scale: true };
+      if (scaleOn && r >= scaleAt && !position.scaled) return { nextStop: tighter, scale: true };
       return { nextStop: tighter };
     }
   }
 
-  if (r >= scaleAt && !position.scaled && (hurdle === 0 || clears)) return { scale: true };
+  if (scaleOn && r >= scaleAt && !position.scaled && (hurdle === 0 || clears)) return { scale: true };
   return {};
 }

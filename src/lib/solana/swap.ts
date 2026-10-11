@@ -53,11 +53,16 @@ export function planSpotOrder(
   if (order.side === "short") {
     throw new Error("Wallet swaps are spot buys and sells. Shorts are not sent to the wallet.");
   }
-  if (order.kind === "open" && order.sol < MIN_SOL) {
-    throw new Error("Need at least 0.005 SOL in the wallet to pay the network fee.");
-  }
   const dexes = dexesForVenues(order.venues);
-  const slippageBps = SLIPPAGE_BPS;
+  const slippageBps = order.slippageBps ?? SLIPPAGE_BPS;
+  const feeFloor = order.minNativeForFees ?? MIN_SOL;
+  if (order.kind === "open" && order.sol < feeFloor) {
+    throw new Error(
+      feeFloor === MIN_SOL
+        ? "Need at least 0.005 SOL in the wallet to pay the network fee."
+        : `Need at least ${feeFloor} SOL in the wallet to pay the network fee.`,
+    );
+  }
   if (order.kind === "open") {
     if (!(order.notionalUsd > 0)) throw new Error("Ticket notional is empty");
     if (order.mint === SOL_MINT && order.usdc + 1e-6 < order.notionalUsd) {
@@ -228,7 +233,7 @@ async function settleUltraClose(
     outputMint: USDC_MINT,
     amount: toAtomic(qty, tokenDecimals),
     taker: trader,
-    slippageBps: SLIPPAGE_BPS,
+    slippageBps: order.slippageBps ?? SLIPPAGE_BPS,
   });
   const tx = decodeSwapTransaction(orderRes.transaction);
   tx.sign([signer]);

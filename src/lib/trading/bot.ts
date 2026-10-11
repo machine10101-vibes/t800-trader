@@ -1,4 +1,5 @@
 import { sameMint, type ChainId } from "@/lib/chain";
+import { ruleOn, stampQuote } from "@/lib/deskSettings";
 import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
 import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline, withFrameTape } from "@/lib/market/tape";
 import { GAS_CRO } from "@/lib/cronos/constants";
@@ -86,7 +87,7 @@ async function walletExit(
       return state;
     }
     try {
-      const fill = await executor(orderForPosition(pos, "close", state.config.venues));
+      const fill = await executor(stampQuote(orderForPosition(pos, "close", state.config.venues), state.config));
       return afterWinningClose(closePosition(state, pos.id, fill.price, reason, fill.signature), chain, true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "wallet sell failed";
@@ -193,7 +194,7 @@ export async function tickBot(
               blocked.push(`${pos.symbol}: this page cannot ask the wallet to sign the scale-out`);
             } else {
               try {
-                const fill = await executor(orderForPosition(pos, "scale", next.config.venues, fraction));
+                const fill = await executor(stampQuote(orderForPosition(pos, "scale", next.config.venues, fraction), next.config));
                 next = await afterWinningClose(scaleOut(next, pos.id, fraction, fill.signature, fill.price), chain, true);
               } catch (error) {
                 blocked.push(`${pos.symbol}: ${error instanceof Error ? error.message : "wallet scale-out failed"}`);
@@ -479,7 +480,11 @@ export async function tickBot(
           const ticket = leveragedTicket(sized.notional * advice.sizeMul, paying, cashCap, wantedLev);
           let leverage = ticket.leverage;
           let collateralUsd = ticket.collateralUsd;
-          if (next.config.walletSwaps && collateralUsd > next.config.maxLiveNotionalUsd + 1e-9) {
+          if (
+            ruleOn(next.config, "maxNotional") &&
+            next.config.walletSwaps &&
+            collateralUsd > next.config.maxLiveNotionalUsd + 1e-9
+          ) {
             collateralUsd = next.config.maxLiveNotionalUsd;
           }
           if (leverage > 1 && !(collateralUsd + 1e-9 >= PERP_MIN_COLLATERAL_USD)) {
@@ -505,19 +510,24 @@ export async function tickBot(
             let stamp: Awaited<ReturnType<ChainExecutor>> | undefined;
             if (next.config.walletSwaps && executor) {
               try {
-                stamp = await executor({
-                  kind: "open",
-                  side: learned.side,
-                  mint: learned.mint,
-                  symbol: learned.symbol,
-                  notionalUsd: qty * learned.price,
-                  qty,
-                  price: learned.price,
-                  venues: next.config.venues,
-                  leverage: leverage > 1 ? leverage : undefined,
-                  collateralUsd: leverage > 1 ? collateralUsd : undefined,
-                  cronosQuote: chain === "cronos" ? next.config.cronosQuote : undefined,
-                });
+                stamp = await executor(
+                  stampQuote(
+                    {
+                      kind: "open",
+                      side: learned.side,
+                      mint: learned.mint,
+                      symbol: learned.symbol,
+                      notionalUsd: qty * learned.price,
+                      qty,
+                      price: learned.price,
+                      venues: next.config.venues,
+                      leverage: leverage > 1 ? leverage : undefined,
+                      collateralUsd: leverage > 1 ? collateralUsd : undefined,
+                      cronosQuote: chain === "cronos" ? next.config.cronosQuote : undefined,
+                    },
+                    next.config,
+                  ),
+                );
               } catch (error) {
                 const message = error instanceof Error ? error.message : "wallet swap failed";
                 blocked.push(`${learned.symbol}: ${message}`);
