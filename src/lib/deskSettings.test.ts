@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  appliedScanSeconds,
+  armedFundsUsd,
   commitTicketCap,
   logicFramesRule,
   multipliersForMode,
@@ -10,7 +12,11 @@ import {
   normalizeCronosQuote,
   normalizeLogicFrames,
   normalizeMarginOnFourHour,
+  normalizeRulesOn,
+  quoteSlippageBps,
   resolveSolTradeMode,
+  ruleOn,
+  ticketBuyUsd,
   toggleLogicFrame,
   usdcToLoad,
 } from "./deskSettings";
@@ -70,6 +76,27 @@ describe("cronos quote", () => {
     assert.equal(normalizeCronosQuote("sol"), "usdc");
     assert.equal(normalizeConfig({ cronosQuote: "cro" }).cronosQuote, "cro");
     assert.equal(normalizeConfig({}).cronosQuote, "usdc");
+  });
+});
+
+describe("rule switches", () => {
+  it("keeps every rule on when an older book never stored the switches", () => {
+    const rules = normalizeRulesOn(undefined);
+    assert.equal(ruleOn({ rulesOn: rules }, "stopLoss"), true);
+    assert.equal(ruleOn({}, "dailyLoss"), true);
+    assert.equal(normalizeConfig({}).rulesOn.stopLoss, true);
+    assert.equal(normalizeConfig({ rulesOn: { ...rules, stopLoss: false, scan: false } }).rulesOn.stopLoss, false);
+    assert.equal(normalizeConfig({ rulesOn: { ...rules, stopLoss: false } }).rulesOn.targetProfit, true);
+  });
+
+  it("uses the built-in number when that rule is off", () => {
+    const off = normalizeRulesOn({ armFunds: false, buySize: false, scan: false, slippage: false });
+    assert.equal(armedFundsUsd({ armFundsUsd: 150, rulesOn: off }), 50);
+    assert.equal(ticketBuyUsd({ armFundsUsd: 150, buySizeUsd: 50, rulesOn: off }), 10);
+    assert.equal(appliedScanSeconds({ scanSeconds: 30, rulesOn: off }), 5);
+    assert.equal(quoteSlippageBps({ slippageBps: 150, rulesOn: off }), 80);
+    assert.equal(quoteSlippageBps({ slippageBps: 150, rulesOn: normalizeRulesOn({ slippage: true }) }), 150);
+    assert.equal(armedFundsUsd({ armFundsUsd: 25, rulesOn: normalizeRulesOn(undefined) }), 25);
   });
 });
 

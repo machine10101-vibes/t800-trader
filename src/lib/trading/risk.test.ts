@@ -942,4 +942,73 @@ describe("settings stop and target", () => {
     const croCleared = { ...cro, markPrice: 102, highWater: 102 };
     assert.equal(managePosition(croCleared).exit, "time");
   });
+
+  it("skips a rule when that switch is off and still uses it when the switch is on", () => {
+    const quiet = { ...DEFAULT_CONFIG, minConfidence: 80, rulesOn: { ...DEFAULT_CONFIG.rulesOn, confidence: false } };
+    const signal = {
+      id: "s",
+      mint: "zzz",
+      symbol: "ZZZ",
+      poolAddress: "p",
+      sector: "DEX",
+      side: "long",
+      reason: "reclaim",
+      confidence: 51,
+      price: 1,
+      stopPct: 2,
+      targetPct: 4,
+      thesis: "t",
+      researchScore: 80,
+      createdAt: new Date().toISOString(),
+    } as Signal;
+    assert.equal(canOpen({ positions: [], signal, config: quiet, portfolio: portfolio() }), null);
+    assert.equal(
+      canOpen({ positions: [], signal, config: { ...quiet, rulesOn: DEFAULT_CONFIG.rulesOn }, portfolio: portfolio() }),
+      "Confidence below the quality floor",
+    );
+    assert.equal(
+      dayLossBreached(portfolio({ equityUsd: 9_000, dayStartEquity: 10_000 }), {
+        ...DEFAULT_CONFIG,
+        rulesOn: { ...DEFAULT_CONFIG.rulesOn, dailyLoss: false },
+      }),
+      false,
+    );
+    const open = sizePosition({
+      equity: 10_000,
+      price: 1,
+      stopPct: 2,
+      config: {
+        ...DEFAULT_CONFIG,
+        buySizeUsd: 25,
+        maxLiveNotionalUsd: 5,
+        rulesOn: { ...DEFAULT_CONFIG.rulesOn, maxNotional: false },
+      },
+      regime: regime("risk-on"),
+      researchScore: 70,
+    });
+    assert.equal(open.notional, 25);
+    const capped = sizePosition({
+      equity: 10_000,
+      price: 1,
+      stopPct: 2,
+      config: { ...DEFAULT_CONFIG, buySizeUsd: 25, maxLiveNotionalUsd: 5 },
+      regime: regime("risk-on"),
+      researchScore: 70,
+    });
+    assert.equal(capped.notional, 5);
+    const naked = presetBracket(held(), {
+      stopLossPct: 2,
+      targetProfitPct: 4,
+      rulesOn: { ...DEFAULT_CONFIG.rulesOn, stopLoss: false, targetProfit: false },
+    });
+    assert.equal(naked.stopEnabled, false);
+    assert.equal(naked.targetEnabled, false);
+    assert.equal(managePosition({ ...naked, markPrice: 90, lowWater: 90 }).exit, undefined);
+    assert.equal(managePosition({ ...naked, markPrice: 120, highWater: 120 }).exit, undefined);
+    const aged = presetBracket(held({ openedAt: new Date(Date.now() - 10 * 60 * 60_000).toISOString() }), DEFAULT_CONFIG);
+    assert.equal(
+      managePosition(aged, Date.now(), { ...DEFAULT_CONFIG, rulesOn: { ...DEFAULT_CONFIG.rulesOn, timeCap: false, staleExit: false } }).exit,
+      undefined,
+    );
+  });
 });

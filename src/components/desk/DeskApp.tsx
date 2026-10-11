@@ -9,6 +9,7 @@ import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { deskCashLegs, type CashLeg } from "@/lib/cashHoldings";
 import { CHAIN_COPY, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
+import { appliedScanSeconds, ruleOn } from "@/lib/deskSettings";
 import {
   adoptLiveEquity,
   armButton,
@@ -437,7 +438,7 @@ function ChainDesk({
 
   const scanSecondsRef = useRef(5);
   const positionOpenRef = useRef(false);
-  scanSecondsRef.current = Math.max(4, desk?.config.scanSeconds ?? 5);
+  scanSecondsRef.current = appliedScanSeconds(desk?.config);
   positionOpenRef.current = Boolean(desk?.bot.running && desk.positions.some((p) => p.signature || (p.leverage ?? 1) > 1));
 
   useEffect(() => {
@@ -2477,7 +2478,7 @@ function BotView({
             sub={desk.bot.lastTickAt ? `Book now · tick ${new Date(desk.bot.lastTickAt).toLocaleTimeString()}` : "Book now"}
           />
           <Stat label="Last error" value={desk.bot.lastError ? "Yes" : "None"} sub={desk.bot.lastError ?? "Clean"} tone={desk.bot.lastError ? "crimson" : "mint"} />
-          <Stat label="Daily loss cap" value={`${desk.config.dailyLossLimitPct}%`} />
+          <Stat label="Daily loss cap" value={ruleOn(desk.config, "dailyLoss") ? `${desk.config.dailyLossLimitPct}%` : "Off"} />
         </div>
         <div className="mt-5 rounded-2xl border border-[var(--line)] p-4">
           <Label>What the book has learned</Label>

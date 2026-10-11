@@ -1,5 +1,5 @@
 import type { ChainId } from "@/lib/chain";
-import { logicFramesRule } from "@/lib/deskSettings";
+import { armedFundsUsd, logicFramesRule, ruleOn, ticketBuyUsd } from "@/lib/deskSettings";
 import { feeHurdlePct } from "@/lib/trading/fees";
 import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
@@ -75,7 +75,23 @@ export function progressToGoal(position: Pick<Position, "side" | "stopPrice" | "
 
 /** The bot's rules, written from the live settings so the words never drift from the code. */
 export function planRules(
-  config: Pick<BotConfig, "stopLossPct" | "targetProfitPct" | "lossStreakPause" | "dailyLossLimitPct" | "maxPositions" | "multipliers" | "scratchEnabled" | "armFundsUsd" | "buySizeUsd" | "solTradeMode" | "marginOnFourHour" | "cronosQuote" | "logicFrames">,
+  config: Pick<
+    BotConfig,
+    | "stopLossPct"
+    | "targetProfitPct"
+    | "lossStreakPause"
+    | "dailyLossLimitPct"
+    | "maxPositions"
+    | "multipliers"
+    | "scratchEnabled"
+    | "armFundsUsd"
+    | "buySizeUsd"
+    | "solTradeMode"
+    | "marginOnFourHour"
+    | "cronosQuote"
+    | "logicFrames"
+    | "rulesOn"
+  >,
   chain: ChainId = "solana",
 ): string[] {
   const hurdle = feeHurdlePct("rules", "TOKEN");
@@ -88,14 +104,24 @@ export function planRules(
       : fourHourMargin
         ? `${charts} SOL margin waits for a solid 4-hour setup.`
         : charts,
-    `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`,
+    ruleOn(config, "stopLoss") && ruleOn(config, "targetProfit")
+      ? `Every buy gets a safety stop ${config.stopLossPct}% below and a profit goal ${config.targetProfitPct}% above the price it paid.`
+      : ruleOn(config, "stopLoss")
+        ? `Every buy gets a safety stop ${config.stopLossPct}% below the price it paid. The profit goal is off.`
+        : ruleOn(config, "targetProfit")
+          ? `New buys do not use a safety stop. The profit goal is ${config.targetProfitPct}% above the price it paid.`
+          : "New buys do not use a safety stop or a profit goal.",
     `A winner is never sold until it beats the fees to buy and sell (about ${hurdle.toFixed(2)}% on smaller coins).`,
-    `Holds at most ${config.maxPositions} coins at once.`,
-    `Arms with $${config.armFundsUsd ?? 50} and spends $${config.buySizeUsd ?? 10} on each buy.`,
-    config.lossStreakPause > 0
+    ruleOn(config, "maxPositions")
+      ? `Holds at most ${config.maxPositions} coins at once.`
+      : "There is no cap on how many coins it can hold at once.",
+    `Arms with $${armedFundsUsd(config)} and spends $${ticketBuyUsd(config)} on each buy.`,
+    ruleOn(config, "lossStreak") && config.lossStreakPause > 0
       ? `After ${config.lossStreakPause} losses in a row it rests for an hour.`
       : "It does not pause after a losing streak.",
-    `Stops for the day after a ${config.dailyLossLimitPct}% loss.`,
+    ruleOn(config, "dailyLoss")
+      ? `Stops for the day after a ${config.dailyLossLimitPct}% loss.`
+      : "It does not stop for the day after a loss.",
   ];
   if (chain === "cronos") {
     rules.push(
@@ -225,14 +251,22 @@ export function botActivity(input: {
   if (input.running && dayLossBreached(input.portfolio, input.config)) {
     add(limits, "limit", `Today's loss hit the ${input.config.dailyLossLimitPct}% limit, so no new trades until tomorrow.`);
   }
-  if (input.running && input.config.maxPositions > 0 && input.positions.length >= input.config.maxPositions) {
+  if (
+    input.running &&
+    ruleOn(input.config, "maxPositions") &&
+    input.config.maxPositions > 0 &&
+    input.positions.length >= input.config.maxPositions
+  ) {
     add(
       limits,
       "limit",
       `Holding ${input.positions.length} coins, the most allowed at once, so no new coin until one sells.`,
     );
   }
-  if (input.running && lossStreakPaused(input.trades, input.config.lossStreakPause, now)) {
+  if (
+    input.running &&
+    lossStreakPaused(input.trades, ruleOn(input.config, "lossStreak") ? input.config.lossStreakPause : 0, now)
+  ) {
     add(limits, "limit", `Resting for an hour after ${input.config.lossStreakPause} losses in a row. No new trades until that hour ends.`);
   }
 

@@ -14,6 +14,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { CHAIN_IDS, type ChainId } from "../src/lib/chain";
+import { appliedScanSeconds } from "../src/lib/deskSettings";
 import { attachDeskFiles, deskDataDir } from "../src/lib/deskFs";
 import { isDeskChain, runnerCronosSession, runnerWalletSession } from "../src/lib/deskHost";
 import { useDeskKeys, writeSecret } from "../src/lib/keystore";
@@ -162,7 +163,7 @@ async function tickChain(chain: ChainId): Promise<{ scan: number; liveOpen: bool
   const session = chain === "cronos" ? runnerCronosSession(wallet) : runnerWalletSession(wallet);
   await controlBot("tick", session, chain);
   return {
-    scan: state.config.scanSeconds,
+    scan: appliedScanSeconds(state.config),
     liveOpen: state.positions.some((pos) => pos.signature || (pos.leverage ?? 1) > 1),
   };
 }

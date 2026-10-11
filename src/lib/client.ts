@@ -1,5 +1,6 @@
 import type { ChainId } from "@/lib/chain";
 import { armButton, buildDesk, shellDesk, startNeedsLiveSignature } from "@/lib/desk";
+import { armedFundsUsd, stampQuote } from "@/lib/deskSettings";
 import {
   authorizeTrading,
   reclaimTrading,
@@ -55,7 +56,7 @@ async function sellSignedPositions(executor: ChainExecutor, chain: ChainId): Pro
       const still = current.positions.find((p) => p.id === pos.id);
       if (!still || !signedOnChain(still)) return current;
       try {
-        const fill = await executor(orderForPosition(still, "close", current.config.venues));
+        const fill = await executor(stampQuote(orderForPosition(still, "close", current.config.venues), current.config));
         return afterWinningClose(pushEquity(closePosition(current, still.id, fill.price, "manual", fill.signature)), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
@@ -224,8 +225,8 @@ export async function controlBot(
   if (action === "start" && session) {
     const state = await loadState(chain);
     if (startNeedsLiveSignature(state.config.walletSwaps)) {
-      if (liveKit) auth = await liveKit.authorize(state.config.armFundsUsd, state.config.cronosQuote);
-      else auth = await authorizeTrading(solana as WalletSession, state.config.armFundsUsd);
+      if (liveKit) auth = await liveKit.authorize(armedFundsUsd(state.config), state.config.cronosQuote);
+      else auth = await authorizeTrading(solana as WalletSession, armedFundsUsd(state.config));
     }
   }
 
@@ -341,7 +342,7 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
     if (signedOnChain(pos)) {
       if (!executor) throw new Error("Connect the wallet on this page to sell this ticket.");
       try {
-        const fill = await executor(orderForPosition(pos, "close", state.config.venues));
+        const fill = await executor(stampQuote(orderForPosition(pos, "close", state.config.venues), state.config));
         return afterWinningClose(applyHandClose(state, pos.id, fill.price, fill.signature), chain, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Close failed";

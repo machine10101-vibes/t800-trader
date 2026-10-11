@@ -8,7 +8,7 @@ import { cronos } from "viem/chains";
 import { sameMint } from "@/lib/chain";
 import { DEFAULT_ARM_FUNDS_USD, normalizeCronosQuote, type CronosQuote } from "@/lib/deskSettings";
 import { planCronosArm } from "./arm";
-import { BOT_MIN_CRO, GAS_CRO, USDC, WCRO } from "./constants";
+import { BOT_MIN_CRO, GAS_CRO, SLIPPAGE_BPS, USDC, WCRO } from "./constants";
 import {
   buildCroTradeCall,
   buildWolfswapCall,
@@ -179,14 +179,14 @@ async function readTokenBalance(owner: `0x${string}`, token: `0x${string}`): Pro
   });
 }
 
-async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeIn: boolean): Promise<string> {
+async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeIn: boolean, slippageBps = SLIPPAGE_BPS): Promise<string> {
   if (nativeIn) {
     const data = encodeFunctionData({ abi: depositAbi, functionName: "deposit" });
     await sendFrom(account, { to: WCRO, data, value: route.amountIn });
   }
   if (route.venue === "wolfswap") {
     if (!route.wolfQuoteId) throw new Error("WolfSwap quote expired before the swap was built");
-    const call = await buildWolfswapCall(route.wolfQuoteId, account.address);
+    const call = await buildWolfswapCall(route.wolfQuoteId, account.address, slippageBps);
     const src = route.path[0];
     if (!src) throw new Error("WolfSwap quote has no input token");
     await ensureAllowance(account, src, call.to, route.amountIn);
@@ -198,7 +198,7 @@ async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeI
     const call = buildVvsCall({
       method: "swapExactTokensForTokens",
       amountIn: route.amountIn,
-      amountOutMin: croTradeMinOut(route.amountOut),
+      amountOutMin: croTradeMinOut(route.amountOut, slippageBps),
       path: route.path,
       recipient: account.address,
       deadline: deadline(),
@@ -208,7 +208,7 @@ async function sendRoute(account: PrivateKeyAccount, route: CronosRoute, nativeI
   }
   const call = buildCroTradeCall({
     amountIn: route.amountIn,
-    amountOutMin: croTradeMinOut(route.amountOut),
+    amountOutMin: croTradeMinOut(route.amountOut, slippageBps),
     path: route.path,
     deadline: deadline(),
   });
@@ -264,7 +264,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
         }
       }
       const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "cro", venues: order.venues });
-      const signature = await sendRoute(account, route, nativeIn);
+      const signature = await sendRoute(account, route, nativeIn, order.slippageBps);
       const qty = Number(formatUnits(route.amountOut, 18));
       const price = qty > 0 ? order.notionalUsd / qty : mark;
       return { signature, qty, price, tokenDecimals: 18, cronosQuote: "cro" };
@@ -276,7 +276,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
     }
     const amountIn = units(order.notionalUsd, 6);
     const route = await quoteCronos({ token: mint, amountIn, side: "buy", quote: "usdc", venues: order.venues });
-    const signature = await sendRoute(account, route, false);
+    const signature = await sendRoute(account, route, false, order.slippageBps);
     const qty = Number(formatUnits(route.amountOut, 18));
     const price = qty > 0 ? order.notionalUsd / qty : mark;
     return { signature, qty, price, tokenDecimals: 18, cronosQuote: "usdc" };
@@ -295,7 +295,7 @@ async function settleCronos(session: CronosSession, order: ChainOrder): Promise<
   }
   if (amountIn <= 0n) throw new Error("ALREADY_FLAT: trading key does not hold this token");
   const route = await quoteCronos({ token: mint, amountIn, side: "sell", quote, venues: order.venues });
-  const signature = await sendRoute(account, { ...route, amountIn }, nativeIn);
+  const signature = await sendRoute(account, { ...route, amountIn }, nativeIn, order.slippageBps);
   const out = Number(formatUnits(route.amountOut, cronosQuoteDecimals(quote)));
   const qty = Number(formatUnits(amountIn, 18));
   const usdOut = quote === "cro" ? out * croPrice : out;

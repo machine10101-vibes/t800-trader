@@ -1,7 +1,7 @@
 "use client";
 
 import { CHAIN_COPY, type ChainId } from "@/lib/chain";
-import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, logicFramesRule, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES, toggleLogicFrame } from "@/lib/deskSettings";
+import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, logicFramesRule, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES, toggleLogicFrame, type RuleId } from "@/lib/deskSettings";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
 import { cronosVenuesOn, venueOptionsFor, venueSummary, venuesOnFor } from "@/lib/market/venues";
 import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
@@ -31,6 +31,9 @@ export function SettingsPanel({
     setLocal((cur) => nextSettingsDraft(cur, saved, dirtyRef.current));
   }, [saved]);
   const set = (patch: Partial<BotConfig>) => setLocal((cur) => normalizeConfig({ ...cur, ...patch }));
+  const setRule = (id: RuleId, on: boolean) =>
+    setLocal((cur) => normalizeConfig({ ...cur, rulesOn: { ...cur.rulesOn, [id]: on } }));
+  const rulesOff = Object.values(local.rulesOn).filter((on) => !on).length;
 
   return (
     <div className="space-y-4">
@@ -40,7 +43,8 @@ export function SettingsPanel({
             <h2 className="text-2xl font-medium">Settings</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               Choose how far a buy can fall before it sells, and how far it has to rise before it sells. Those levels are
-              set when the buy happens. A sale does not start a new buy. Everything else is under More settings.
+              set when the buy happens. Every number below can also be turned off. Off skips that rule and keeps the
+              number for when you turn it back on. A sale does not start a new buy. Everything else is under More settings.
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
@@ -78,6 +82,7 @@ export function SettingsPanel({
           {local.killSwitch ? " · emergency stop" : ""}
           {` · loads $${local.armFundsUsd} · $${local.buySizeUsd} a buy`}
           {` · charts ${local.logicFrames.join(", ")}`}
+          {rulesOff ? ` · ${rulesOff} ${rulesOff === 1 ? "rule" : "rules"} off` : " · every rule on"}
           {chain === "cronos"
             ? ` · spends ${local.cronosQuote === "cro" ? "CRO" : "USDC"} · no extra size`
             : local.solTradeMode === "spot"
@@ -118,13 +123,17 @@ export function SettingsPanel({
           }
           value={local.armFundsUsd}
           options={ARM_FUNDS_USD.map((n) => ({ value: n, label: `$${n}` }))}
+          enabled={local.rulesOn.armFunds}
+          onToggle={(on) => setRule("armFunds", on)}
           onChange={(armFundsUsd) => set({ armFundsUsd, buySizeUsd: Math.min(local.buySizeUsd, armFundsUsd) })}
         />
         <Choice
           label="Buy size per trade"
-          hint="What one buy spends. It cannot be larger than the armed bankroll."
+          hint="What one buy spends. It cannot be larger than the armed bankroll. Off uses $10, or the armed bankroll if that is smaller."
           value={local.buySizeUsd}
           options={BUY_SIZE_USD.filter((n) => n <= local.armFundsUsd).map((n) => ({ value: n, label: `$${n}` }))}
+          enabled={local.rulesOn.buySize}
+          onToggle={(on) => setRule("buySize", on)}
           onChange={(buySizeUsd) => set({ buySizeUsd })}
         />
       </Section>
@@ -138,6 +147,8 @@ export function SettingsPanel({
           max={15}
           step={0.1}
           value={local.stopLossPct}
+          enabled={local.rulesOn.stopLoss}
+          onToggle={(on) => setRule("stopLoss", on)}
           onChange={(v) => set({ stopLossPct: v })}
         />
         <Field
@@ -148,6 +159,8 @@ export function SettingsPanel({
           max={30}
           step={0.1}
           value={local.targetProfitPct}
+          enabled={local.rulesOn.targetProfit}
+          onToggle={(on) => setRule("targetProfit", on)}
           onChange={(v) => set({ targetProfitPct: v })}
         />
         <Field
@@ -159,6 +172,8 @@ export function SettingsPanel({
           max={10_000}
           step={1}
           value={local.maxLiveNotionalUsd}
+          enabled={local.rulesOn.maxNotional}
+          onToggle={(on) => setRule("maxNotional", on)}
           onChange={(v) => {
             const cap = commitTicketCap(String(v), local.maxLiveNotionalUsd);
             set({ maxLiveNotionalUsd: cap });
@@ -213,12 +228,16 @@ export function SettingsPanel({
           max={200}
           step={10}
           suffix={` · ${(local.slippageBps / 100).toFixed(2)}%`}
+          enabled={local.rulesOn.slippage}
+          onToggle={(on) => setRule("slippage", on)}
           onChange={(v) => set({ slippageBps: v })}
         />
         <Field
           label={chain === "cronos" ? "CRO kept for fees" : "SOL kept for fees"}
-          hint="Real buys wait until the wallet has at least this much left for network fees."
+          hint="On waits until the wallet has at least this much left for network fees. Off uses the smaller built-in cushion."
           value={local.minSolForFees}
+          enabled={local.rulesOn.feeReserve}
+          onToggle={(on) => setRule("feeReserve", on)}
           min={0.006}
           max={0.08}
           step={0.002}
@@ -349,6 +368,8 @@ export function SettingsPanel({
           max={60}
           step={1}
           value={local.scanSeconds}
+          enabled={local.rulesOn.scan}
+          onToggle={(on) => setRule("scan", on)}
           onChange={(v) => set({ scanSeconds: v })}
         />
         <Field
@@ -359,6 +380,8 @@ export function SettingsPanel({
           max={180}
           step={5}
           value={local.cooldownMinutes}
+          enabled={local.rulesOn.cooldown}
+          onToggle={(on) => setRule("cooldown", on)}
           onChange={(v) => set({ cooldownMinutes: v })}
         />
         <Toggle
@@ -384,6 +407,8 @@ export function SettingsPanel({
           max={1000}
           step={10}
           value={local.minLiquidityUsd / 1000}
+          enabled={local.rulesOn.liquidity}
+          onToggle={(on) => setRule("liquidity", on)}
           onChange={(v) => set({ minLiquidityUsd: v * 1000 })}
         />
         <Field
@@ -394,6 +419,8 @@ export function SettingsPanel({
           max={1000}
           step={10}
           value={local.minVolume24hUsd / 1000}
+          enabled={local.rulesOn.volume}
+          onToggle={(on) => setRule("volume", on)}
           onChange={(v) => set({ minVolume24hUsd: v * 1000 })}
         />
         <Field
@@ -404,6 +431,8 @@ export function SettingsPanel({
           max={72}
           step={1}
           value={local.minAgeHours}
+          enabled={local.rulesOn.poolAge}
+          onToggle={(on) => setRule("poolAge", on)}
           onChange={(v) => set({ minAgeHours: v })}
         />
         <Field
@@ -413,6 +442,8 @@ export function SettingsPanel({
           max={85}
           step={1}
           value={local.minConfidence}
+          enabled={local.rulesOn.confidence}
+          onToggle={(on) => setRule("confidence", on)}
           onChange={(v) => set({ minConfidence: v })}
         />
         <Field
@@ -422,6 +453,8 @@ export function SettingsPanel({
           max={90}
           step={1}
           value={local.defensiveBreakoutScore}
+          enabled={local.rulesOn.defensiveScore}
+          onToggle={(on) => setRule("defensiveScore", on)}
           onChange={(v) => set({ defensiveBreakoutScore: v })}
         />
         <div className="grid gap-3">
@@ -442,6 +475,8 @@ export function SettingsPanel({
           max={8}
           step={1}
           value={local.maxPositions}
+          enabled={local.rulesOn.maxPositions}
+          onToggle={(on) => setRule("maxPositions", on)}
           onChange={(v) => set({ maxPositions: v })}
         />
         <Field
@@ -451,6 +486,8 @@ export function SettingsPanel({
           max={4}
           step={1}
           value={local.maxPerSector}
+          enabled={local.rulesOn.maxPerSector}
+          onToggle={(on) => setRule("maxPerSector", on)}
           onChange={(v) => set({ maxPerSector: v })}
         />
         <Field
@@ -460,6 +497,8 @@ export function SettingsPanel({
           max={8}
           step={1}
           value={local.lossStreakPause}
+          enabled={local.rulesOn.lossStreak}
+          onToggle={(on) => setRule("lossStreak", on)}
           onChange={(v) => set({ lossStreakPause: v })}
         />
         <Field
@@ -470,6 +509,8 @@ export function SettingsPanel({
           max={15}
           step={0.5}
           value={local.dailyLossLimitPct}
+          enabled={local.rulesOn.dailyLoss}
+          onToggle={(on) => setRule("dailyLoss", on)}
           onChange={(v) => set({ dailyLossLimitPct: v })}
         />
         <Field
@@ -480,6 +521,8 @@ export function SettingsPanel({
           max={100}
           step={5}
           value={local.dayBudgetPct}
+          enabled={local.rulesOn.dayBudget}
+          onToggle={(on) => setRule("dayBudget", on)}
           onChange={(v) => set({ dayBudgetPct: v })}
         />
         <Toggle
@@ -499,6 +542,8 @@ export function SettingsPanel({
           max={2.5}
           step={0.1}
           value={local.maxRiskPerTradePct}
+          enabled={local.rulesOn.riskPerTrade}
+          onToggle={(on) => setRule("riskPerTrade", on)}
           onChange={(v) => set({ maxRiskPerTradePct: v })}
         />
         <Field
@@ -533,6 +578,8 @@ export function SettingsPanel({
           max={2}
           step={0.05}
           value={local.beR}
+          enabled={local.rulesOn.protectGain}
+          onToggle={(on) => setRule("protectGain", on)}
           onChange={(v) => set({ beR: v })}
         />
         <Field
@@ -543,6 +590,8 @@ export function SettingsPanel({
           max={3}
           step={0.05}
           value={local.scaleAtR}
+          enabled={local.rulesOn.scaleOut}
+          onToggle={(on) => setRule("scaleOut", on)}
           onChange={(v) => set({ scaleAtR: v })}
         />
         <Field
@@ -553,6 +602,7 @@ export function SettingsPanel({
           max={75}
           step={5}
           value={local.scaleFractionPct}
+          enabled={local.rulesOn.scaleOut}
           onChange={(v) => set({ scaleFractionPct: v })}
         />
         <Field
@@ -563,6 +613,8 @@ export function SettingsPanel({
           max={4}
           step={0.1}
           value={local.lockAtR}
+          enabled={local.rulesOn.lockProfit}
+          onToggle={(on) => setRule("lockProfit", on)}
           onChange={(v) => set({ lockAtR: v })}
         />
         <Field
@@ -573,6 +625,7 @@ export function SettingsPanel({
           max={1.5}
           step={0.05}
           value={local.lockProfitR}
+          enabled={local.rulesOn.lockProfit}
           onChange={(v) => set({ lockProfitR: v })}
         />
         <Field
@@ -583,6 +636,8 @@ export function SettingsPanel({
           max={240}
           step={5}
           value={local.staleMin}
+          enabled={local.rulesOn.staleExit}
+          onToggle={(on) => setRule("staleExit", on)}
           onChange={(v) => set({ staleMin: v })}
         />
         <Field
@@ -593,6 +648,8 @@ export function SettingsPanel({
           max={120}
           step={1}
           value={local.memeStaleMin}
+          enabled={local.rulesOn.memeStale}
+          onToggle={(on) => setRule("memeStale", on)}
           onChange={(v) => set({ memeStaleMin: v })}
         />
         <Field
@@ -603,6 +660,8 @@ export function SettingsPanel({
           max={360}
           step={10}
           value={local.timeCapMin}
+          enabled={local.rulesOn.timeCap}
+          onToggle={(on) => setRule("timeCap", on)}
           onChange={(v) => set({ timeCapMin: v })}
         />
         <Field
@@ -613,6 +672,8 @@ export function SettingsPanel({
           max={180}
           step={5}
           value={local.memeTimeCapMin}
+          enabled={local.rulesOn.memeTimeCap}
+          onToggle={(on) => setRule("memeTimeCap", on)}
           onChange={(v) => set({ memeTimeCapMin: v })}
         />
       </Section>
@@ -687,8 +748,10 @@ function Field({
   step,
   suffix,
   disabled,
+  enabled = true,
   kind = "range",
   onChange,
+  onToggle,
 }: {
   label: string;
   hint: string;
@@ -698,8 +761,10 @@ function Field({
   step: number;
   suffix?: string;
   disabled?: boolean;
+  enabled?: boolean;
   kind?: "range" | "number";
   onChange: (value: number) => void;
+  onToggle?: (on: boolean) => void;
 }) {
   const digits = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
   const shown = digits === 0 ? String(Math.round(value)) : value.toFixed(digits);
@@ -708,6 +773,7 @@ function Field({
   useEffect(() => {
     if (!focused.current) setDraft(shown);
   }, [shown]);
+  const off = enabled === false || disabled;
   const commitDraft = () => {
     focused.current = false;
     const text = draft.trim();
@@ -722,12 +788,23 @@ function Field({
     if (resolved !== value) onChange(resolved);
   };
   return (
-    <label className={`block rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${disabled ? "opacity-50" : ""}`}>
+    <div className={`block rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${off ? "opacity-60" : ""}`}>
       <div className="flex items-start justify-between gap-3 text-sm">
         <span className="min-w-0">{label}</span>
-        <span className="num shrink-0 text-[var(--magenta)]">
-          {shown}
-          {suffix ?? ""}
+        <span className="flex shrink-0 items-center gap-2">
+          {onToggle ? (
+            <button
+              type="button"
+              onClick={() => onToggle(!enabled)}
+              className={`num rounded-full px-2 py-1 text-[11px] ${enabled ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {enabled ? "On" : "Off"}
+            </button>
+          ) : null}
+          <span className="num text-[var(--magenta)]">
+            {shown}
+            {suffix ?? ""}
+          </span>
         </span>
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
@@ -740,7 +817,7 @@ function Field({
           max={max}
           step={step}
           value={focused.current ? draft : shown}
-          disabled={disabled}
+          disabled={off}
           onFocus={() => {
             focused.current = true;
             setDraft(shown);
@@ -761,11 +838,11 @@ function Field({
           max={max}
           step={step}
           value={value}
-          disabled={disabled}
+          disabled={off}
           onChange={(e) => onChange(Number(e.target.value))}
         />
       )}
-    </label>
+    </div>
   );
 }
 
@@ -774,19 +851,34 @@ function Choice({
   hint,
   value,
   options,
+  enabled = true,
   onChange,
+  onToggle,
 }: {
   label: string;
   hint: string;
   value: number;
   options: { value: number; label: string }[];
+  enabled?: boolean;
   onChange: (value: number) => void;
+  onToggle?: (on: boolean) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-black/20 p-3">
+    <div className={`rounded-2xl border border-[var(--line)] bg-black/20 p-3 ${enabled ? "" : "opacity-60"}`}>
       <div className="flex items-start justify-between gap-3 text-sm">
         <span className="min-w-0">{label}</span>
-        <span className="num shrink-0 text-[var(--magenta)]">${value}</span>
+        <span className="flex shrink-0 items-center gap-2">
+          {onToggle ? (
+            <button
+              type="button"
+              onClick={() => onToggle(!enabled)}
+              className={`num rounded-full px-2 py-1 text-[11px] ${enabled ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
+            >
+              {enabled ? "On" : "Off"}
+            </button>
+          ) : null}
+          <span className="num text-[var(--magenta)]">${value}</span>
+        </span>
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--faint)]">{hint}</p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -796,6 +888,7 @@ function Choice({
             <button
               key={option.value}
               type="button"
+              disabled={!enabled}
               onClick={() => onChange(option.value)}
               className={`num rounded-full px-3 py-1 text-[12px] ${on ? "bg-[var(--magenta)] text-[var(--accent-ink)]" : "border border-[var(--line)] text-[var(--muted)]"}`}
             >

@@ -1,5 +1,5 @@
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
-import type { BotConfig } from "@/lib/types";
+import type { BotConfig, ChainOrder } from "@/lib/types";
 import { normalizeMultipliers } from "@/lib/trading/leverage";
 
 /** USDC loaded onto the trading key when the bot is armed. */
@@ -116,6 +116,102 @@ export function usdcToLoad(haveUsd: number, wantUsd: number, alreadyUsd = 0): nu
  */
 export function nextSettingsDraft(draft: BotConfig, saved: BotConfig, editing: boolean): BotConfig {
   return editing ? draft : saved;
+}
+
+/**
+ * Every adjustable rule. Missing means on, so an older book keeps today's behavior.
+ * Off skips that rule and leaves the saved number in place.
+ */
+export const RULE_IDS = [
+  "stopLoss",
+  "targetProfit",
+  "maxNotional",
+  "slippage",
+  "feeReserve",
+  "scan",
+  "cooldown",
+  "liquidity",
+  "volume",
+  "poolAge",
+  "confidence",
+  "defensiveScore",
+  "maxPositions",
+  "maxPerSector",
+  "lossStreak",
+  "dailyLoss",
+  "dayBudget",
+  "riskPerTrade",
+  "protectGain",
+  "scaleOut",
+  "lockProfit",
+  "staleExit",
+  "memeStale",
+  "timeCap",
+  "memeTimeCap",
+  "armFunds",
+  "buySize",
+] as const;
+
+export type RuleId = (typeof RULE_IDS)[number];
+export type RulesOn = Record<RuleId, boolean>;
+
+export function defaultRulesOn(): RulesOn {
+  return Object.fromEntries(RULE_IDS.map((id) => [id, true])) as RulesOn;
+}
+
+export function normalizeRulesOn(value: unknown): RulesOn {
+  const src = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const next = defaultRulesOn();
+  for (const id of RULE_IDS) {
+    if (typeof src[id] === "boolean") next[id] = src[id];
+  }
+  return next;
+}
+
+export function ruleOn(config: { rulesOn?: Partial<RulesOn> | null } | null | undefined, id: RuleId): boolean {
+  return config?.rulesOn?.[id] !== false;
+}
+
+export function armedFundsUsd(config: { armFundsUsd?: number; rulesOn?: Partial<RulesOn> | null } | null | undefined): number {
+  if (!ruleOn(config, "armFunds")) return DEFAULT_ARM_FUNDS_USD;
+  return normalizeArmFundsUsd(config?.armFundsUsd);
+}
+
+export function ticketBuyUsd(config: { armFundsUsd?: number; buySizeUsd?: number; rulesOn?: Partial<RulesOn> | null } | null | undefined): number {
+  const arm = armedFundsUsd(config);
+  if (!ruleOn(config, "buySize")) return Math.min(arm, DEFAULT_BUY_SIZE_USD);
+  return normalizeBuySizeUsd(config?.buySizeUsd, arm);
+}
+
+export function appliedScanSeconds(config: { scanSeconds?: number; rulesOn?: Partial<RulesOn> | null } | null | undefined): number {
+  const saved = typeof config?.scanSeconds === "number" && Number.isFinite(config.scanSeconds) ? config.scanSeconds : 5;
+  return Math.max(4, ruleOn(config, "scan") ? saved : 5);
+}
+
+export function quoteSlippageBps(config: { slippageBps?: number; rulesOn?: Partial<RulesOn> | null } | null | undefined): number {
+  if (!ruleOn(config, "slippage")) return 80;
+  const n = config?.slippageBps;
+  if (typeof n !== "number" || !Number.isFinite(n)) return 80;
+  return Math.min(2_000, Math.max(1, Math.round(n)));
+}
+
+/** Native coin kept back for fees. Off keeps the smaller built-in cushion. */
+export function feeReserveNative(config: { minSolForFees?: number; rulesOn?: Partial<RulesOn> | null } | null | undefined): number | undefined {
+  if (!ruleOn(config, "feeReserve")) return undefined;
+  const n = config?.minSolForFees;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0.02;
+}
+
+export function stampQuote(
+  order: ChainOrder,
+  config: { slippageBps?: number; minSolForFees?: number; rulesOn?: Partial<RulesOn> | null },
+): ChainOrder {
+  const reserve = feeReserveNative(config);
+  return {
+    ...order,
+    slippageBps: quoteSlippageBps(config),
+    ...(reserve === undefined ? {} : { minNativeForFees: reserve }),
+  };
 }
 
 /** Max ticket is a dollar cap. 5 stays 5. Blank or junk keeps the previous cap. */
