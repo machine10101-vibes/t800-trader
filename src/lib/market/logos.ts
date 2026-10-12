@@ -90,6 +90,7 @@ const BY_SYMBOL: Record<string, string> = {
   WSOL: SOL_LOGO,
   JITOSOL: BY_MINT[JITO_SOL_MINT.toLowerCase()],
   USDC: BY_MINT[USDC_MINT.toLowerCase()],
+  USDT: "/t800-trader/logos/tokens/usdt.svg",
   ZBCN: BY_MINT[ZBCN_MINT.toLowerCase()],
   PUMP: BY_MINT[PUMP_MINT.toLowerCase()],
   ZEC: BY_MINT[ZEC_MINT.toLowerCase()],

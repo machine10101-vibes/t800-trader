@@ -212,7 +212,7 @@ export function SettingsPanel({
           <Toggle
             key={frame}
             label={`${FRAME_LABEL[frame]} chart`}
-            hint={logicChartHint(frame, local.logicFrames)}
+            hint={logicChartHint(frame, local.logicFrames, chain)}
             checked={local.logicFrames.includes(frame)}
             onChange={(on) => set({ logicFrames: toggleLogicFrame(local.logicFrames, frame, on) })}
           />
@@ -722,7 +722,7 @@ export function SettingsPanel({
   );
 }
 
-function logicChartHint(frame: Frame, enabled: Frame[]): string {
+function logicChartHint(frame: Frame, enabled: Frame[], chain: ChainId): string {
   const on = enabled.includes(frame);
   if (frame === "5m") {
     return on
@@ -740,7 +740,9 @@ function logicChartHint(frame: Frame, enabled: Frame[]): string {
       : "Off. The bot will not wait for the 1-hour chart.";
   }
   return on
-    ? "On. A buy must not fight the 4-hour trend. SOL margin can also wait for a setup on this chart."
+    ? chain === "solana"
+      ? "On. A buy must not fight the 4-hour trend. SOL margin can also wait for a setup on this chart."
+      : "On. A buy must not fight the 4-hour trend."
     : "Off. The bot will not wait for the 4-hour chart.";
 }
 

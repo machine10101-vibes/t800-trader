@@ -136,7 +136,7 @@ export async function dashBudget(session: DashSession | null | undefined) {
 
 export async function dashSnapshot(owner: string): Promise<TradingSnap | null> {
   const held = await readDashBalances(owner).catch(() => null);
-  if (!held) return null;
+  if (!held || (held.usdc < 0.01 && held.sol < 0.0000001)) return null;
   rememberBudget("dash", owner, { usdc: held.usdc, sol: held.sol, solPriceUsd: held.solPriceUsd ?? 0 });
   return { address: owner, sol: held.sol, usdc: held.usdc, equityUsd: held.equityUsd };
 }
