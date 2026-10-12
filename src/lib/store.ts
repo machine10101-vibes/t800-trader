@@ -15,6 +15,8 @@ import {
   normalizeArmFundsUsd,
   normalizeBuySizeUsd,
   normalizeCronosQuote,
+  DEFAULT_DASH_QUOTE,
+  normalizeDashQuote,
   defaultRulesOn,
   normalizeLogicFrames,
   normalizeMarginOnFourHour,
@@ -48,6 +50,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   armFundsUsd: DEFAULT_ARM_FUNDS_USD,
   buySizeUsd: DEFAULT_BUY_SIZE_USD,
   cronosQuote: DEFAULT_CRONOS_QUOTE,
+  dashQuote: DEFAULT_DASH_QUOTE,
   minSolForFees: 0.02,
   killSwitch: false,
   rulesOn: defaultRulesOn(),
@@ -110,6 +113,7 @@ export function normalizeConfig(input?: Partial<BotConfig> | null): BotConfig {
     armFundsUsd: normalizeArmFundsUsd(src.armFundsUsd),
     buySizeUsd: normalizeBuySizeUsd(src.buySizeUsd, normalizeArmFundsUsd(src.armFundsUsd)),
     cronosQuote: normalizeCronosQuote(src.cronosQuote),
+    dashQuote: normalizeDashQuote(src.dashQuote),
     minSolForFees: clampNum(src.minSolForFees, DEFAULT_CONFIG.minSolForFees, 0.004, 0.2),
     killSwitch: asBool(src.killSwitch, false),
     rulesOn: normalizeRulesOn(input?.rulesOn),
@@ -150,7 +154,7 @@ export function withSolanaStrategy(config: BotConfig): BotConfig {
 /** Solana and Cronos share the 4-hour stop, target, and time defaults. Later edits stick. */
 function chainConfig(chain: ChainId, config: Partial<BotConfig>): Partial<BotConfig> {
   const next = normalizeConfig(config);
-  return chain === "solana" || chain === "cronos" ? withSolanaStrategy(next) : next;
+  return withSolanaStrategy(next);
 }
 
 /**
@@ -187,6 +191,7 @@ function blankSlot(): BookSlot {
 const slots: Record<ChainId, BookSlot> = {
   solana: blankSlot(),
   cronos: blankSlot(),
+  dash: blankSlot(),
 };
 
 let storeBackend: KeyBackend | null = null;
@@ -248,9 +253,9 @@ function slotFor(chain: ChainId = "solana"): BookSlot {
 }
 
 function walletError(chain: ChainId): string {
-  return chain === "cronos"
-    ? "Connect a Cronos wallet to load a live book."
-    : "Connect a Solana wallet to load a live book.";
+  if (chain === "cronos") return "Connect a Cronos wallet to load a live book.";
+  if (chain === "dash") return "Connect DashPay and NEAR Mobile to load a live book.";
+  return "Connect a Solana wallet to load a live book.";
 }
 
 export function getActiveWallet(chain: ChainId = "solana"): string | null {

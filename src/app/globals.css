@@ -754,6 +754,55 @@ html[data-desk="cronos"] .desk-scroll::-webkit-scrollbar-thumb {
   background-color: #ffffff;
 }
 
+/* Dash desk. Dark, with the Dash blue standing in for the magenta accent. */
+.theme-dash {
+  --magenta: #008de4;
+  --accent-soft: rgba(0, 141, 228, 0.18);
+  --accent-wash: rgba(0, 141, 228, 0.08);
+  --accent-chip: rgba(0, 141, 228, 0.16);
+  --line: rgba(0, 141, 228, 0.24);
+  --line-2: rgba(0, 141, 228, 0.48);
+  --ice: #4cb4ff;
+  --pill-magenta-border: rgba(0, 141, 228, 0.42);
+  --pill-magenta-bg: rgba(0, 141, 228, 0.12);
+  color-scheme: dark;
+  min-height: 100dvh;
+}
+
+html[data-desk="dash"] body {
+  background-image:
+    radial-gradient(980px 460px at 86% -12%, rgba(0, 141, 228, 0.22), transparent 54%),
+    radial-gradient(760px 420px at -8% 108%, rgba(0, 141, 228, 0.12), transparent 50%),
+    linear-gradient(rgba(0, 141, 228, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 141, 228, 0.05) 1px, transparent 1px);
+}
+
+html[data-desk="dash"] ::selection {
+  background: rgba(0, 141, 228, 0.35);
+}
+
+html[data-desk="dash"] :focus-visible {
+  outline-color: rgba(0, 141, 228, 0.7);
+}
+
+.theme-dash .btn-magenta {
+  background: linear-gradient(180deg, #3aa8f5, #008de4);
+  box-shadow: 0 8px 24px rgba(0, 141, 228, 0.32);
+}
+
+.theme-dash .nav-item[data-active="true"] {
+  box-shadow: inset 3px 0 0 #008de4;
+}
+
+.theme-dash .orb {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.35), transparent 46%),
+    linear-gradient(160deg, #3aa8f5, #0068b0);
+  box-shadow:
+    0 0 0 1px rgba(0, 141, 228, 0.35),
+    0 18px 40px rgba(0, 141, 228, 0.28);
+}
+
 .token-pill {
   display: inline-flex;
   align-items: center;

@@ -42,9 +42,16 @@ function pickFinalists(items: ScoredCandidate[], maxMeme = 2, maxWatch = 6): Sco
   return out.slice(0, 8);
 }
 
+function deskName(chain: string | undefined): string {
+  if (chain === "cronos") return "Cronos";
+  if (chain === "dash") return "Dash";
+  return "Solana";
+}
+
 function catalystsFor(c: ScoredCandidate): Catalyst[] {
   const list: Catalyst[] = [];
   const cronos = c.chain === "cronos";
+  const dash = c.chain === "dash";
   if (c.watchlist) {
     list.push({
       window: "30d",
@@ -52,15 +59,19 @@ function catalystsFor(c: ScoredCandidate): Catalyst[] {
       status: "confirmed",
       detail: cronos
         ? "Named book token with live Cronos pools. Near-term catalyst is continued fee and volume, not a rumor."
-        : "Watchlist protocol with live Solana pools. Near-term catalyst is continued fee/volume share, not a rumor.",
+        : dash
+          ? "Named book token with live NEAR DEX pools. Near-term catalyst is continued fee and volume, not a rumor."
+          : "Watchlist protocol with live Solana pools. Near-term catalyst is continued fee/volume share, not a rumor.",
     });
     list.push({
       window: "1-3m",
-      title: cronos ? "Ecosystem flow if CRO stays bid" : "Ecosystem flow if SOL beta holds",
+      title: cronos ? "Ecosystem flow if CRO stays bid" : dash ? "Ecosystem flow if DASH stays bid" : "Ecosystem flow if SOL beta holds",
       status: "speculative",
       detail: cronos
         ? "If CRO stays bid, liquid Cronos names usually re-rate together. This is beta, not a unique unlock."
-        : "If SOL stays bid, liquid ecosystem names usually re-rate together. This is beta, not a unique unlock.",
+        : dash
+          ? "If DASH stays bid, liquid NEAR DEX names usually re-rate together. This is beta, not a unique unlock."
+          : "If SOL stays bid, liquid ecosystem names usually re-rate together. This is beta, not a unique unlock.",
     });
   } else {
     list.push({
@@ -126,7 +137,9 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
     c.watchlist
       ? c.chain === "cronos"
         ? "Mapped to a named Cronos token on this book."
-        : "Mapped to a known Solana protocol on the internal watchlist."
+        : c.chain === "dash"
+          ? "Mapped to a named Dash token on this book."
+          : "Mapped to a known Solana protocol on the internal watchlist."
       : "Not on the conservative watchlist — treat as tape-first.",
     `24h unique takers ${ (c.flows.h24.buyers + c.flows.h24.sellers).toLocaleString() }.`,
     mc ? `Reported market cap ${usd(mc)}.` : "Market cap not published by GeckoTerminal for this pool.",
@@ -158,16 +171,16 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
 
   const relative =
     volMc !== null
-      ? `Volume/MC ${(volMc * 100).toFixed(2)}%. Compare only against other ${c.chain === "cronos" ? "Cronos" : "Solana"} ${c.sector} names, not against BTC. High turnover can mean healthy flow or a mercenary crowd — pair it with unique takers and reserve depth.`
+      ? `Volume/MC ${(volMc * 100).toFixed(2)}%. Compare only against other ${deskName(c.chain)} ${c.sector} names, not against BTC. High turnover can mean healthy flow or a mercenary crowd — pair it with unique takers and reserve depth.`
       : `Market cap missing, so MC/Revenue and MC/TVL are not computed. Fallback: reserves ${usd(c.liquidityUsd)} vs 24h volume ${usd(c.volume24hUsd)}.`;
 
   const competitive = c.watchlist
-    ? `${c.name} competes with other ${c.chain === "cronos" ? "Cronos" : "Solana"} ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
+    ? `${c.name} competes with other ${deskName(c.chain)} ${c.sector} venues. Advantage, if any, is existing liquidity and ticker recognition — both are copyable. A faster incentive program or a better product fork can take flow in weeks.`
     : `${c.symbol} has no demonstrated moat in this dataset. Competitors are every other launch with deeper liquidity or a more credible float.`;
 
   const bull = `${c.symbol} 15m stays green, the 5m holds its short average, and reserves stay near ${usd(c.liquidityUsd)}. Regime is ${regime.stance}. ${path}`;
   const base =
-    c.chain === "cronos"
+    c.chain === "cronos" || c.chain === "dash"
       ? `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still take a small continuation when the 5m is not red.`
       : `The 15m chops around flat. A red 15m stays in cash. A flat 15m can still open 5x or 10x when the 5m is not red.`;
   const bear = `The 15m stays red, or reserves fall under $${Math.max(80_000, c.liquidityUsd * 0.45).toFixed(0)}. No new long. An open ticket scratches when the 5m and the 15m both flip.`;
@@ -207,7 +220,7 @@ function thesisFrom(c: ScoredCandidate, regime: MarketRegime): ResearchThesis {
       "Pool reserves and 5m/1h volume",
       "Buy/sell and buyer/seller mix",
       "5m RSI / EMA stack / VWAP extension",
-      c.chain === "cronos" ? "CRO tape and BTC dominance" : "SOL beta and BTC dominance",
+      c.chain === "cronos" ? "CRO tape and BTC dominance" : c.chain === "dash" ? "DASH tape and BTC dominance" : "SOL beta and BTC dominance",
       "Any verified unlock or fee-switch announcement (not social rumors)",
     ],
     sources: [
@@ -246,6 +259,7 @@ interface ResearchValue {
 const researchCache: Record<ChainId, { at: number; key: string; value: ResearchValue } | null> = {
   solana: null,
   cronos: null,
+  dash: null,
 };
 
 const RESEARCH_CACHE_MS = 6_000;
@@ -261,6 +275,7 @@ export function clearResearchCache(chain?: ChainId): void {
   if (!chain) {
     researchCache.solana = null;
     researchCache.cronos = null;
+    researchCache.dash = null;
     return;
   }
   researchCache[chain] = null;
@@ -327,7 +342,7 @@ export async function runResearch(
 
   scored.sort((a, b) => b.researchScore - a.researchScore);
   const named = bookTokens(chain);
-  const memeCap = chain === "cronos" ? named.filter((token) => token.sector === "Meme").length : config.allowMemes ? 2 : 0;
+  const memeCap = chain === "cronos" || chain === "dash" ? named.filter((token) => token.sector === "Meme").length : config.allowMemes ? 2 : 0;
   const finalists = keepNamedScores(scored, pickFinalists(scored, memeCap, Math.max(6, named.length)), chain);
   const research = finalists.map((c) => thesisFrom(c, market.regime));
 
@@ -383,8 +398,8 @@ function collapseMints(rows: TokenCandidate[]): TokenCandidate[] {
 }
 
 export function wrongAbout(regime: MarketRegime, research: ResearchThesis[], chain: ChainId = "solana"): string[] {
-  const l1 = chain === "cronos" ? "CRO" : "SOL";
-  const venues = chain === "cronos" ? "Cronos" : "Solana";
+  const l1 = chain === "cronos" ? "CRO" : chain === "dash" ? "DASH" : "SOL";
+  const venues = chain === "cronos" ? "Cronos" : chain === "dash" ? "NEAR" : "Solana";
   return [
     "Public pool tape can be wash-traded, incentive-driven, or spoofed. Unique taker counts are not unique humans.",
     "GeckoTerminal market cap and FDV are venue-reported. They can be stale, circular, or missing — we do not fabricate replacements.",

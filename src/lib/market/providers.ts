@@ -2,7 +2,7 @@ import type { ChainId } from "@/lib/chain";
 import { sameMint } from "@/lib/chain";
 import type { Candle, FlowWindow, MarketRegime, Timeframe, TokenCandidate } from "@/lib/types";
 import { fetchJson, hoursSince, num, nullableNum, sleep, uniqueBy } from "@/lib/utils";
-import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoMinuteUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
+import { derivedFrames, enoughFrameBars, FRAME_BARS, FRAME_REFRESH_MS, frameKey, frameWarmOrder, FRAMES, geckoFrameUrl, geckoMinuteUrl, jupiterInterval, MIN_FOUR_HOUR_BARS, sourceFrame, type Frame } from "./frames";
 import { jupiterChartUrl, parseJupiterCandles } from "./jupiterChart";
 import { applyJupiterTape, loadJupiterTapes, type JupiterTape } from "./jupiterTape";
 import { liveMajors } from "./marks";
@@ -48,6 +48,7 @@ interface GtPool {
     fdv_usd: string | null;
     market_cap_usd: string | null;
     base_token_price_usd: string | null;
+    quote_token_price_usd?: string | null;
     reserve_in_usd: string | null;
     price_change_percentage?: Record<string, string>;
     transactions?: Record<string, { buys?: number; sells?: number; buyers?: number; sellers?: number }>;
@@ -106,6 +107,7 @@ function blankMarket(): MarketSlot {
 const markets: Record<ChainId, MarketSlot> = {
   solana: blankMarket(),
   cronos: blankMarket(),
+  dash: blankMarket(),
 };
 
 function bookKey(mint: string): string {
@@ -142,8 +144,8 @@ export function skeletonBook(chain: ChainId): TokenCandidate[] {
         name: token.name,
         mint: token.mint,
         poolAddress: pin,
-        dex: chain === "cronos" ? "vvs" : "raydium",
-        quoteSymbol: chain === "cronos" || token.mint === SOL_MINT ? "USDC" : "SOL",
+        dex: chain === "cronos" ? "vvs" : chain === "dash" ? "near-intents" : "raydium",
+        quoteSymbol: chain === "cronos" || token.mint === SOL_MINT ? "USDC" : chain === "dash" ? "USDT" : "SOL",
         priceUsd: token.priceUsd ?? 0,
         marketCapUsd: null,
         fdvUsd: null,
@@ -218,27 +220,35 @@ function toCandidate(pool: GtPool, tokens: Map<string, GtToken>, source: string,
   const quote = tokens.get(quoteId ?? "");
   const mint = mintFromGtId(baseId) || base?.attributes.address || "";
   const quoteMint = mintFromGtId(quoteId);
-  const symbol = (base?.attributes.symbol || pool.attributes.name.split(" / ")[0] || "UNK").toUpperCase();
-  const quoteSymbol = (quote?.attributes.symbol || pool.attributes.name.split(" / ")[1] || "").toUpperCase();
+  let symbol = (base?.attributes.symbol || pool.attributes.name.split(" / ")[0] || "UNK").toUpperCase();
+  let quoteSymbol = (quote?.attributes.symbol || pool.attributes.name.split(" / ")[1] || "").toUpperCase();
+  let tradedMint = mint;
+  let priceUsd = num(pool.attributes.base_token_price_usd);
   if (!mint || !pool.attributes.address) return null;
-  if (isStable(symbol)) return null;
+  if (chain === "dash" && isStable(symbol) && quoteMint && isActiveBook(quoteMint, "dash")) {
+    tradedMint = quoteMint;
+    symbol = (quote?.attributes.symbol || "NEAR").toUpperCase();
+    if (symbol === "WNEAR") symbol = "NEAR";
+    quoteSymbol = "USDT";
+    priceUsd = num(pool.attributes.quote_token_price_usd);
+  } else if (isStable(symbol)) return null;
   if (quoteSymbol && !isQuote(quoteSymbol)) return null;
   if (mint === SOL_MINT && !quoteMint) return null;
 
-  const watch = watchMeta(mint, chain);
-  const name = watch?.name || base?.attributes.name || symbol;
+  const watch = watchMeta(tradedMint, chain);
+  const name = watch?.name || (tradedMint === mint ? base?.attributes.name : quote?.attributes.name) || symbol;
   const created = pool.attributes.pool_created_at;
 
   return {
-    id: mint,
+    id: tradedMint,
     chain,
     symbol,
     name,
-    mint,
+    mint: tradedMint,
     poolAddress: pool.attributes.address,
     dex: pool.relationships?.dex?.data?.id || "unknown",
     quoteSymbol: quoteSymbol || "SOL",
-    priceUsd: num(pool.attributes.base_token_price_usd),
+    priceUsd,
     marketCapUsd: nullableNum(pool.attributes.market_cap_usd),
     fdvUsd: nullableNum(pool.attributes.fdv_usd),
     liquidityUsd: num(pool.attributes.reserve_in_usd),
@@ -315,8 +325,12 @@ export async function livePoolPrice(pool: string, chain: ChainId): Promise<numbe
   return price;
 }
 
+function geckoAddress(address: string): string {
+  return address.includes(":") ? encodeURIComponent(address) : address;
+}
+
 async function gtPool(address: string, source: string, chain: ChainId): Promise<TokenCandidate | null> {
-  const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${address}?include=base_token,quote_token`;
+  const url = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${geckoAddress(address)}?include=base_token,quote_token`;
   const json = await paceGecko(() => fetchJson<{ data: GtPool; included?: GtToken[] }>(url, { timeoutMs: 5_000, retries: 1 }));
   return toCandidate(json.data, tokenMap(json.included), source, chain);
 }
@@ -527,12 +541,12 @@ async function fetchOhlcvOnce(poolAddress: string, limit: number, chain: ChainId
     const book = await loadVvsFrames(mint);
     return (book?.minutes ?? []).slice(-Math.min(limit, 140));
   }
-  const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${poolAddress}/ohlcv/minute?aggregate=1&limit=${limit}`;
+  const poolUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/pools/${geckoAddress(poolAddress)}/ohlcv/minute?aggregate=1&limit=${limit}`;
   const poolRows = await readOhlcv(poolUrl);
   if (poolRows.length) return poolRows;
   const mint = poolMint.get(poolAddress);
   if (!mint) return poolRows;
-  const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/tokens/${mint}/ohlcv/minute?aggregate=1&limit=${limit}`;
+  const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork(chain)}/tokens/${geckoAddress(mint)}/ohlcv/minute?aggregate=1&limit=${limit}`;
   return readOhlcv(tokenUrl).catch(() => poolRows);
 }
 
@@ -549,11 +563,11 @@ async function fetchChartOnce(poolAddress: string, chain: ChainId, opts?: { dire
   }
   const read = opts?.direct ? readOhlcvDirect : readOhlcv;
   const network = geckoNetwork(chain);
-  const poolRows = await read(geckoHourlyChartUrl(network, poolAddress, "pools"));
+  const poolRows = await read(geckoHourlyChartUrl(network, geckoAddress(poolAddress), "pools"));
   if (poolRows.length) return poolRows;
   const mint = poolMint.get(poolAddress) ?? bookPools(chain).find((row) => row.pool.toLowerCase() === poolAddress.toLowerCase())?.mint;
   if (!mint) return poolRows;
-  return read(geckoHourlyChartUrl(network, mint, "tokens")).catch(() => poolRows);
+  return read(geckoHourlyChartUrl(network, geckoAddress(mint), "tokens")).catch(() => poolRows);
 }
 
 function staleCandles(poolAddress: string): Candle[] | null {
@@ -660,8 +674,9 @@ async function croMarkFallback(): Promise<{ price: number | null; change24h: num
 
 async function fetchRegime(chain: ChainId = "solana"): Promise<MarketRegime> {
   const cronos = chain === "cronos";
-  const geckoIds = cronos ? "bitcoin,ethereum,crypto-com-chain" : "bitcoin,ethereum,solana";
-  const dexSlug = cronos ? "cronos" : "solana";
+  const dash = chain === "dash";
+  const geckoIds = cronos ? "bitcoin,ethereum,crypto-com-chain" : dash ? "bitcoin,ethereum,dash" : "bitcoin,ethereum,solana";
+  const dexSlug = cronos ? "cronos" : dash ? "near" : "solana";
   const [prices, global, fng, chains, dexs] = await Promise.allSettled([
     fetchJson<CgSimple>(
       `https://api.coingecko.com/api/v3/simple/price?ids=${geckoIds}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
@@ -677,7 +692,7 @@ async function fetchRegime(chain: ChainId = "solana"): Promise<MarketRegime> {
   ]);
 
   const px = prices.status === "fulfilled" ? prices.value : null;
-  const l1Gecko = cronos ? px?.["crypto-com-chain"] : px?.solana;
+  const l1Gecko = cronos ? px?.["crypto-com-chain"] : dash ? px?.dash : px?.solana;
   const needFallback =
     !nullableNum(px?.bitcoin?.usd) || !nullableNum(px?.ethereum?.usd) || !nullableNum(l1Gecko?.usd);
   const fallback = !cronos && needFallback ? await liveMajors().catch(() => null) : null;
@@ -687,7 +702,9 @@ async function fetchRegime(chain: ChainId = "solana"): Promise<MarketRegime> {
   const chainList = chains.status === "fulfilled" ? chains.value : [];
   const l1Chain = cronos
     ? chainList.find((c) => c.name === "Cronos" || c.gecko_id === "crypto-com-chain" || c.gecko_id === "cronos")
-    : chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
+    : dash
+      ? chainList.find((c) => c.name === "Dash" || c.gecko_id === "dash")
+      : chainList.find((c) => c.name === "Solana" || c.gecko_id === "solana");
   const dex = dexs.status === "fulfilled" ? dexs.value : null;
 
   const btcPx = nullableNum(px?.bitcoin?.usd) ?? fallback?.btc.price ?? null;
@@ -870,7 +887,7 @@ function decisionKey(chain: ChainId, mint: string): string {
 export function cachedDecisionChart(mint: string, chain: ChainId = "solana"): Candle[] | null {
   const hit = decisionCache.get(decisionKey(chain, mint));
   if (hit?.rows.length) return hit.rows;
-  if (chain !== "cronos") return null;
+  if (chain !== "cronos" && chain !== "dash") return null;
   const pool = bookPools(chain).find((row) => sameMint(row.mint, mint))?.pool;
   return pool ? cachedChart(pool) : null;
 }
@@ -1033,6 +1050,14 @@ export function cachedFrameChart(mint: string, chain: ChainId, frame: Frame): Ca
 }
 
 async function readFrameSource(mint: string, chain: ChainId, source: Frame): Promise<void> {
+  if (chain === "dash") {
+    const pool = bookPools("dash").find((row) => sameMint(row.mint, mint))?.pool;
+    if (!pool) throw new Error("empty");
+    const rows = await readOhlcvDirect(geckoFrameUrl("near", geckoAddress(pool), "pools", source));
+    if (!rows.length) throw new Error("empty");
+    rememberFrames(chain, mint, source, rows);
+    return;
+  }
   if (chain === "cronos") {
     const book = await loadVvsFrames(mint);
     if (!book) throw new Error("empty");
@@ -1268,7 +1293,7 @@ async function loadMarketOnce(chain: ChainId): Promise<{
   );
   if (chain === "solana") {
     candidates = candidates.map((candidate) => applyJupiterTape(candidate, tapes.get(candidate.mint) ?? null));
-  } else {
+  } else if (chain === "cronos") {
     candidates = await stampVvsBook(candidates);
   }
   const stamped = withYields(regime, crossed.yields);
@@ -1286,6 +1311,7 @@ export function invalidateMarketCache(chain?: ChainId): void {
   if (!chain) {
     markets.solana.cache = null;
     markets.cronos.cache = null;
+    markets.dash.cache = null;
     return;
   }
   markets[chain].cache = null;

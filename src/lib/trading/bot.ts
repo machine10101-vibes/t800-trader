@@ -1,15 +1,16 @@
-import { sameMint, type ChainId } from "@/lib/chain";
+import { isSpotDesk, sameMint, type ChainId } from "@/lib/chain";
 import { ruleOn, stampQuote } from "@/lib/deskSettings";
 import { cachedOhlcv, cachedTapeMarks, livePoolPrice, loadFrameCharts, loadMarket } from "@/lib/market/providers";
 import { candleChangePct, cashExit, printClose, solanaKeepEntry, solanaPass, tickHeadline, withFrameTape } from "@/lib/market/tape";
 import { GAS_CRO } from "@/lib/cronos/constants";
-import { bookMints, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
+import { bookMints, DASH_MINT, headlineFor, isActiveBook, SOL_MINT, watchMeta, WCRO_MINT } from "@/lib/market/universe";
 import { runResearch } from "@/lib/research/engine";
 import { bookScreen, screenCandidate } from "@/lib/research/scoring";
 import type { AppState, ChainExecutor, MarketRegime, Position, ScoredCandidate, Signal, TradeReason } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 import { emptyState, getActiveWallet, mutateState } from "@/lib/store";
 import { applyCronosProfitShares, cronosProfitShares, takeCronosProfitShare } from "@/lib/cronos/share";
+import { applyDashProfitShares, dashProfitShares, takeDashProfitShare } from "@/lib/dash/share";
 import { applySolProfitShares, solProfitShares, takeSolProfitShare } from "@/lib/solana/share";
 import { advise, studyTape } from "./learn";
 import {
@@ -70,7 +71,14 @@ async function marksForPositions(
 async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
   if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
   if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
+  if (chain === "dash") return takeDashProfitShare(state, { live, owner: getActiveWallet("solana") });
   return state;
+}
+
+function spendsNativeCoin(chain: ChainId, quote: string | undefined, mint: string, symbol: string): boolean {
+  if (chain === "cronos" && quote === "cro" && (sameMint(mint, WCRO_MINT) || symbol === "CRO")) return true;
+  if (chain === "dash" && quote === "dash" && (sameMint(mint, DASH_MINT) || symbol === "DASH")) return true;
+  return false;
 }
 
 async function walletExit(
@@ -269,7 +277,7 @@ export async function tickBot(
           blocked.push(`limit: ${error instanceof Error ? error.message : "could not read the resting bid"}`);
         }
       }
-      const nativeMint = chain === "cronos" ? WCRO_MINT : SOL_MINT;
+      const nativeMint = chain === "cronos" ? WCRO_MINT : chain === "dash" ? DASH_MINT : SOL_MINT;
       const nativeMark = [...prices.entries()].find(([mint, price]) => price > 0 && sameMint(mint, nativeMint))?.[1] ?? 0;
       const priced =
         budget && !(budget.solPriceUsd > 0) && nativeMark > 0 ? { ...budget, solPriceUsd: nativeMark } : budget;
@@ -279,7 +287,12 @@ export async function tickBot(
               quote: next.config.cronosQuote,
               feeReserve: next.config.cronosQuote === "cro" ? GAS_CRO : undefined,
             }
-          : undefined;
+          : chain === "dash"
+            ? {
+                quote: next.config.dashQuote === "dash" ? ("dash" as const) : ("usdt" as const),
+                feeReserve: next.config.dashQuote === "dash" ? 0 : undefined,
+              }
+            : undefined;
       const risk = walletRiskBook(next.portfolio, next.positions, next.trades, priced, next.config.walletSwaps, payOpts);
       const balanceUnread = Boolean(next.config.walletSwaps && next.bot.running && !budget);
       if (balanceUnread) blocked.push("Could not read the trading balance, so no new ticket was sent");
@@ -290,7 +303,16 @@ export async function tickBot(
         const marked = priced ? walletMarkUsd(priced) : 0;
         const bookTooSmall = Boolean(priced) && next.config.walletSwaps && (marked < MIN_TRADE_USD || spendable < MIN_TICKET_USD);
         if (bookTooSmall) {
-          const spend = chain === "cronos" && next.config.cronosQuote === "cro" ? "CRO" : chain === "cronos" ? "USDC or CRO" : "SOL or USDC";
+          const spend =
+            chain === "dash" && next.config.dashQuote === "dash"
+              ? "DASH"
+              : chain === "dash"
+                ? "USDT"
+                : chain === "cronos" && next.config.cronosQuote === "cro"
+                  ? "CRO"
+                  : chain === "cronos"
+                    ? "USDC or CRO"
+                    : "SOL or USDC";
           blocked.push(
             `Trading balance is under $${MIN_TRADE_USD} — the trading key needs that much ${spend} before a swap is sent`,
           );
@@ -301,9 +323,11 @@ export async function tickBot(
           .sort((a, b) => huntRank(b) - huntRank(a))
           .slice(0, 16);
         for (const mint of bookMints(chain)) {
-          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(mint, WCRO_MINT) || watchMeta(mint, chain)?.symbol === "CRO")) {
-            if (!focus.some((token) => sameMint(token.mint, mint) || token.symbol === "CRO")) {
-              blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
+          const bookSymbol = watchMeta(mint, chain)?.symbol ?? "";
+          if (spendsNativeCoin(chain, chain === "dash" ? next.config.dashQuote : next.config.cronosQuote, mint, bookSymbol)) {
+            const coin = chain === "dash" ? "DASH" : "CRO";
+            if (!focus.some((token) => sameMint(token.mint, mint) || token.symbol === coin)) {
+              blocked.push(`${coin}: skipped — this desk spends ${coin}, so it cannot buy ${coin}`);
             }
             continue;
           }
@@ -328,13 +352,14 @@ export async function tickBot(
             blocked.push(`${token.symbol}: price feeds disagree`);
             return;
           }
-          if (chain === "cronos" && next.config.cronosQuote === "cro" && (sameMint(token.mint, WCRO_MINT) || token.symbol === "CRO")) {
-            blocked.push("CRO: skipped — this desk spends CRO, so it cannot buy CRO");
+          if (spendsNativeCoin(chain, chain === "dash" ? next.config.dashQuote : next.config.cronosQuote, token.mint, token.symbol)) {
+            const coin = chain === "dash" ? "DASH" : "CRO";
+            blocked.push(`${coin}: skipped — this desk spends ${coin}, so it cannot buy ${coin}`);
             return;
           }
           const frames = charts[i];
-          const marked = chain === "cronos" ? withFrameTape(token, frames) : token;
-          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const marked = isSpotDesk(chain) ? withFrameTape(token, frames) : token;
+          const mode = isSpotDesk(chain) ? "spot" : next.config.solTradeMode;
           const decision = deskEntrySignals(
             marked,
             { m5: frames["5m"], m15: frames["15m"], h1: frames["1h"], h4: frames["4h"] },
@@ -355,7 +380,7 @@ export async function tickBot(
             if (signal.side !== "long") return false;
             // Cronos already back-checked the 15-minute chart against 1-hour and 4-hour.
             // The Solana 15-minute flow gate was throwing those longs away.
-            if (chain === "cronos" || signal.setupFrame === "4h" || signal.setupFrame === "1h") return true;
+            if (isSpotDesk(chain) || signal.setupFrame === "4h" || signal.setupFrame === "1h") return true;
             return solanaKeepEntry(signal.side, marked.flows.m15.priceChangePct);
           });
           signals.push(...found);
@@ -430,11 +455,15 @@ export async function tickBot(
             minCashUsd: next.config.walletSwaps ? MIN_TICKET_USD : undefined,
           });
           if (gate) {
-            const native = chain === "cronos" ? "CRO" : "SOL";
+            const native = chain === "dash" ? "DASH" : chain === "cronos" ? "CRO" : "SOL";
             const spend =
-              chain === "cronos" && next.config.cronosQuote === "cro"
-                ? `need at least $${MIN_TICKET_USD} in CRO after the fee reserve`
-                : `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`;
+              chain === "dash" && next.config.dashQuote === "dash"
+                ? `need at least $${MIN_TICKET_USD} in DASH`
+                : chain === "dash"
+                  ? `need at least $${MIN_TICKET_USD} in USDT`
+                  : chain === "cronos" && next.config.cronosQuote === "cro"
+                    ? `need at least $${MIN_TICKET_USD} in CRO after the fee reserve`
+                    : `need at least $${MIN_TICKET_USD} in USDC or in ${native} after the fee reserve. One swap cannot spend both`;
             const why = gate === "Insufficient cash" && next.config.walletSwaps ? spend : gate;
             blocked.push(`${learned.symbol} ${learned.side}: ${why}`);
             continue;
@@ -455,7 +484,7 @@ export async function tickBot(
               })
             : { qty: 0, notional: 0 };
           const cashCap = cashConcentration(risk.portfolio.equityUsd, next.config);
-          const mode = chain === "cronos" ? "spot" : next.config.solTradeMode;
+          const mode = isSpotDesk(chain) ? "spot" : next.config.solTradeMode;
           const wanted = tradeLeverage({
             multipliers: next.config.multipliers,
             confidence: Math.max(signal.confidence, learned.confidence),
@@ -524,6 +553,7 @@ export async function tickBot(
                       leverage: leverage > 1 ? leverage : undefined,
                       collateralUsd: leverage > 1 ? collateralUsd : undefined,
                       cronosQuote: chain === "cronos" ? next.config.cronosQuote : undefined,
+                      dashQuote: chain === "dash" ? next.config.dashQuote : undefined,
                     },
                     next.config,
                   ),
@@ -639,7 +669,9 @@ export function applyControl(
         ? applySolProfitShares(flat, solProfitShares(flat))
         : chain === "cronos"
           ? applyCronosProfitShares(flat, cronosProfitShares(flat))
-          : flat;
+          : chain === "dash"
+            ? applyDashProfitShares(flat, dashProfitShares(flat))
+            : flat;
     return {
       ...shared,
       bot: { ...shared.bot, running: false, resting: undefined, lastNote: "Book flattened by hand" },

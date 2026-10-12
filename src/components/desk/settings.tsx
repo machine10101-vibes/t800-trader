@@ -1,10 +1,10 @@
 "use client";
 
-import { CHAIN_COPY, type ChainId } from "@/lib/chain";
+import { CHAIN_COPY, isSpotDesk, type ChainId } from "@/lib/chain";
 import { ARM_FUNDS_USD, BUY_SIZE_USD, commitTicketCap, logicFramesRule, multipliersForMode, nextSettingsDraft, SOL_TRADE_MODES, toggleLogicFrame, type RuleId } from "@/lib/deskSettings";
 import { FRAME_LABEL, FRAMES, type Frame } from "@/lib/market/frames";
-import { cronosVenuesOn, venueOptionsFor, venueSummary, venuesOnFor } from "@/lib/market/venues";
-import { DEFAULT_CONFIG, normalizeConfig, solanaDefaults } from "@/lib/store";
+import { venueOptionsFor, venueSummary, venuesOnFor } from "@/lib/market/venues";
+import { normalizeConfig, solanaDefaults } from "@/lib/store";
 import type { BotConfig, DeskPayload } from "@/lib/types";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TokenLogo, VenueLogo } from "./TokenLogo";
@@ -56,7 +56,7 @@ export function SettingsPanel({
               onClick={() =>
                 setLocal(
                   normalizeConfig({
-                    ...(chain === "solana" || chain === "cronos" ? solanaDefaults() : DEFAULT_CONFIG),
+                    ...solanaDefaults(),
                     startingEquity: local.startingEquity,
                   }),
                 )
@@ -85,7 +85,9 @@ export function SettingsPanel({
           {rulesOff ? ` · ${rulesOff} ${rulesOff === 1 ? "rule" : "rules"} off` : " · every rule on"}
           {chain === "cronos"
             ? ` · spends ${local.cronosQuote === "cro" ? "CRO" : "USDC"} · no extra size`
-            : local.solTradeMode === "spot"
+            : chain === "dash"
+              ? ` · spends ${local.dashQuote === "dash" ? "DASH" : "USDT"} · no extra size`
+              : local.solTradeMode === "spot"
               ? " · spot swaps"
               : local.solTradeMode === "margin"
                 ? ` · SOL margin${local.marginOnFourHour ? " on 4-hour setups" : ""}${local.multipliers.length ? ` · ${local.multipliers.map((n) => `${n} times`).join(", ")}` : ""}`
@@ -98,10 +100,26 @@ export function SettingsPanel({
         hint={
           chain === "cronos" && local.cronosQuote === "cro"
             ? "Arming loads this much CRO, at the live CRO price, onto the trading key, plus a little for fees. Practice uses the same number as pretend money. Each buy spends the size you pick."
-            : "Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
+            : chain === "dash" && local.dashQuote === "dash"
+              ? "Arming uses this much DASH, at the live DASH price, on the NEAR account. Practice uses the same number as pretend money. Each buy spends the size you pick."
+              : chain === "dash"
+                ? "Arming uses this much USDT on the NEAR account. Practice uses the same number as pretend money. Each buy spends the size you pick."
+                : "Arming loads this much USDC onto the trading key. Practice uses the same number as pretend money. Each buy spends the size you pick."
         }
       >
-        {chain === "cronos" ? (
+        {chain === "dash" ? (
+          <Pills
+            label="Spend on each buy"
+            hint="USDT buys with the stablecoin and sells back to USDT. DASH buys with DASH and sells back to DASH. DASH itself is skipped when the desk spends DASH. Changing this does not flip an open ticket."
+            value={local.dashQuote}
+            display={local.dashQuote === "dash" ? "DASH" : "USDT"}
+            options={[
+              { value: "usdt" as const, label: "USDT" },
+              { value: "dash" as const, label: "DASH" },
+            ]}
+            onChange={(dashQuote) => set({ dashQuote })}
+          />
+        ) : chain === "cronos" ? (
           <Pills
             label="Spend on each buy"
             hint="USDC buys with the stablecoin and sells back to USDC. CRO buys with wrapped CRO and sells back to CRO. Changing this does not flip an open ticket."
@@ -119,7 +137,11 @@ export function SettingsPanel({
           hint={
             chain === "cronos" && local.cronosQuote === "cro"
               ? "25, 50, or 150 dollars of CRO. Real money moves that much CRO plus fee CRO. Practice starts a book of that size."
-              : "25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
+              : chain === "dash" && local.dashQuote === "dash"
+                ? "25, 50, or 150 dollars of DASH. Real money spends that much DASH. Practice starts a book of that size."
+                : chain === "dash"
+                  ? "25, 50, or 150 USDT. Real money spends that much. Practice starts a book of that size."
+                  : "25, 50, or 150 USDC. Real money moves that much. Practice starts a book of that size."
           }
           value={local.armFundsUsd}
           options={ARM_FUNDS_USD.map((n) => ({ value: n, label: `$${n}` }))}
@@ -184,7 +206,7 @@ export function SettingsPanel({
 
       <Section
         title="Charts the bot uses"
-        hint="Turn each chart on or off. The shortest chart that is on finds the buy. Longer charts that stay on must not fight that buy. At least one chart stays on. This is the same on Solana and Cronos."
+        hint="Turn each chart on or off. The shortest chart that is on finds the buy. Longer charts that stay on must not fight that buy. At least one chart stays on. This is the same on Solana, Cronos, and Dash."
       >
         {FRAMES.map((frame) => (
           <Toggle
@@ -213,8 +235,8 @@ export function SettingsPanel({
           hint={
             local.killSwitch
               ? "The emergency stop is on. Turn real money back on from the confirm box."
-              : chain === "cronos"
-                ? "On sends real buys and sells from a wallet key in this browser. Off only practices, and no money moves."
+              : chain === "dash"
+                ? "On sends real buys and sells through the NEAR DEX. NEAR Mobile signs each one. Off only practices, and no money moves."
                 : "On sends real buys and sells from a wallet key in this browser. Off only practices, and no money moves."
           }
           checked={local.walletSwaps}
@@ -233,7 +255,7 @@ export function SettingsPanel({
           onChange={(v) => set({ slippageBps: v })}
         />
         <Field
-          label={chain === "cronos" ? "CRO kept for fees" : "SOL kept for fees"}
+          label={chain === "dash" ? "NEAR kept for fees" : chain === "cronos" ? "CRO kept for fees" : "SOL kept for fees"}
           hint="On waits until the wallet has at least this much left for network fees. Off uses the smaller built-in cushion."
           value={local.minSolForFees}
           enabled={local.rulesOn.feeReserve}
@@ -241,7 +263,7 @@ export function SettingsPanel({
           min={0.006}
           max={0.08}
           step={0.002}
-          suffix={chain === "cronos" ? " CRO" : " SOL"}
+          suffix={chain === "dash" ? " NEAR" : chain === "cronos" ? " CRO" : " SOL"}
           onChange={(v) => set({ minSolForFees: v })}
         />
         <Toggle
@@ -252,12 +274,16 @@ export function SettingsPanel({
         />
       </Section>
 
-      {chain === "cronos" ? (
-        <Section title="How it buys" hint={CHAIN_COPY.cronos.settingsMultiplier}>
+      {isSpotDesk(chain) ? (
+        <Section title="How it buys" hint={CHAIN_COPY[chain].settingsMultiplier}>
           <p className="text-sm leading-6 text-[var(--muted)] md:col-span-2">
-            {local.cronosQuote === "cro"
-              ? "A buy spends CRO on the DEXes you leave on. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
-              : "A buy spends USDC on the DEXes you leave on. A sell turns the coin back into USDC. There is no extra size on Cronos."}
+            {chain === "dash"
+              ? local.dashQuote === "dash"
+                ? "A buy spends DASH on the NEAR DEX. A sell turns the coin back into DASH. DASH itself is skipped so the desk does not buy DASH with DASH. There is no extra size on Dash."
+                : "A buy spends USDT on the NEAR DEX. A sell turns the coin back into USDT. There is no extra size on Dash."
+              : local.cronosQuote === "cro"
+                ? "A buy spends CRO on the DEXes you leave on. A sell turns the coin back into CRO. CRO itself is skipped so the desk does not buy CRO with CRO. There is no extra size on Cronos."
+                : "A buy spends USDC on the DEXes you leave on. A sell turns the coin back into USDC. There is no extra size on Cronos."}
           </p>
         </Section>
       ) : (
@@ -322,11 +348,15 @@ export function SettingsPanel({
       <Section
         title="Where it buys"
         hint={
-          chain === "cronos"
-            ? local.cronosQuote === "cro"
-              ? "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends CRO. A ticket you already hold still sells if you turn that place off."
-              : "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends USDC. A ticket you already hold still sells if you turn that place off."
-            : "New buys only use the places you leave on. A buy you already hold stays until it sells, even if you turn that place off."
+          chain === "dash"
+            ? local.dashQuote === "dash"
+              ? "The NEAR DEX stays on or off. A buy spends DASH. A ticket you already hold still sells if you turn it off."
+              : "The NEAR DEX stays on or off. A buy spends USDT. A ticket you already hold still sells if you turn it off."
+            : chain === "cronos"
+              ? local.cronosQuote === "cro"
+                ? "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends CRO. A ticket you already hold still sells if you turn that place off."
+                : "Turn each DEX on or off. A buy or sell quotes the places that are on and sends the one that returns more. A buy spends USDC. A ticket you already hold still sells if you turn that place off."
+              : "New buys only use the places you leave on. A buy you already hold stays until it sells, even if you turn that place off."
         }
       >
         {venueOptionsFor(chain).map((venue) => {
@@ -339,8 +369,8 @@ export function SettingsPanel({
               mark={<VenueLogo id={venue.id} size="md" />}
               checked={on}
               onChange={(next) => {
-                if (chain === "cronos") {
-                  const current = cronosVenuesOn(local.venues);
+                if (isSpotDesk(chain)) {
+                  const current = venuesOnFor(local.venues, chain);
                   set({
                     venues: next ? [...current, venue.id] : current.filter((id) => id !== venue.id),
                   });

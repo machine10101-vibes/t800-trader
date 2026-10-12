@@ -1,6 +1,6 @@
 import type { ChainId } from "@/lib/chain";
 
-export type CashSymbol = "USDC" | "SOL" | "CRO";
+export type CashSymbol = "USDC" | "SOL" | "CRO" | "USDT" | "DASH";
 
 export interface CashLeg {
   symbol: CashSymbol;
@@ -8,8 +8,14 @@ export interface CashLeg {
   usd: number;
 }
 
-export function nativeCashSymbol(chain: ChainId): "SOL" | "CRO" {
-  return chain === "cronos" ? "CRO" : "SOL";
+export function nativeCashSymbol(chain: ChainId): "SOL" | "CRO" | "DASH" {
+  if (chain === "cronos") return "CRO";
+  if (chain === "dash") return "DASH";
+  return "SOL";
+}
+
+export function stableCashSymbol(chain: ChainId): "USDC" | "USDT" {
+  return chain === "dash" ? "USDT" : "USDC";
 }
 
 /** Always USDC plus the desk native, so a $0.005 CRO dust still lists both tokens. */
@@ -23,8 +29,9 @@ export function cashLegs(input: {
   const native = Math.max(0, Number.isFinite(input.native) ? input.native : 0);
   const price = input.nativePriceUsd && input.nativePriceUsd > 0 ? input.nativePriceUsd : 0;
   const symbol = nativeCashSymbol(input.chain);
+  const stable = stableCashSymbol(input.chain);
   return [
-    { symbol: "USDC", amount: usdc, usd: usdc },
+    { symbol: stable, amount: usdc, usd: usdc },
     { symbol, amount: native, usd: native * price },
   ];
 }
@@ -36,8 +43,8 @@ export function formatCashUsd(n: number): string {
 }
 
 export function formatCashAmount(symbol: CashSymbol, amount: number): string {
-  if (!Number.isFinite(amount) || amount <= 0) return symbol === "USDC" ? "$0.00" : `0 ${symbol}`;
-  if (symbol === "USDC") return formatCashUsd(amount);
+  if (!Number.isFinite(amount) || amount <= 0) return symbol === "USDC" || symbol === "USDT" ? "$0.00" : `0 ${symbol}`;
+  if (symbol === "USDC" || symbol === "USDT") return formatCashUsd(amount);
   if (amount >= 1000) return `${amount.toFixed(1)} ${symbol}`;
   if (amount >= 1) return `${amount.toFixed(3)} ${symbol}`;
   if (amount >= 0.001) return `${amount.toFixed(4)} ${symbol}`;
@@ -45,7 +52,7 @@ export function formatCashAmount(symbol: CashSymbol, amount: number): string {
 }
 
 export function cashLegLine(leg: CashLeg): string {
-  if (leg.symbol === "USDC") return formatCashUsd(leg.amount);
+  if (leg.symbol === "USDC" || leg.symbol === "USDT") return formatCashUsd(leg.amount);
   const qty = formatCashAmount(leg.symbol, leg.amount);
   if (leg.usd <= 0) return qty;
   return `${qty} · ${formatCashUsd(leg.usd)}`;

@@ -1,6 +1,11 @@
-export type ChainId = "solana" | "cronos";
+export type ChainId = "solana" | "cronos" | "dash";
 
-export const CHAIN_IDS: ChainId[] = ["solana", "cronos"];
+export const CHAIN_IDS: ChainId[] = ["solana", "cronos", "dash"];
+
+/** Cronos and Dash stay a spot buy and a spot sell. Solana can also use margin. */
+export function isSpotDesk(chain: ChainId): boolean {
+  return chain === "cronos" || chain === "dash";
+}
 
 export interface ChainCopy {
   id: ChainId;
@@ -104,6 +109,42 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     settingsTen: "Does not apply. Cronos tickets stay a spot buy and a spot sell.",
     settingsReset: "Reset wallet book is the control that clears the paper account back to the live CRO and USDC mark.",
   },
+  dash: {
+    id: "dash",
+    kicker: "Dash",
+    native: "DASH",
+    bookLabel: "DASH, NEAR, ETH, QTC, and Rhea",
+    walletBook: "DASH + USDT",
+    swapHint: "NEAR DEX from NEAR Mobile",
+    connectBlurb:
+      "Connect DashPay for the Dash identity and NEAR Mobile for the account that signs. The desk reads DASH and USDT on that NEAR account and starts in practice mode, so no money moves until you turn on real money. Swaps go through the NEAR DEX.",
+    connectFallback: "Connect Dash wallets",
+    installHint: "Install the Dash Platform extension for DashPay, and NEAR Mobile on the phone. Then connect both.",
+    armBlurb:
+      "Real money asks NEAR Mobile to sign each buy and sell. DashPay stays connected so the desk knows the Dash identity. Nothing is moved to a key this site holds.",
+    watchBlurb: "Paste a NEAR account to see the trades this browser saved for it. Nothing can be traded from here.",
+    watchError: "That is not a NEAR account.",
+    needWallet: "Connect DashPay and NEAR Mobile to trade.",
+    needFunds: "priced DASH/USDT",
+    scanning: "Scanning the NEAR DEX",
+    waitingTick: "Waiting for the first DASH, NEAR, ETH, QTC, and Rhea tick.",
+    radar: "DASH, NEAR, ETH, QTC, and Rhea. Empty rows mean the feeds missed this cycle — nothing is invented.",
+    noSwaps:
+      "No signed swaps yet. An armed bot sends the next 15-minute setup that passes the 1-hour and 4-hour check through the NEAR DEX. The row appears here with a NearBlocks link once that swap confirms.",
+    bookArm:
+      "Arm checks that DashPay and NEAR Mobile are both connected. Each buy and sell then asks NEAR Mobile to sign. Tickets list only those signed fills. Turning the bot off stops new buys. Every ticket is a buy or a sell.",
+    noOpen: "No open swap. A 15-minute setup that passes the 1-hour and 4-hour check is sent through the NEAR DEX.",
+    noTickets:
+      "No live tickets yet. A NEAR DEX swap shows up here with a NearBlocks link. The bot trades a 15-minute setup once the 1-hour and 4-hour charts agree, so a quiet day can pass with no trade.",
+    explorerName: "NearBlocks",
+    settingsWallet:
+      "On: Arm checks DashPay and NEAR Mobile, then each swap asks NEAR Mobile to sign a NEAR DEX trade. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
+    settingsMultiplier:
+      "Pick USDT or DASH in Trading money. A buy spends that coin on the NEAR DEX, and a sell returns the same coin. DASH itself is skipped when the desk spends DASH. Extra size is not used.",
+    settingsFive: "Does not apply. Dash tickets stay a spot buy and a spot sell.",
+    settingsTen: "Does not apply. Dash tickets stay a spot buy and a spot sell.",
+    settingsReset: "Reset wallet book is the control that clears the paper account back to the live DASH and USDT mark.",
+  },
 };
 
 export function sameMint(a: string, b: string): boolean {
@@ -115,6 +156,7 @@ export function sameMint(a: string, b: string): boolean {
 
 export function txUrl(chain: ChainId, signature: string): string {
   if (chain === "cronos") return `https://cronoscan.com/tx/${signature}`;
+  if (chain === "dash") return `https://nearblocks.io/txns/${signature}`;
   return `https://solscan.io/tx/${signature}`;
 }
 
@@ -129,7 +171,7 @@ export function readDeskChain(): ChainId {
   if (typeof window === "undefined") return "solana";
   try {
     const raw = window.localStorage.getItem(DESK_CHAIN_KEY);
-    if (raw === "cronos" || raw === "solana") return raw;
+    if (raw === "cronos" || raw === "solana" || raw === "dash") return raw;
   } catch {
     // Private mode still opens Solana first.
   }

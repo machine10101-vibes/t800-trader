@@ -16,16 +16,24 @@ import {
   type CronosSession,
   type EthereumProvider,
 } from "@/lib/cronos/wallet";
+import { connectDash, disconnectDash, refreshDash, type DashSession } from "@/lib/dash/trade";
+import { dashPayInstalled } from "@/lib/dash/wallet";
 
-export type DeskSession = WalletSession | CronosSession;
+export type DeskSession = WalletSession | CronosSession | DashSession;
 
-export async function connectDesk(chain: ChainId, trusted = false): Promise<DeskSession> {
+export async function connectDesk(
+  chain: ChainId,
+  trusted = false,
+  side?: "dashpay" | "near",
+): Promise<DeskSession> {
   if (chain === "cronos") return connectCronos(trusted);
+  if (chain === "dash") return connectDash(trusted, side);
   return connectWallet(trusted);
 }
 
 export async function refreshDesk(chain: ChainId, session: DeskSession): Promise<DeskSession> {
   if (chain === "cronos") return refreshCronos(session as CronosSession);
+  if (chain === "dash") return refreshDash(session as DashSession);
   return refreshWallet(session as WalletSession);
 }
 
@@ -37,11 +45,16 @@ export function listenDesk(
     onAccountChanged?: (address: string | null) => void;
   },
 ): () => void {
+  if (chain === "dash") return () => undefined;
   if (chain === "cronos") return listenCronos((session as CronosSession).provider, handlers);
   return listenWallet((session as WalletSession).provider, handlers);
 }
 
 export async function disconnectDesk(chain: ChainId, session?: DeskSession | null): Promise<void> {
+  if (chain === "dash") {
+    disconnectDash();
+    return;
+  }
   if (chain === "cronos") {
     await disconnectCronos((session as CronosSession | null | undefined)?.provider);
     return;
@@ -51,6 +64,7 @@ export async function disconnectDesk(chain: ChainId, session?: DeskSession | nul
 
 export function detectedDeskWallet(chain: ChainId): string | null {
   if (chain === "cronos") return detectedCronosWallet();
+  if (chain === "dash") return dashPayInstalled() ? "DashPay" : null;
   return detectedWalletName();
 }
 

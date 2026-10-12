@@ -10,13 +10,14 @@ describe("landing roster", () => {
     const tokens = landingTokens();
     assert.deepEqual(
       tokens.map((token) => token.symbol),
-      [...bookTokens("solana"), ...bookTokens("cronos")].map((token) => token.symbol),
+      [...bookTokens("solana"), ...bookTokens("cronos"), ...bookTokens("dash")].map((token) => token.symbol),
     );
     const orbit = landingOrbit();
     assert.equal(orbit.length, tokens.length);
     assert.equal(new Set(orbit.map((token) => token.symbol)).size, tokens.length);
     assert.equal(orbit[0]?.chain, "solana");
     assert.equal(orbit[1]?.chain, "cronos");
+    assert.equal(orbit[2]?.chain, "dash");
     for (const token of tokens) {
       const mark = landingMark(token.symbol);
       assert.ok(mark, token.symbol);

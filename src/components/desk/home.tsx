@@ -285,7 +285,9 @@ export function Home({
           <p className="mt-4 text-xs leading-5 text-[var(--faint)]">
             {chain === "cronos"
               ? "No bot can promise a profit. These Cronos rules have not been replayed. Practice first, and only use money you can afford to lose."
-              : "No bot can promise a profit. In 120-day replays with fees these rules stayed close to flat. Practice first, and only use money you can afford to lose."}
+              : chain === "dash"
+                ? "No bot can promise a profit. These Dash rules have not been replayed. Practice first, and only use money you can afford to lose."
+                : "No bot can promise a profit. In 120-day replays with fees these rules stayed close to flat. Practice first, and only use money you can afford to lose."}
           </p>
           <p className="mt-3 text-xs leading-5 text-[var(--faint)]">{alwaysOnNote(runner)}</p>
           <button type="button" onClick={onMore} className="mt-3 text-sm text-[var(--magenta)] underline-offset-4 hover:underline">

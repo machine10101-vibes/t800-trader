@@ -98,6 +98,15 @@ export function normalizeCronosQuote(value: unknown): CronosQuote {
   return value === "cro" || value === "usdc" ? value : DEFAULT_CRONOS_QUOTE;
 }
 
+export const DASH_QUOTES = ["usdt", "dash"] as const;
+export type DashQuote = (typeof DASH_QUOTES)[number];
+export const DEFAULT_DASH_QUOTE: DashQuote = "usdt";
+
+/** Older Dash books that never stored a quote stay on USDT. */
+export function normalizeDashQuote(value: unknown): DashQuote {
+  return value === "dash" || value === "usdt" ? value : DEFAULT_DASH_QUOTE;
+}
+
 /** Margin or both with an empty list still posts a SOL 5x or 10x. */
 export function multipliersForMode(mode: SolTradeMode, multipliers: readonly number[]): number[] {
   if (mode === "spot") return [...multipliers];
