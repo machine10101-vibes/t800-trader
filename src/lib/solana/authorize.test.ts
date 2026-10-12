@@ -3,21 +3,25 @@ import assert from "node:assert/strict";
 import { planAuthorization, planProfitWithdrawal, tradingKeyCoversSpend } from "./authorize";
 
 describe("planAuthorization", () => {
-  it("moves the chosen USDC size and only enough SOL for fees", () => {
+  it("moves the chosen USDC size and 0.05 SOL for fees", () => {
     const plan = planAuthorization(0.2, 80, { armFundsUsd: 50 });
     assert.equal(plan.usdcToBot, 50);
-    assert.ok(plan.solToBot >= 0.01);
-    assert.ok(plan.solToBot <= 0.18);
+    assert.equal(plan.solToBot, 0.05);
   });
 
-  it("tops up a trading key that is already partly funded", () => {
-    const plan = planAuthorization(0.2, 40, { armFundsUsd: 50, alreadyUsdc: 20, alreadyNative: 0.02 });
+  it("asks for 0.05 SOL again when the trading key is still under that", () => {
+    const plan = planAuthorization(0.2, 80, { armFundsUsd: 50, alreadyNative: 0.012 });
+    assert.equal(plan.solToBot, 0.05);
+  });
+
+  it("does not move more SOL once the trading key already holds 0.05", () => {
+    const plan = planAuthorization(0.2, 40, { armFundsUsd: 50, alreadyUsdc: 20, alreadyNative: 0.05 });
     assert.equal(plan.usdcToBot, 30);
     assert.equal(plan.solToBot, 0);
   });
 
-  it("refuses a wallet that cannot pay the swap fees or the chosen USDC size", () => {
-    assert.throws(() => planAuthorization(0.01, 40, { armFundsUsd: 25 }), /0\.025 SOL/);
+  it("refuses a wallet that cannot spare 0.05 SOL or the chosen USDC size", () => {
+    assert.throws(() => planAuthorization(0.04, 40, { armFundsUsd: 25 }), /0\.05 SOL/);
     assert.throws(() => planAuthorization(0.2, 10, { armFundsUsd: 50 }), /\$50 USDC/);
   });
 });

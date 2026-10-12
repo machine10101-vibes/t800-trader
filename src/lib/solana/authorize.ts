@@ -19,8 +19,11 @@ const ASSOCIATED_TOKEN_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25
 
 /** Stays in Phantom so the arm transaction and a later disarm can pay fees. */
 const USER_KEEP_SOL = 0.02;
+/** Moved onto the trading key when the bot starts. The fee floor in Settings is 0.02, so 0.05 leaves room for the swap. */
+export const ARM_SOL = 0.05;
 /** The trading key needs this much SOL to land Jupiter swaps. */
 const BOT_MIN_SOL = 0.01;
+const ARM_SOL_SHORT = "Need 0.05 SOL for the trading key, plus about 0.02 SOL left in the wallet for fees.";
 
 export interface ArmPlan {
   solToBot: number;
@@ -35,7 +38,7 @@ export interface ArmFunds {
 
 /**
  * One Jupiter swap spends a single mint, and only the owner can sign it.
- * Arming moves the chosen USDC size plus enough SOL for fees.
+ * Arming moves the chosen USDC size plus 0.05 SOL. A short trading key is not topped up with a smaller amount.
  */
 export function planAuthorization(sol: number, usdc: number, funds: ArmFunds = {}): ArmPlan {
   const want = funds.armFundsUsd ?? DEFAULT_ARM_FUNDS_USD;
@@ -43,21 +46,10 @@ export function planAuthorization(sol: number, usdc: number, funds: ArmFunds = {
   const alreadySol = funds.alreadyNative ?? 0;
   const usdcToBot = usdcToLoad(usdc, want, alreadyUsdc);
   let solToBot = 0;
-  if (alreadySol < BOT_MIN_SOL) {
-    const need = round(BOT_MIN_SOL - alreadySol, 9);
+  if (alreadySol + 1e-9 < ARM_SOL) {
+    solToBot = ARM_SOL;
     const available = sol > USER_KEEP_SOL ? round(sol - USER_KEEP_SOL, 9) : 0;
-    solToBot = Math.min(available, Math.max(need, BOT_MIN_SOL));
-    if (solToBot < BOT_MIN_SOL) {
-      const extra = round(BOT_MIN_SOL - solToBot, 9);
-      const leftOnUser = round(sol - solToBot - extra, 9);
-      if (leftOnUser >= 0.005) solToBot = round(solToBot + extra, 9);
-    }
-  }
-  if (alreadySol + solToBot < BOT_MIN_SOL) {
-    throw new Error("Need about 0.025 SOL in the wallet so arming can pay for swaps.");
-  }
-  if (alreadySol + solToBot < 0.02 && usdcToBot + alreadyUsdc < 0.5) {
-    throw new Error("Need at least 0.04 SOL, or USDC plus 0.025 SOL, before arming can authorize swaps.");
+    if (available + 1e-9 < solToBot) throw new Error(ARM_SOL_SHORT);
   }
   if (alreadyUsdc + usdcToBot + 0.5 < want) {
     throw new Error(`Need $${want} USDC to load this trading size. This wallet has $${usdc.toFixed(2)}.`);
@@ -147,8 +139,6 @@ async function latestBlockhash(): Promise<string> {
 
 const ATA_RENT_LAMPORTS = 2_039_280n;
 const FEE_BUFFER_LAMPORTS = 20_000n;
-const BOT_MIN_LAMPORTS = 10_000_000n;
-const USER_MIN_LAMPORTS = 5_000_000n;
 
 interface ChainHoldings {
   lamports: bigint;
@@ -288,7 +278,7 @@ export function authorizeTrading(session: WalletSession, armFundsUsd: number = D
 }
 
 function tradingKeyCoversArm(held: TradingSnap | null, armFundsUsd: number): boolean {
-  return tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD) && (held?.usdc ?? 0) + 0.5 >= armFundsUsd;
+  return Boolean(held && held.sol + 1e-9 >= ARM_SOL) && tradingKeyCoversSpend(held, BOT_MIN_SOL, JUPITER_MIN_COLLATERAL_USD) && (held?.usdc ?? 0) + 0.5 >= armFundsUsd;
 }
 
 function noteSolanaBudget(
@@ -340,22 +330,16 @@ async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number)
   }
 
   const usdcMint = new PublicKey(USDC_MINT);
-  let solLamports = BigInt(Math.round(plan.solToBot * 1_000_000_000));
-  if (userChain.lamports < solLamports + USER_MIN_LAMPORTS) {
-    solLamports = userChain.lamports > USER_MIN_LAMPORTS ? userChain.lamports - USER_MIN_LAMPORTS : 0n;
-  }
+  const solLamports = BigInt(Math.round(plan.solToBot * 1_000_000_000));
   const wantedUsdc = BigInt(Math.round(plan.usdcToBot * 1_000_000));
   const usdcUnits = wantedUsdc > 0n ? (wantedUsdc < userChain.usdc ? wantedUsdc : userChain.usdc) : 0n;
-  if (usdcUnits > 0n) {
-    const botAta = associatedToken(bot.publicKey, usdcMint);
-    const rent = (await accountExists(botAta)) ? 0n : ATA_RENT_LAMPORTS;
-    const extra = rent + FEE_BUFFER_LAMPORTS;
-    if (userChain.lamports < solLamports + extra) {
-      solLamports = userChain.lamports > extra ? userChain.lamports - extra : 0n;
+  if (solLamports > 0n) {
+    let overhead = FEE_BUFFER_LAMPORTS;
+    if (usdcUnits > 0n && !(await accountExists(associatedToken(bot.publicKey, usdcMint)))) {
+      overhead += ATA_RENT_LAMPORTS;
     }
-  }
-  if (solLamports < BOT_MIN_LAMPORTS) {
-    throw new Error("Need about 0.025 SOL in the wallet so arming can pay for swaps.");
+    const userKeep = BigInt(Math.round(USER_KEEP_SOL * 1_000_000_000));
+    if (userChain.lamports < solLamports + overhead + userKeep) throw new Error(ARM_SOL_SHORT);
   }
 
   const tx = new Transaction();

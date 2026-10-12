@@ -50,7 +50,7 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     connectFallback: "Connect Solana wallet",
     installHint: "On a phone, Connect opens Phantom. Unlock it and approve the connection. This browser then opens the desk. On a computer, install Phantom or Solflare, then reload.",
     armBlurb:
-      "In real-money mode, turning the bot on asks your wallet to approve one transfer to a trading key kept in this browser. That key places each trade, and turning the bot off sends the money back.",
+      "In real-money mode, turning the bot on asks your wallet to approve a transfer of 0.05 SOL plus the armed USDC to a trading key kept in this browser. That key places each trade, and turning the bot off sends the money back.",
     watchBlurb: "Paste any Solana address to see its SOL and USDC and the trades this browser saved for it. Nothing can be traded from here.",
     watchError: "That is not a Solana address.",
     needWallet: "Connect a Solana wallet to trade.",
@@ -61,12 +61,12 @@ export const CHAIN_COPY: Record<ChainId, ChainCopy> = {
     noSwaps:
       "No signed swaps yet. An armed bot sends the next rising SOL, Zebec, Pump, ZEC, or Ray buy from the trading key. The row appears here with a Solscan link once that swap confirms.",
     bookArm:
-      "Arm asks Phantom or Solflare to sign once. That transaction moves a trading balance to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back.",
+      "Arm asks Phantom or Solflare to sign once. That signature moves 0.05 SOL and the armed USDC to a key in this browser, and that key signs each Jupiter swap. Tickets list only those signed fills. Send profits returns cash above that deposit to your wallet and leaves the rest trading. Disarm sells open tickets, then sends the leftover SOL and USDC back.",
     noOpen: "No open swap. A rising SOL, Zebec, Pump, ZEC, or Ray buy is sent from the trading key.",
     noTickets: "No live tickets yet. A swap from the trading key shows up here with a Solscan link. The bot trades a 15-minute setup once the 1-hour and 4-hour charts agree, so a quiet day can pass with no trade.",
     explorerName: "Solscan",
     settingsWallet:
-      "On: The first arm signs one transaction and moves spare SOL and USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key still holds a balance, does not move more. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
+      "On: The first arm signs one transaction and moves 0.05 SOL plus the armed USDC to a browser trading key. That key signs each Jupiter swap. A refresh, or arming again while that key already holds 0.05 SOL, does not move more SOL. Disarm sells open tickets, then returns leftover SOL and USDC. Off leaves every fill in this browser. Every ticket is a buy or a sell.",
     settingsMultiplier:
       "Pick spot swaps, SOL margin, or both. 5x and 10x are SOL buys only, from a $5 order. Jupiter will not open a brand-new position under $10, so a $5 order is raised to $10 when the trading key has it. Zebec, Pump, ZEC, and Ray stay a spot buy and a spot sell unless you pick margin only, which skips them. Turn on Margin only on solid 4-hour setups to wait for a 4-hour structure before a SOL perp.",
     settingsFive: "SOL only. Posts at least $5 and takes five times that exposure.",
