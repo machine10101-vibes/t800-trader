@@ -13,6 +13,11 @@ import {
   ULTI_MINT,
   USDC_MINT,
   WCRO_MINT,
+  DASH_MINT,
+  NEAR_MINT,
+  ETH_NEAR_MINT,
+  QTC_MINT,
+  RHEA_MINT,
   ZBCN_MINT,
   ZEC_MINT,
 } from "./universe";
@@ -32,6 +37,8 @@ const WIF_MINT = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm";
 
 const SOL_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
 const CRO_LOGO = "https://assets.coingecko.com/coins/images/7310/small/cro_token_logo.png";
+const DASH_LOGO = "/t800-trader/logos/tokens/dash.png";
+const NEAR_LOGO = "/t800-trader/logos/tokens/near.jpg";
 
 /** Official brand marks. SOL and CRO use the native coin, not wrapped-ticker art. */
 const BY_MINT: Record<string, string> = {
@@ -62,6 +69,11 @@ const BY_MINT: Record<string, string> = {
   [MERY_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/36620/small/Mistery_Fam_%281%29.png",
   [PACK_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/71685/small/logo-transparent.png",
   [ULTI_MINT.toLowerCase()]: "https://coin-images.coingecko.com/coins/images/102179280/small/3627.png",
+  [DASH_MINT.toLowerCase()]: DASH_LOGO,
+  [NEAR_MINT.toLowerCase()]: NEAR_LOGO,
+  [ETH_NEAR_MINT.toLowerCase()]: "/t800-trader/logos/tokens/eth.png",
+  [QTC_MINT.toLowerCase()]: "/t800-trader/logos/tokens/qtc.svg",
+  [RHEA_MINT.toLowerCase()]: "/t800-trader/logos/tokens/rhea.svg",
 };
 
 const BY_SYMBOL: Record<string, string> = {
@@ -69,10 +81,16 @@ const BY_SYMBOL: Record<string, string> = {
   ETH: "https://assets.coingecko.com/coins/images/279/small/ethereum.png",
   SOL: SOL_LOGO,
   CRO: CRO_LOGO,
+  DASH: DASH_LOGO,
+  NEAR: NEAR_LOGO,
+  WNEAR: NEAR_LOGO,
+  QTC: "/t800-trader/logos/tokens/qtc.svg",
+  RHEA: "/t800-trader/logos/tokens/rhea.svg",
   WCRO: CRO_LOGO,
   WSOL: SOL_LOGO,
   JITOSOL: BY_MINT[JITO_SOL_MINT.toLowerCase()],
   USDC: BY_MINT[USDC_MINT.toLowerCase()],
+  USDT: "/t800-trader/logos/tokens/usdt.svg",
   ZBCN: BY_MINT[ZBCN_MINT.toLowerCase()],
   PUMP: BY_MINT[PUMP_MINT.toLowerCase()],
   ZEC: BY_MINT[ZEC_MINT.toLowerCase()],
@@ -122,6 +140,7 @@ const VENUE_LOGO: Record<string, string> = {
   wolfswap: `${BASE}/wolfswap.svg`,
   vvs: `${BASE}/vvs.jpg`,
   crotrade: `${BASE}/crotrade.png`,
+  near: `${BASE}/near.jpg`,
 };
 
 export function venueLogoUrl(id: string): string | null {

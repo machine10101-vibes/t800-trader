@@ -46,6 +46,18 @@ export const PACK_POOL = "0x82234ae6d2df79e4d22ce05c63a703f3dbc32520";
 export const ULTI_MINT = "0x074fa42e34c503ba83a6913d275a2fce5f94f1d5";
 export const ULTI_POOL = "0x78d2411b63d8188b536f43a03e1677b9b6a2660d";
 
+/** DASH on NEAR. The desk trades this as DASH. */
+export const DASH_MINT = "dash.omft.near";
+export const DASH_POOL = "nep141:dash.omft.near___nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near";
+export const NEAR_MINT = "wrap.near";
+export const NEAR_POOL = "nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near___nep141:wrap.near";
+export const ETH_NEAR_MINT = "eth.omft.near";
+export const ETH_NEAR_POOL = "nep141:eth.omft.near___nep141:wrap.near";
+export const QTC_MINT = "qtc.omft.near";
+export const QTC_POOL = "nep141:qtc.omft.near___nep141:wrap.near";
+export const RHEA_MINT = "token.rhealab.near";
+export const RHEA_POOL = "refv1-6458";
+
 /** The only Solana names this desk trades. Jupiter's most-traded list is not on the book. */
 export const ACTIVE_BOOK = [SOL_MINT, ZBCN_MINT, PUMP_MINT, ZEC_MINT, RAY_MINT] as const;
 
@@ -76,8 +88,18 @@ const CRONOS_BOOK: WatchToken[] = [
   { symbol: "ULTI", name: "Ulti", mint: ULTI_MINT, sector: "Meme", pool: ULTI_POOL },
 ];
 
+const DASH_BOOK: WatchToken[] = [
+  { symbol: "DASH", name: "Dash", mint: DASH_MINT, sector: "Payments", pool: DASH_POOL },
+  { symbol: "NEAR", name: "NEAR", mint: NEAR_MINT, sector: "L1", pool: NEAR_POOL },
+  { symbol: "ETH", name: "Ethereum", mint: ETH_NEAR_MINT, sector: "L1", pool: ETH_NEAR_POOL },
+  { symbol: "QTC", name: "QTC", mint: QTC_MINT, sector: "Meme", pool: QTC_POOL },
+  { symbol: "RHEA", name: "Rhea", mint: RHEA_MINT, sector: "DEX", pool: RHEA_POOL },
+];
+
 export function geckoNetwork(chain: ChainId = "solana"): string {
-  return chain === "cronos" ? "cro" : "solana";
+  if (chain === "cronos") return "cro";
+  if (chain === "dash") return "near";
+  return "solana";
 }
 
 /** Liquid SOL/USDC pools GeckoTerminal indexes — used when a finalist has no 5m tape. */
@@ -124,7 +146,7 @@ const WATCH_BY_MINT = new Map(WATCHLIST.map((t) => [t.mint, t]));
 const WATCH_BY_SYMBOL = new Map(WATCHLIST.map((t) => [t.symbol.toUpperCase(), t]));
 
 const STABLE_SYMS = new Set(["USDC", "USDT", "USD1", "PYUSD", "USDS", "DAI", "FDUSD", "CASH"]);
-const QUOTE_SYMS = new Set(["SOL", "WSOL", "USDC", "USDT", "CRO", "WCRO"]);
+const QUOTE_SYMS = new Set(["SOL", "WSOL", "USDC", "USDT", "CRO", "WCRO", "NEAR", "WNEAR", "DASH"]);
 const WRAPPED_OR_FOREIGN = new Set([
   "WETH",
   "ETH",
@@ -172,20 +194,27 @@ export function classifySector(symbol: string, name: string): Sector {
   return "Unknown";
 }
 
+function namedBook(chain: ChainId): WatchToken[] | null {
+  if (chain === "cronos") return CRONOS_BOOK;
+  if (chain === "dash") return DASH_BOOK;
+  return null;
+}
+
 export function coreBookMints(chain: ChainId = "solana"): string[] {
-  if (chain === "cronos") return CRONOS_BOOK.map((token) => token.mint);
+  const named = namedBook(chain);
+  if (named) return named.map((token) => token.mint);
   return [...ACTIVE_BOOK];
 }
 
 export function bookTokens(chain: ChainId = "solana"): WatchToken[] {
-  if (chain === "cronos") return CRONOS_BOOK;
+  const named = namedBook(chain);
+  if (named) return named;
   return ACTIVE_BOOK.map((mint) => WATCH_BY_MINT.get(mint)).filter((token): token is WatchToken => Boolean(token));
 }
 
 export function bookPools(chain: ChainId = "solana"): { mint: string; pool: string }[] {
-  if (chain === "cronos") {
-    return CRONOS_BOOK.flatMap((token) => (token.pool ? [{ mint: token.mint, pool: token.pool }] : []));
-  }
+  const named = namedBook(chain);
+  if (named) return named.flatMap((token) => (token.pool ? [{ mint: token.mint, pool: token.pool }] : []));
   return BOOK_POOLS;
 }
 
@@ -194,7 +223,7 @@ export function bookMints(chain: ChainId = "solana"): string[] {
 }
 
 export function headlineFor(chain: ChainId = "solana"): { symbol: string; label: string }[] {
-  if (chain === "cronos") return CRONOS_BOOK.map((token) => ({ symbol: token.symbol, label: token.symbol }));
+  if (chain === "cronos" || chain === "dash") return bookTokens(chain).map((token) => ({ symbol: token.symbol, label: token.symbol }));
   const labels: Record<string, string> = { SOL: "SOL", ZBCN: "Zebec", PUMP: "Pump", ZEC: "ZEC", RAY: "Ray" };
   return bookTokens(chain).map((token) => ({ symbol: token.symbol, label: labels[token.symbol] ?? token.symbol }));
 }

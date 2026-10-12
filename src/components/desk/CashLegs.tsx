@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChainId } from "@/lib/chain";
-import { cashDeskLabel, cashLegLine, formatCashAmount, formatCashUsd, nativeCashSymbol, type CashLeg } from "@/lib/cashHoldings";
+import { cashDeskLabel, cashLegLine, formatCashAmount, formatCashUsd, nativeCashSymbol, stableCashSymbol, type CashLeg } from "@/lib/cashHoldings";
 import { TokenLogo } from "./TokenLogo";
 
 export function CashLegs({
@@ -35,13 +35,14 @@ export function WalletUsdcChip({
   usdc: number;
   chain: ChainId;
 }) {
+  const stable = stableCashSymbol(chain);
   return (
-    <div className="text-right" title="Connected wallet USDC">
+    <div className="text-right" title={`Connected wallet ${stable}`}>
       <div className="flex items-center justify-end gap-1.5 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-        <TokenLogo symbol="USDC" chain={chain} size="xs" />
-        Wallet USDC
+        <TokenLogo symbol={stable} chain={chain} size="xs" />
+        Wallet {stable}
       </div>
-      <div className="num">{cashLegLine({ symbol: "USDC", amount: usdc, usd: usdc })}</div>
+      <div className="num">{cashLegLine({ symbol: stable, amount: usdc, usd: usdc })}</div>
     </div>
   );
 }
@@ -67,6 +68,7 @@ export function CashPanel({
   note?: string;
 }) {
   const native = nativeCashSymbol(chain);
+  const stable = stableCashSymbol(chain);
   return (
     <section className="cash-panel neon p-4 sm:p-5" aria-label={`${title} token balances`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -74,7 +76,7 @@ export function CashPanel({
           <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{title}</div>
           {totalUsd !== undefined ? <div className="num mt-1 text-2xl sm:text-3xl">{formatCashUsd(totalUsd)}</div> : null}
           <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-            {note ?? `USDC and ${native} held on this desk.`}
+            {note ?? `${stable} and ${native} held on this desk.`}
           </p>
         </div>
         {walletUsdc !== undefined ? <WalletUsdcChip usdc={walletUsdc} chain={chain} /> : null}
@@ -86,7 +88,7 @@ export function CashPanel({
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">{leg.symbol}</div>
               <div className="num mt-0.5 text-xl font-medium text-[var(--text)]">{formatCashAmount(leg.symbol, leg.amount)}</div>
-              {leg.symbol === "USDC" ? null : <div className="num text-xs text-[var(--muted)]">{formatCashUsd(leg.usd)}</div>}
+              {leg.symbol === "USDC" || leg.symbol === "USDT" ? null : <div className="num text-xs text-[var(--muted)]">{formatCashUsd(leg.usd)}</div>}
             </div>
           </li>
         ))}

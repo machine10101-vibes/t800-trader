@@ -48,7 +48,7 @@ export interface FlowWindow {
 
 export interface TokenCandidate {
   id: string;
-  chain: "solana" | "cronos";
+  chain: "solana" | "cronos" | "dash";
   symbol: string;
   name: string;
   mint: string;
@@ -226,6 +226,8 @@ export interface Position {
   positionPubkey?: string;
   /** Cronos quote used to open this ticket. A later Settings change does not flip the sell. */
   cronosQuote?: "usdc" | "cro";
+  /** Dash quote used to open this ticket. A later Settings change does not flip the sell. */
+  dashQuote?: "usdt" | "dash";
 }
 
 export interface Trade {
@@ -245,6 +247,8 @@ export interface Trade {
   signature?: string;
   /** Cronos quote this close sold back to. A later Settings change does not flip the share coin. */
   cronosQuote?: "usdc" | "cro";
+  /** Dash quote this close sold back to. A later Settings change does not flip the share coin. */
+  dashQuote?: "usdt" | "dash";
 }
 
 export interface BotConfig {
@@ -327,6 +331,11 @@ export interface BotConfig {
    * CRO buys with wrapped CRO and sells back to CRO. Solana ignores this.
    */
   cronosQuote: "usdc" | "cro";
+  /**
+   * Dash only. USDT buys with Tether on NEAR and sells back to USDT.
+   * DASH buys with DASH on NEAR and sells back to DASH. Solana and Cronos ignore this.
+   */
+  dashQuote: "usdt" | "dash";
   /** Minimum native SOL before a LIVE buy is allowed. */
   minSolForFees: number;
   /** When on, new LIVE tickets are refused. Open signed tickets can still close. */
@@ -354,6 +363,8 @@ export interface ChainOrder {
   positionPubkey?: string;
   /** Cronos quote this ticket spends and returns. */
   cronosQuote?: "usdc" | "cro";
+  /** Dash quote this ticket spends and returns. */
+  dashQuote?: "usdt" | "dash";
   /** Quote wiggle room in basis points. Missing uses the built-in 80. */
   slippageBps?: number;
   /** Native coin a buy must leave behind for fees. Missing uses the built-in cushion. */
@@ -370,6 +381,8 @@ export interface ChainFill {
   positionPubkey?: string;
   /** Cronos quote this fill spent or returned. */
   cronosQuote?: "usdc" | "cro";
+  /** Dash quote this fill spent or returned. */
+  dashQuote?: "usdt" | "dash";
 }
 
 export type ChainExecutor = (order: ChainOrder) => Promise<ChainFill>;

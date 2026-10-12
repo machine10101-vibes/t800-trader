@@ -130,7 +130,7 @@ export interface WalletBudget {
 }
 
 export interface PayableOpts {
-  quote?: "usdc" | "cro";
+  quote?: "usdc" | "cro" | "usdt" | "dash";
   feeReserve?: number;
 }
 
@@ -177,7 +177,8 @@ export function payableUsd(budget: WalletBudget, opts?: PayableOpts): number {
   const reserve = opts?.feeReserve ?? SOL_FEE_RESERVE;
   const nativeLeg = Math.max(0, budget.sol - reserve) * px;
   const wrapped = Math.max(0, budget.wcro ?? 0) * px;
-  if (opts?.quote === "cro") return nativeLeg + wrapped;
+  if (opts?.quote === "cro" || opts?.quote === "dash") return nativeLeg + wrapped;
+  if (opts?.quote === "usdt") return Math.max(0, budget.usdc);
   return Math.max(Math.max(0, budget.usdc), nativeLeg);
 }
 

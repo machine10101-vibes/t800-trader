@@ -17,6 +17,7 @@ import { executorFor } from "@/lib/solana/swap";
 import { orderForPosition, signedOnChain } from "@/lib/trading/leverage";
 import { readBalances, type WalletSession } from "@/lib/solana/wallet";
 import type { CronosSession } from "@/lib/cronos/wallet";
+import type { DashSession } from "@/lib/dash/wallet";
 import type { WalletBudget } from "@/lib/trading/risk";
 import { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, loadState, mutateState, normalizeConfig } from "@/lib/store";
 import { applyControl, tickBot } from "@/lib/trading/bot";
@@ -31,12 +32,16 @@ import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/sola
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
-export type DeskSession = WalletSession | CronosSession;
+export type DeskSession = WalletSession | CronosSession | DashSession;
 
 export async function tradingSnapshot(owner: string, chain: ChainId = "solana"): Promise<TradingSnap | null> {
   if (chain === "cronos") {
     const { cronosSnapshot } = await import("@/lib/cronos/trade");
     return cronosSnapshot(owner);
+  }
+  if (chain === "dash") {
+    const { dashSnapshot } = await import("@/lib/dash/trade");
+    return dashSnapshot(owner);
   }
   return solanaTradingSnapshot(owner);
 }
@@ -44,6 +49,10 @@ export async function tradingSnapshot(owner: string, chain: ChainId = "solana"):
 async function afterWinningClose(state: AppState, chain: ChainId, live: boolean): Promise<AppState> {
   if (chain === "solana") return takeSolProfitShare(state, { live, owner: getActiveWallet("solana") });
   if (chain === "cronos") return takeCronosProfitShare(state, { live, owner: getActiveWallet("solana") });
+  if (chain === "dash") {
+    const { takeDashProfitShare } = await import("@/lib/dash/share");
+    return takeDashProfitShare(state, { live, owner: getActiveWallet("solana") });
+  }
   return state;
 }
 
@@ -100,6 +109,34 @@ async function budgetFor(session?: WalletSession | null): Promise<WalletBudget |
   }
 }
 
+async function dashLive(session: DeskSession | null | undefined) {
+  const { authorizeDash, dashBudget, dashExecutor } = await import("@/lib/dash/trade");
+  const { readDashBalances } = await import("@/lib/dash/wallet");
+  const dash = session as DashSession | null | undefined;
+  return {
+    executor: dash?.nearAccountId ? dashExecutor(dash) : undefined,
+    maker: null as ReturnType<typeof makerDesk> | null,
+    budget: () => dashBudget(dash),
+    authorize: (armFundsUsd?: number, quote?: "usdc" | "cro") => {
+      void armFundsUsd;
+      void quote;
+      return authorizeDash(dash as DashSession);
+    },
+    confirmDisarm: () => Promise.resolve(),
+    reclaim: (keep: number) => {
+      void keep;
+      return Promise.resolve(null as string | null);
+    },
+    read: (address: string) => readDashBalances(address),
+    hasKey: () => Boolean(dash?.nearAccountId && dash.dashAccount),
+    sendProfit: (principal: number, keep: number) => {
+      void principal;
+      void keep;
+      return Promise.resolve(null as string | null);
+    },
+  };
+}
+
 async function cronosLive(session: DeskSession | null | undefined) {
   const { authorizeCronos, confirmCronosDisarm, cronosBudget, cronosExecutor, reclaimCronos, sendCronosProfit } =
     await import("@/lib/cronos/trade");
@@ -153,7 +190,7 @@ export async function controlBot(
 ): Promise<DeskPayload> {
   const resolved = action === "tick" ? tickSessionFor(chain, session) : session ?? null;
   const solana = chain === "solana" ? (resolved as WalletSession | null | undefined) : null;
-  const liveKit = chain === "cronos" ? await cronosLive(resolved) : null;
+  const liveKit = chain === "cronos" ? await cronosLive(resolved) : chain === "dash" ? await dashLive(resolved) : null;
   const executor = liveKit ? liveKit.executor : solana ? executorFor(solana) : undefined;
   const maker = liveKit ? liveKit.maker : solana ? makerDesk(solana) : null;
   const budget = () => (liveKit ? liveKit.budget() : budgetFor(solana));
@@ -175,7 +212,9 @@ export async function controlBot(
         const address = owner
           ? chain === "cronos"
             ? (await import("@/lib/cronos/trade")).cronosBudgetAddress(owner)
-            : tradingBudgetAddress(owner)
+            : chain === "dash"
+              ? owner
+              : tradingBudgetAddress(owner)
           : "";
         funds = address ? recallBudget(chain, address) : null;
       }
@@ -197,7 +236,7 @@ export async function controlBot(
   let principalAfter: number | null = null;
   if ((action === "stop" || action === "flatten" || action === "reset") && session) {
     const open = (await loadState(chain)).positions.some((p) => signedOnChain(p));
-    if (liveKit) {
+    if (liveKit && chain !== "dash") {
       const { cronosBudgetAddress } = await import("@/lib/cronos/trade");
       const address = cronosBudgetAddress(session.address);
       const before = await liveKit.read(address).catch(() => null);
@@ -235,7 +274,7 @@ export async function controlBot(
     if ((action === "flatten" || action === "reset") && unsold) return state;
     const controlled = applyControl(state, action, chain);
     const next =
-      chain === "cronos" && action === "start" && auth
+      (chain === "cronos" || chain === "dash") && action === "start" && auth
         ? {
             ...controlled,
             config: normalizeConfig({
@@ -308,11 +347,16 @@ export async function withdrawTradingProfit(session: DeskSession, chain: ChainId
     const held =
       chain === "cronos"
         ? await import("@/lib/cronos/trade").then((mod) => mod.cronosSnapshot(session.address))
-        : await readBalances(tradingBudgetAddress(session.address));
+        : chain === "dash"
+          ? await import("@/lib/dash/trade").then((mod) => mod.dashSnapshot(session.address))
+          : await readBalances(tradingBudgetAddress(session.address));
     await baselineTradingPrincipal(held?.equityUsd ?? 0, chain);
     throw new Error("No trading profit to send yet. The bot keeps the balance it is still using.");
   }
   const open = state.positions.some((p) => signedOnChain(p));
+  if (chain === "dash") {
+    throw new Error("Dash keeps the balance in NEAR Mobile. A winning close sends the 10% share on its own.");
+  }
   const sent =
     chain === "cronos"
       ? await import("@/lib/cronos/trade").then((mod) => mod.sendCronosProfit(session.address, principal, open ? 0.5 : 0.3))
@@ -333,9 +377,13 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
       ? session
         ? (await import("@/lib/cronos/trade")).cronosExecutor(session as CronosSession)
         : undefined
-      : session
-        ? executorFor(session as WalletSession)
-        : undefined;
+      : chain === "dash"
+        ? session
+          ? (await import("@/lib/dash/trade")).dashExecutor(session as DashSession)
+          : undefined
+        : session
+          ? executorFor(session as WalletSession)
+          : undefined;
   const saved = await mutateState(async (state) => {
     const pos = state.positions.find((p) => p.id === positionId);
     if (!pos) return state;
@@ -361,7 +409,7 @@ export async function closeTicket(positionId: string, session?: DeskSession | nu
 
 /** Pull a resting limit bid. A filled bid is left for the next scan to book. */
 export async function cancelResting(session: DeskSession, chain: ChainId = "solana"): Promise<DeskPayload> {
-  if (chain === "cronos") return buildDesk(false, chain);
+  if (chain === "cronos" || chain === "dash") return buildDesk(false, chain);
   const maker = makerDesk(session as WalletSession);
   const saved = await mutateState(async (state) => {
     const resting = state.bot.resting;

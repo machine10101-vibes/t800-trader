@@ -8,7 +8,7 @@ import { Home } from "@/components/desk/home";
 import { SettingsPanel } from "@/components/desk/settings";
 import { WatchScreen } from "@/components/desk/watch";
 import { deskCashLegs, type CashLeg } from "@/lib/cashHoldings";
-import { CHAIN_COPY, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
+import { CHAIN_COPY, isSpotDesk, readDeskChain, sameMint, tapeLabel, txUrl, writeDeskChain, type ChainId } from "@/lib/chain";
 import { appliedScanSeconds, ruleOn } from "@/lib/deskSettings";
 import {
   adoptLiveEquity,
@@ -44,6 +44,7 @@ import { assetCall } from "@/lib/market/tape";
 import { venueForDex, venueLabel } from "@/lib/market/venues";
 import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
+import { dashPayInstalled, parseNearAccount } from "@/lib/dash/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
@@ -75,6 +76,15 @@ function previewDeskSession(chain: ChainId, address: string, equityUsd: number):
   if (chain === "cronos") {
     return { ...base, wcro: 0, posCro: 0, provider: { request: async () => [] } };
   }
+  if (chain === "dash") {
+    return {
+      ...base,
+      near: 0,
+      nearAccountId: address,
+      dashAccount: null,
+      provider: { kind: "dash" as const },
+    };
+  }
   return {
     ...base,
     provider: {
@@ -86,7 +96,7 @@ function previewDeskSession(chain: ChainId, address: string, equityUsd: number):
 export function DeskApp() {
   const [view, setView] = useState<ChainId>("solana");
   const [chainReady, setChainReady] = useState(false);
-  const [running, setRunning] = useState<Record<ChainId, boolean>>({ solana: false, cronos: false });
+  const [running, setRunning] = useState<Record<ChainId, boolean>>({ solana: false, cronos: false, dash: false });
   const markRunning = useCallback((chain: ChainId, next: boolean) => {
     setRunning((cur) => (cur[chain] === next ? cur : { ...cur, [chain]: next }));
   }, []);
@@ -106,7 +116,7 @@ export function DeskApp() {
         <ChainDesk
           chain="solana"
           active={view === "solana"}
-          peerArmed={running.cronos}
+          armed={running}
           onRunning={(next) => markRunning("solana", next)}
           onSwitch={setView}
         />
@@ -115,8 +125,17 @@ export function DeskApp() {
         <ChainDesk
           chain="cronos"
           active={view === "cronos"}
-          peerArmed={running.solana}
+          armed={running}
           onRunning={(next) => markRunning("cronos", next)}
+          onSwitch={setView}
+        />
+      </div>
+      <div hidden={view !== "dash"} className="theme-dash">
+        <ChainDesk
+          chain="dash"
+          active={view === "dash"}
+          armed={running}
+          onRunning={(next) => markRunning("dash", next)}
           onSwitch={setView}
         />
       </div>
@@ -127,13 +146,13 @@ export function DeskApp() {
 function ChainDesk({
   chain,
   active,
-  peerArmed,
+  armed,
   onRunning,
   onSwitch,
 }: {
   chain: ChainId;
   active: boolean;
-  peerArmed: boolean;
+  armed: Record<ChainId, boolean>;
   onRunning: (running: boolean) => void;
   onSwitch: (next: ChainId) => void;
 }) {
@@ -191,7 +210,7 @@ function ChainDesk({
   }, [chain]);
 
   const openWatch = useCallback((raw: string) => {
-    const parsed = chain === "cronos" ? parseCronosAddress(raw) : parseWalletAddress(raw);
+    const parsed = chain === "cronos" ? parseCronosAddress(raw) : chain === "dash" ? parseNearAccount(raw) : parseWalletAddress(raw);
     if (!parsed) {
       setWatchError(copy.watchError);
       return;
@@ -233,11 +252,11 @@ function ChainDesk({
     }
   }, [applyDesk, chain, wallet]);
 
-  const connect = useCallback(async (trusted = false) => {
+  const connect = useCallback(async (trusted = false, side?: "dashpay" | "near") => {
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const session = await connectDesk(chain, trusted);
+      const session = await connectDesk(chain, trusted, side);
       const book = await attachWallet(session.address, session.equityUsd, chain);
       applyDesk(shellDesk(book));
       setSavedAddress(session.address);
@@ -287,7 +306,7 @@ function ChainDesk({
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("watch");
-    const parsed = chain === "cronos" ? parseCronosAddress(query ?? "") : query ? parseWalletAddress(query) : null;
+    const parsed = chain === "cronos" ? parseCronosAddress(query ?? "") : chain === "dash" ? parseNearAccount(query ?? "") : query ? parseWalletAddress(query) : null;
     if (parsed) return;
     void connect(true);
   }, [chain, connect]);
@@ -295,10 +314,10 @@ function ChainDesk({
   useEffect(() => {
     // Hidden Cronos still mounted. A running CRO bot still
     // needs those VVS frames after a tab switch.
-    if (!active && chain === "cronos" && !desk?.bot.running) return;
+    if (!active && isSpotDesk(chain) && !desk?.bot.running) return;
     void prefetchFrameCharts(chain);
     const id = window.setInterval(() => {
-      if (!active && chain === "cronos" && !desk?.bot.running) return;
+      if (!active && isSpotDesk(chain) && !desk?.bot.running) return;
       void prefetchFrameCharts(chain);
     }, 60_000);
     return () => window.clearInterval(id);
@@ -341,7 +360,7 @@ function ChainDesk({
     let cancelled = false;
     const id = window.setInterval(() => {
       if (cancelled || walletRef.current) return;
-      const ready = chain === "cronos" ? cronosWalletInstalled() : Boolean(injectedSolanaAddress());
+      const ready = chain === "cronos" ? cronosWalletInstalled() : chain === "dash" ? dashPayInstalled() : Boolean(injectedSolanaAddress());
       if (!ready) return;
       cancelled = true;
       window.clearInterval(id);
@@ -423,7 +442,7 @@ function ChainDesk({
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("watch");
     if (query) {
-      const parsed = chain === "cronos" ? parseCronosAddress(query) : parseWalletAddress(query);
+      const parsed = chain === "cronos" ? parseCronosAddress(query) : chain === "dash" ? parseNearAccount(query) : parseWalletAddress(query);
       if (parsed) setWatchAddress(parsed);
     }
     setKnownBooks(listLocalBooks(chain));
@@ -647,9 +666,11 @@ function ChainDesk({
                 running: true,
                 lastError: null,
                 lastNote: startNeedsLiveSignature(cur.config.walletSwaps)
-                  ? chain === "cronos"
-                    ? "Approve the wallet signature to arm."
-                    : "Armed — approve the wallet if it asks."
+                  ? chain === "dash"
+                    ? "Checking DashPay and NEAR Mobile."
+                    : chain === "cronos"
+                      ? "Approve the wallet signature to arm."
+                      : "Armed — approve the wallet if it asks."
                   : "Armed — first tick incoming",
               },
             }
@@ -874,8 +895,10 @@ function ChainDesk({
       cancelled = true;
     };
   }, [chain, cronosMark, desk, refresh, wallet]);
-  const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : peerArmed;
-  const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : peerArmed;
+  const solArmed = chain === "solana" ? Boolean(desk?.bot.running) : armed.solana;
+  const croArmed = chain === "cronos" ? Boolean(desk?.bot.running) : armed.cronos;
+  const dashArmed = chain === "dash" ? Boolean(desk?.bot.running) : armed.dash;
+  const dashWallet = wallet && "nearAccountId" in wallet ? wallet : null;
   const shownWallet =
     wallet ??
     (savedAddress && desk ? previewDeskSession(chain, savedAddress, desk.portfolio.equityUsd) : null);
@@ -906,7 +929,7 @@ function ChainDesk({
           address={watchAddress}
           chain={chain}
           onClose={closeWatch}
-          toolbar={<ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />}
+          toolbar={<ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} dashArmed={dashArmed} onSwitch={switchChain} />}
         />
       </div>
     );
@@ -921,11 +944,15 @@ function ChainDesk({
             T8
           </Link>
           <div className="mb-5 flex justify-end">
-            <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={switchChain} />
+            <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} dashArmed={dashArmed} onSwitch={switchChain} />
           </div>
           <div className="text-[11px] uppercase tracking-[0.35em] text-[var(--magenta)]">T-800 // {copy.kicker}</div>
           <h1 className="mt-3 text-3xl font-medium tracking-tight sm:text-5xl">
-            {chain === "solana" ? "Connect a wallet to start trading" : "Connect a wallet to arm the desk"}
+            {chain === "dash"
+              ? "Connect DashPay and NEAR Mobile"
+              : chain === "solana"
+                ? "Connect a wallet to start trading"
+                : "Connect a wallet to arm the desk"}
           </h1>
           <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{copy.connectBlurb}</p>
           {walletError ? <p className="mt-4 text-sm text-[var(--crimson)]">{walletError}</p> : null}
@@ -939,6 +966,16 @@ function ChainDesk({
               Phantom is open. Tap Approve. After you unlock, this desk connects.
             </p>
           ) : null}
+          {chain === "dash" ? (
+            <div className="mt-6 grid gap-2">
+              <button disabled={walletBusy} onClick={() => void connect(false, "dashpay")} className="btn btn-magenta w-full">
+                {walletBusy ? "Waiting on wallet…" : "Connect DashPay"}
+              </button>
+              <button disabled={walletBusy} onClick={() => void connect(false, "near")} className="btn btn-ink w-full">
+                {walletBusy ? "Waiting on wallet…" : "Connect NEAR Mobile"}
+              </button>
+            </div>
+          ) : (
           <button disabled={walletBusy} onClick={() => void connect(false)} className="btn btn-magenta mt-6 w-full">
             {walletBusy
               ? "Waiting on wallet…"
@@ -950,6 +987,7 @@ function ChainDesk({
                     ? `Connect ${walletHint}`
                     : copy.connectFallback}
           </button>
+          )}
           <div className="mt-6">
             <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">This desk trades</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -967,6 +1005,12 @@ function ChainDesk({
                 <GateChip label="Real prices" hint="CoinGecko · GeckoTerminal · Jupiter" />
                 <GateChip label="Practice first" hint="No money moves until you choose" />
                 <GateChip label="You keep control" hint="No seed phrase, ever" />
+              </>
+            ) : chain === "dash" ? (
+              <>
+                <GateChip label="Live marks" hint="GeckoTerminal · NEAR" />
+                <GateChip label="Wallet book" hint={`${copy.walletBook} only`} />
+                <GateChip label="Live swaps" hint={copy.swapHint} />
               </>
             ) : (
               <>
@@ -1011,7 +1055,7 @@ function ChainDesk({
             ) : null}
           </form>
           <p className="mt-3 text-[11px] leading-5 text-[var(--faint)]">
-            {walletHint ? `${walletHint} is injected in this browser.` : copy.installHint} {copy.armBlurb}
+            {chain === "dash" ? copy.installHint : walletHint ? `${walletHint} is injected in this browser.` : copy.installHint} {copy.armBlurb}
           </p>
         </div>
         </div>
@@ -1047,6 +1091,7 @@ function ChainDesk({
         chain={chain}
         solArmed={solArmed}
         croArmed={croArmed}
+        dashArmed={dashArmed}
         onSwitch={switchChain}
         updatedAt={updatedAt}
         onDisconnect={() => void disconnect()}
@@ -1097,7 +1142,7 @@ function ChainDesk({
               Emergency stop
             </button>
           ) : null}
-          {desk?.config.walletSwaps ? (
+          {desk?.config.walletSwaps && chain !== "dash" ? (
             <button
               disabled={busy || !trading || tradingProfitUsd(trading.equityUsd, desk?.bot.swapPrincipalUsd) < 1}
               onClick={() => void withdrawProfit()}
@@ -1115,7 +1160,9 @@ function ChainDesk({
           ) : null}
           <p className={`mt-2 break-words px-2 text-[11px] leading-5 text-[var(--faint)] ${homeOnPhone ? "max-lg:hidden" : ""}`}>
             {trading
-              ? chain === "cronos"
+              ? chain === "dash"
+                ? `${trading.sol.toFixed(3)} DASH · ${trading.usdc.toFixed(2)} USDT on ${shortAddress(trading.address)}. Each swap asks NEAR Mobile to sign.`
+                : chain === "cronos"
                 ? `${trading.sol.toFixed(3)} CRO EVM · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Disarm asks the Onchain extension to sign before this balance returns.`
                 : `${trading.sol.toFixed(3)} ${copy.native} · ${trading.usdc.toFixed(2)} USDC on the trading key ${shortAddress(trading.address)}. Arm signed once. That key sends the swaps.`
               : cronosHeld
@@ -1128,10 +1175,24 @@ function ChainDesk({
                   ? desk?.bot.running
                     ? "Wallet is reconnecting. The bot is still running."
                     : "Wallet is reconnecting."
-                : `${shownWallet.sol.toFixed(3)} ${copy.native} · ${shownWallet.usdc.toFixed(2)} USDC. ${
+                : chain === "dash"
+                  ? `${shownWallet.sol.toFixed(3)} DASH · ${shownWallet.usdc.toFixed(2)} USDT. ${
+                      desk?.config.walletSwaps ? "Each swap asks NEAR Mobile to sign." : "Fills stay in this browser."
+                    }`
+                  : `${shownWallet.sol.toFixed(3)} ${copy.native} · ${shownWallet.usdc.toFixed(2)} USDC. ${
                     desk?.config.walletSwaps ? "Arm signs once. That signature sends the swaps." : "Fills stay in this browser."
                   }`}
           </p>
+          {chain === "dash" && dashWallet && !dashWallet.dashAccount ? (
+            <button disabled={walletBusy} onClick={() => void connect(false, "dashpay")} className="btn btn-ink mt-2 w-full">
+              Connect DashPay
+            </button>
+          ) : null}
+          {chain === "dash" && dashWallet && !dashWallet.nearAccountId ? (
+            <button disabled={walletBusy} onClick={() => void connect(false, "near")} className="btn btn-ink mt-2 w-full">
+              Connect NEAR Mobile
+            </button>
+          ) : null}
           <button onClick={() => void disconnect()} className="mt-2 min-h-11 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)] sm:hidden">
             Disconnect
           </button>
@@ -1301,9 +1362,11 @@ function LiveConfirmModal({
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
       <div className="neon w-full max-w-lg p-6">
-        <h2 className="text-xl font-medium">{chain === "cronos" ? "Enable LIVE WolfSwap, VVS, and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
+        <h2 className="text-xl font-medium">{chain === "dash" ? "Enable LIVE NEAR DEX swaps" : chain === "cronos" ? "Enable LIVE WolfSwap, VVS, and cro.trade swaps" : "Enable LIVE Jupiter swaps"}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          {chain === "cronos"
+          {chain === "dash"
+            ? "PAPER stays the default. LIVE spends real USDT or DASH from the NEAR account after you arm, whichever you pick in Settings. Each swap asks NEAR Mobile to sign. You can lose that money. The bot only buys and sells."
+            : chain === "cronos"
             ? "PAPER stays the default. LIVE spends real USDC or CRO from the trading key after you arm, whichever you pick in Settings. You can lose that money plus CRO fees. The bot only buys and sells."
             : "PAPER stays the default. LIVE spends real USDC from the trading key after you arm. You can lose that USDC plus SOL fees. The bot only buys and sells. A reload locks LIVE until you type LIVE again."}
         </p>
@@ -1347,11 +1410,13 @@ function ChainSwitch({
   chain,
   solArmed,
   croArmed,
+  dashArmed,
   onSwitch,
 }: {
   chain: ChainId;
   solArmed: boolean;
   croArmed: boolean;
+  dashArmed: boolean;
   onSwitch: (next: ChainId) => void;
 }) {
   const item = (id: ChainId, label: string, armed: boolean) => (
@@ -1368,9 +1433,10 @@ function ChainSwitch({
     </button>
   );
   return (
-    <div className="flex shrink-0 items-center gap-1 rounded-full border border-[var(--line)] p-1">
+    <div className="flex shrink-0 flex-wrap items-center gap-1 rounded-full border border-[var(--line)] p-1">
       {item("solana", "SOL", solArmed)}
       {item("cronos", "CRO", croArmed)}
+      {item("dash", "DASH", dashArmed)}
     </div>
   );
 }
@@ -1385,6 +1451,7 @@ function Header({
   chain,
   solArmed,
   croArmed,
+  dashArmed,
   onSwitch,
   updatedAt,
   onDisconnect,
@@ -1401,6 +1468,7 @@ function Header({
   chain: ChainId;
   solArmed: boolean;
   croArmed: boolean;
+  dashArmed: boolean;
   onSwitch: (next: ChainId) => void;
   updatedAt: string | null;
   onDisconnect: () => void;
@@ -1434,7 +1502,7 @@ function Header({
               <div className="hidden text-[11px] uppercase tracking-[0.2em] text-[var(--faint)] sm:block">Live stream</div>
             </div>
           </Link>
-          <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} onSwitch={onSwitch} />
+          <ChainSwitch chain={chain} solArmed={solArmed} croArmed={croArmed} dashArmed={dashArmed} onSwitch={onSwitch} />
           <div className="hidden items-center gap-5 md:flex">
             <Ticker label={nativeLabel} value={solPx ? priceFmt(solPx) : "—"} chg={solPx ? solChg : undefined} />
             <Ticker
@@ -1459,10 +1527,10 @@ function Header({
             <Pill tone="magenta">{shortAddress(wallet.address)}</Pill>
             <Pill
               tone={
-                desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "mint" : "magenta") : "default"
+                desk?.config.walletSwaps ? (chain === "cronos" || chain === "dash" || desk.liveSessionArmed ? "mint" : "magenta") : "default"
               }
             >
-              {desk?.config.walletSwaps ? (chain === "cronos" || desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
+              {desk?.config.walletSwaps ? (chain === "cronos" || chain === "dash" || desk.liveSessionArmed ? "LIVE" : "LIVE locked") : "PAPER"}
             </Pill>
             <Pill tone={armed ? "mint" : "default"}>
               <span className={`pulse-dot ${armed ? "bg-[var(--mint)] text-[var(--mint)]" : "bg-[var(--faint)] text-[var(--faint)]"}`} />
@@ -2736,17 +2804,19 @@ function Book({
       <div className="neon p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <Label>{swaps ? (chain === "cronos" ? "LIVE WolfSwap, VVS, and cro.trade book" : "LIVE Jupiter book") : "PAPER book"}</Label>
+            <Label>{swaps ? (chain === "dash" ? "LIVE NEAR DEX book" : chain === "cronos" ? "LIVE WolfSwap, VVS, and cro.trade book" : "LIVE Jupiter book") : "PAPER book"}</Label>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {swaps
                 ? copy.bookArm
-                : chain === "cronos"
+                : chain === "dash"
+                  ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. NEAR Mobile signs each NEAR DEX swap."
+                  : chain === "cronos"
                   ? "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends WolfSwap, VVS, or cro.trade swaps."
                   : "PAPER is on, so this book only simulates fills. Enable LIVE, type LIVE this session, then arm. The trading key sends Jupiter swaps."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto">
-            {swaps ? (
+            {swaps && chain !== "dash" ? (
               <button disabled={busy || profit < 1} onClick={onWithdraw} className="btn btn-magenta w-full sm:w-auto">
                 {profit >= 1 ? `Send ${usd(profit)} profit to my wallet` : "Send profits to my wallet"}
               </button>

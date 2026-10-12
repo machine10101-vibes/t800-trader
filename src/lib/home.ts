@@ -89,6 +89,7 @@ export function planRules(
     | "solTradeMode"
     | "marginOnFourHour"
     | "cronosQuote"
+    | "dashQuote"
     | "logicFrames"
     | "rulesOn"
   >,
@@ -130,6 +131,13 @@ export function planRules(
         : "Every ticket spends USDC and sells back to USDC. Extra size is not used.",
     );
     rules.push("Every profitable Cronos close automatically sends 10% of the gain to the profit address in the coin that ticket spent.");
+  } else if (chain === "dash") {
+    rules.push(
+      config.dashQuote === "dash"
+        ? "Every ticket spends DASH and sells back to DASH. DASH itself is skipped. Extra size is not used."
+        : "Every ticket spends USDT and sells back to USDT. Extra size is not used.",
+    );
+    rules.push("Every profitable Dash close automatically sends 10% of the gain to the profit address. USDT tickets pay USDC. DASH tickets pay SOL of the same dollars.");
   } else if (config.solTradeMode === "margin") {
     rules.push(
       config.marginOnFourHour

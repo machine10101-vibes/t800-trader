@@ -58,14 +58,25 @@ export const CRONOS_VENUE_OPTIONS: VenueOption[] = [
   },
 ];
 
+export const DASH_VENUE_OPTIONS: VenueOption[] = [
+  {
+    id: "near",
+    label: "NEAR DEX",
+    hint: "Quotes NEAR Intents and Rhea. A buy or sell is sent there when this place is on.",
+  },
+];
+
 export const DEFAULT_VENUES: string[] = VENUE_OPTIONS.map((v) => v.id);
 export const DEFAULT_CRONOS_VENUES: string[] = CRONOS_VENUE_OPTIONS.map((v) => v.id);
+export const DEFAULT_DASH_VENUES: string[] = DASH_VENUE_OPTIONS.map((v) => v.id);
 
 export type CronosVenueId = "wolfswap" | "vvs" | "crotrade";
+export type DashVenueId = "near";
 
 const SOLANA_IDS = new Set(DEFAULT_VENUES);
 const CRONOS_IDS = new Set(DEFAULT_CRONOS_VENUES);
-const ALL_IDS = new Set([...DEFAULT_VENUES, ...DEFAULT_CRONOS_VENUES]);
+const DASH_IDS = new Set(DEFAULT_DASH_VENUES);
+const ALL_IDS = new Set([...DEFAULT_VENUES, ...DEFAULT_CRONOS_VENUES, ...DEFAULT_DASH_VENUES]);
 
 const KNOWN: { id: string; test: (dex: string) => boolean }[] = [
   { id: "vvs", test: (dex) => dex === "vvs" || dex.startsWith("vvs-") },
@@ -76,6 +87,7 @@ const KNOWN: { id: string; test: (dex: string) => boolean }[] = [
   { id: "meteora", test: (dex) => dex.startsWith("meteora") },
   { id: "jupiter", test: (dex) => dex.startsWith("jupiter") },
   { id: "pump", test: (dex) => dex.includes("pump") },
+  { id: "near", test: (dex) => dex.includes("near") || dex.startsWith("ref") },
 ];
 
 export function venueForDex(dex: string): string {
@@ -88,12 +100,16 @@ export function isCronosVenue(id: string): id is CronosVenueId {
 }
 
 export function venueOptionsFor(chain: ChainId): VenueOption[] {
-  return chain === "cronos" ? CRONOS_VENUE_OPTIONS : VENUE_OPTIONS;
+  if (chain === "cronos") return CRONOS_VENUE_OPTIONS;
+  if (chain === "dash") return DASH_VENUE_OPTIONS;
+  return VENUE_OPTIONS;
 }
 
 export function venueLabel(id: string): string {
   const cronos = CRONOS_VENUE_OPTIONS.find((venue) => venue.id === id);
   if (cronos) return cronos.label;
+  const dash = DASH_VENUE_OPTIONS.find((venue) => venue.id === id);
+  if (dash) return dash.label;
   return VENUE_OPTIONS.find((venue) => venue.id === id)?.label ?? id;
 }
 
@@ -110,13 +126,25 @@ export function cronosVenuesOn(venues?: string[]): CronosVenueId[] {
   return [];
 }
 
+/** Older Dash books stored Solana venue ids. Those still mean NEAR DEX is on. */
+export function dashVenuesOn(venues?: string[]): DashVenueId[] {
+  if (!venues) return [...DEFAULT_DASH_VENUES] as DashVenueId[];
+  const picked = venues.filter((id): id is DashVenueId => DASH_IDS.has(id));
+  if (picked.length) return picked;
+  if (!venues.length) return [];
+  if (venues.some((id) => SOLANA_IDS.has(id) || CRONOS_IDS.has(id))) return [...DEFAULT_DASH_VENUES] as DashVenueId[];
+  return [];
+}
+
 export function venuesOnFor(venues: string[] | undefined, chain: ChainId): string[] {
-  return chain === "cronos" ? cronosVenuesOn(venues) : (venues ?? [...DEFAULT_VENUES]);
+  if (chain === "cronos") return cronosVenuesOn(venues);
+  if (chain === "dash") return dashVenuesOn(venues);
+  return venues ?? [...DEFAULT_VENUES];
 }
 
 export function venueSummary(ids: string[], chain: ChainId = "solana"): string {
   const options = venueOptionsFor(chain);
-  const selected = chain === "cronos" ? cronosVenuesOn(ids) : ids;
+  const selected = chain === "cronos" ? cronosVenuesOn(ids) : chain === "dash" ? dashVenuesOn(ids) : ids;
   if (!selected.length) return "no venue";
   const labels = options.filter((venue) => selected.includes(venue.id)).map((venue) => venue.label);
   if (!labels.length) return "no venue";

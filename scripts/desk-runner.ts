@@ -16,7 +16,7 @@ import path from "node:path";
 import { CHAIN_IDS, type ChainId } from "../src/lib/chain";
 import { appliedScanSeconds } from "../src/lib/deskSettings";
 import { attachDeskFiles, deskDataDir } from "../src/lib/deskFs";
-import { isDeskChain, runnerCronosSession, runnerWalletSession } from "../src/lib/deskHost";
+import { isDeskChain, runnerCronosSession, runnerDashSession, runnerWalletSession } from "../src/lib/deskHost";
 import { useDeskKeys, writeSecret } from "../src/lib/keystore";
 import { controlBot } from "../src/lib/client";
 import { resumeLiveSession } from "../src/lib/solana/live-session";
@@ -160,7 +160,7 @@ async function tickChain(chain: ChainId): Promise<{ scan: number; liveOpen: bool
   const state = await loadState(chain);
   if (!state.bot.running) return null;
   if (state.config.walletSwaps) resumeLiveSession();
-  const session = chain === "cronos" ? runnerCronosSession(wallet) : runnerWalletSession(wallet);
+  const session = chain === "cronos" ? runnerCronosSession(wallet) : chain === "dash" ? runnerDashSession(wallet) : runnerWalletSession(wallet);
   await controlBot("tick", session, chain);
   return {
     scan: appliedScanSeconds(state.config),

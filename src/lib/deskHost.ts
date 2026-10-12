@@ -4,6 +4,7 @@ import { getActiveWallet } from "@/lib/store";
 import { DESK_RUNNER_PORT, localRunnerOrigin, runnerBookUrl, runnerStatusUrl } from "@/lib/trading/runtime";
 import type { AppState } from "@/lib/types";
 import type { CronosSession } from "@/lib/cronos/wallet";
+import type { DashSession } from "@/lib/dash/wallet";
 import type { WalletSession } from "@/lib/solana/wallet";
 
 export interface DeskRunnerStatus {
@@ -26,7 +27,7 @@ export function runnerOrigin(): string {
 }
 
 export function isDeskChain(value: string): value is ChainId {
-  return value === "solana" || value === "cronos";
+  return value === "solana" || value === "cronos" || value === "dash";
 }
 
 export function runnerProbeUrls(origin = typeof window !== "undefined" ? window.location.origin : ""): string[] {
@@ -88,12 +89,14 @@ export async function publishDeskBook(chain: ChainId, wallet: string, state: App
 /** After a refresh the wallet popup is gone. The trading key still signs from this address. */
 export function tickSessionFor(
   chain: ChainId,
-  session?: WalletSession | CronosSession | null,
-): WalletSession | CronosSession | null {
+  session?: WalletSession | CronosSession | DashSession | null,
+): WalletSession | CronosSession | DashSession | null {
   if (session?.address) return session;
   const address = getActiveWallet(chain);
   if (!address) return null;
-  return chain === "cronos" ? runnerCronosSession(address) : runnerWalletSession(address);
+  if (chain === "cronos") return runnerCronosSession(address);
+  if (chain === "dash") return runnerDashSession(address);
+  return runnerWalletSession(address);
 }
 
 export function runnerWalletSession(address: string): WalletSession {
@@ -106,6 +109,20 @@ export function runnerWalletSession(address: string): WalletSession {
     provider: {
       connect: async () => ({ publicKey: { toBase58: () => address } }),
     },
+  };
+}
+
+export function runnerDashSession(address: string): DashSession {
+  return {
+    address,
+    nearAccountId: address,
+    dashAccount: address,
+    sol: 0,
+    usdc: 0,
+    near: 0,
+    solPriceUsd: null,
+    equityUsd: 0,
+    provider: { kind: "dash" },
   };
 }
 

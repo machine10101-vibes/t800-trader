@@ -19,7 +19,7 @@ export interface ScreenConfig {
  * An off-book dust pool still fails the floor.
  */
 export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
-  if (chain !== "cronos") return cfg;
+  if (chain !== "cronos" && chain !== "dash") return cfg;
   return {
     ...cfg,
     venues: undefined,
@@ -29,8 +29,8 @@ export function bookScreen(cfg: ScreenConfig, chain: ChainId): ScreenConfig {
 }
 
 export function screenCandidate(c: TokenCandidate, cfg: ScreenConfig): string | null {
-  const namedCronos = (c.chain ?? "solana") === "cronos" && isActiveBook(c.mint, "cronos");
-  if (namedCronos) return null;
+  const namedSpot = (c.chain === "cronos" || c.chain === "dash") && isActiveBook(c.mint, c.chain);
+  if (namedSpot) return null;
   const minLiq = c.watchlist ? Math.min(cfg.minLiquidityUsd, 80_000) : cfg.minLiquidityUsd;
   const minVol = c.watchlist ? Math.min(cfg.minVolume24hUsd, 40_000) : cfg.minVolume24hUsd;
   if (c.liquidityUsd < minLiq) return `Liquidity ${c.liquidityUsd.toFixed(0)} below ${minLiq}`;

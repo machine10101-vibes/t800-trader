@@ -1,5 +1,5 @@
 import { bookTokens } from "@/lib/market/universe";
-import type { ChainId } from "@/lib/chain";
+import { CHAIN_IDS, type ChainId } from "@/lib/chain";
 
 export interface LandingToken {
   symbol: string;
@@ -16,6 +16,11 @@ const MARK: Record<string, string> = {
   ZEC: "zec.png",
   RAY: "ray.jpg",
   CRO: "cro.png",
+  DASH: "dash.png",
+  NEAR: "near.jpg",
+  ETH: "eth.png",
+  QTC: "qtc.svg",
+  RHEA: "rhea.svg",
   ULTCAT: "ultcat.png",
   CRIMECAT: "crimecat.svg",
   MERY: "mery.png",
@@ -23,9 +28,9 @@ const MARK: Record<string, string> = {
   ULTI: "ulti.png",
 };
 
-/** Every name the desk actually trades, Solana book then Cronos book. */
+/** Every name the desk actually trades, one chain after another. */
 export function landingTokens(): LandingToken[] {
-  return (["solana", "cronos"] as const).flatMap((chain) =>
+  return CHAIN_IDS.flatMap((chain) =>
     bookTokens(chain).map((token) => ({
       symbol: token.symbol,
       name: token.name,
@@ -36,16 +41,16 @@ export function landingTokens(): LandingToken[] {
   );
 }
 
-/** Alternate the two books so the ring does not clump one chain. */
+/** Alternate the books so the ring does not clump one chain. */
 export function landingOrbit(): LandingToken[] {
   const all = landingTokens();
-  const sol = all.filter((token) => token.chain === "solana");
-  const cro = all.filter((token) => token.chain === "cronos");
+  const groups = CHAIN_IDS.map((chain) => all.filter((token) => token.chain === chain));
   const mixed: LandingToken[] = [];
-  const count = Math.max(sol.length, cro.length);
+  const count = Math.max(...groups.map((group) => group.length));
   for (let i = 0; i < count; i += 1) {
-    if (sol[i]) mixed.push(sol[i]);
-    if (cro[i]) mixed.push(cro[i]);
+    for (const group of groups) {
+      if (group[i]) mixed.push(group[i]);
+    }
   }
   return mixed;
 }

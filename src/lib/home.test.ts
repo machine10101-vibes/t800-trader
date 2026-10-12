@@ -93,6 +93,15 @@ describe("home", () => {
         r.includes("spends CRO") && r.includes("CRO itself is skipped"),
       ),
     );
+    const dash = planRules({ ...solanaDefaults(), multipliers: [5] }, "dash");
+    assert.ok(dash.every((r) => !r.includes("SOL margin") && !r.includes("Solana") && !r.includes("5x")));
+    assert.ok(dash.some((r) => r.includes("spends USDT") && r.includes("sells back to USDT")));
+    assert.ok(dash.some((r) => r.includes("10%") && r.includes("USDT tickets pay USDC")));
+    assert.ok(
+      planRules({ ...solanaDefaults(), dashQuote: "dash" }, "dash").some((r) =>
+        r.includes("spends DASH") && r.includes("DASH itself is skipped"),
+      ),
+    );
     assert.match(alwaysOnNote(false), /npm run desk/);
     assert.match(alwaysOnNote(true), /desk runner/);
     assert.match(alwaysOnNote(true), /close this browser/);

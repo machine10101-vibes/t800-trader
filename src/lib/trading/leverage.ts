@@ -170,5 +170,6 @@ export function orderForPosition(pos: Position, kind: "close" | "scale", venues?
     collateralUsd: pos.collateralUsd,
     positionPubkey: pos.positionPubkey,
     cronosQuote: pos.cronosQuote,
+    dashQuote: pos.dashQuote,
   };
 }
