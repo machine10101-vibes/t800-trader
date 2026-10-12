@@ -117,12 +117,23 @@ async function dashLive(session: DeskSession | null | undefined) {
     executor: dash?.nearAccountId ? dashExecutor(dash) : undefined,
     maker: null as ReturnType<typeof makerDesk> | null,
     budget: () => dashBudget(dash),
-    authorize: (_armFundsUsd?: number, _quote?: "usdc" | "cro") => authorizeDash(dash as DashSession),
+    authorize: (armFundsUsd?: number, quote?: "usdc" | "cro") => {
+      void armFundsUsd;
+      void quote;
+      return authorizeDash(dash as DashSession);
+    },
     confirmDisarm: () => Promise.resolve(),
-    reclaim: (_keep: number) => Promise.resolve(null as string | null),
+    reclaim: (keep: number) => {
+      void keep;
+      return Promise.resolve(null as string | null);
+    },
     read: (address: string) => readDashBalances(address),
     hasKey: () => Boolean(dash?.nearAccountId && dash.dashAccount),
-    sendProfit: (_principal: number, _keep: number) => Promise.resolve(null as string | null),
+    sendProfit: (principal: number, keep: number) => {
+      void principal;
+      void keep;
+      return Promise.resolve(null as string | null);
+    },
   };
 }
 
