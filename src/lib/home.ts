@@ -1,7 +1,7 @@
 import type { ChainId } from "@/lib/chain";
 import { armedFundsUsd, logicFramesRule, ruleOn, ticketBuyUsd } from "@/lib/deskSettings";
 import { feeHurdlePct } from "@/lib/trading/fees";
-import { dayLossBreached, lossStreakPaused } from "@/lib/trading/risk";
+import { dayLossBreached, lossStreakResumeAt, nextSessionMs } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
 import { priceFmt } from "@/lib/utils";
 
@@ -180,6 +180,53 @@ export type ActivityKind = "target" | "limit" | "wall";
 export interface ActivityItem {
   kind: ActivityKind;
   text: string;
+  /** Epoch ms when this limit lifts and the bot can begin again. */
+  resumeAt?: number;
+}
+
+/** Open time for a finished result. A stamped close wins. Otherwise the latest open of that coin at or before the close. */
+export function openedAtFor(
+  close: Pick<Trade, "mint" | "at" | "openedAt">,
+  trades: Pick<Trade, "mint" | "action" | "at">[],
+): string | null {
+  if (close.openedAt) return close.openedAt;
+  const closeMs = Date.parse(close.at);
+  if (!Number.isFinite(closeMs)) return null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  let best: string | null = null;
+  for (const trade of trades) {
+    if (trade.action !== "open" || trade.mint !== close.mint) continue;
+    const ms = Date.parse(trade.at);
+    if (!Number.isFinite(ms) || ms > closeMs || ms < bestMs) continue;
+    bestMs = ms;
+    best = trade.at;
+  }
+  return best;
+}
+
+/** Local date and time for an open or a close. */
+export function formatWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return "—";
+  return when.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Remaining time until a limit lifts, ticking down to the second. */
+export function formatRemain(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (hours > 0) return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+  return `${minutes}m ${pad(seconds)}s`;
 }
 
 export interface BotActivity {
@@ -217,6 +264,39 @@ function goalText(position: Position, feeWait: boolean): string {
   return `${position.symbol} is waiting for its profit goal at ${goal}. Price is ${now}, about ${gap.toFixed(1)}% short of the goal. Safety stop is ${stop}.${fee}`;
 }
 
+function symbolOnLine(line: string): string | null {
+  const match = line.match(/^([A-Za-z0-9.]+)(?:\s+(?:long|short))?:/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
+function cooldownResumeMs(line: string, trades: Trade[], minutes: number): number | undefined {
+  if (!/cooldown after/i.test(line) || !(minutes > 0)) return undefined;
+  const symbol = symbolOnLine(line);
+  const last = trades.find((trade) => {
+    if (trade.action !== "close") return false;
+    if (trade.reason !== "stop" && trade.reason !== "time" && trade.reason !== "risk-off") return false;
+    if (symbol && trade.symbol.toUpperCase() !== symbol) return false;
+    return true;
+  });
+  const at = last ? Date.parse(last.at) : NaN;
+  if (!Number.isFinite(at)) return undefined;
+  return at + minutes * 60_000;
+}
+
+function limitResumeAt(
+  line: string,
+  input: { trades: Trade[]; config: BotConfig; quietUntil?: string | null },
+  now: number,
+): number | undefined {
+  if (/day budget/i.test(line)) return nextSessionMs(now);
+  if (/no new trade after that fill/i.test(line) && input.quietUntil) {
+    const at = Date.parse(input.quietUntil);
+    if (Number.isFinite(at)) return at;
+  }
+  const minutes = ruleOn(input.config, "cooldown") ? Math.max(0, input.config.cooldownMinutes || 0) : 0;
+  return cooldownResumeMs(line, input.trades, minutes);
+}
+
 /**
  * Splits the live book into the three things a person needs to tell apart:
  * a trade waiting on its profit goal, a limit that stopped new trades, or a wall that stuck the bot.
@@ -242,22 +322,31 @@ export function botActivity(input: {
   hidden?: boolean;
   /** A local desk runner is the clock. A quiet UI pull is not a wall. */
   runner?: boolean;
+  /** After a preset stop or target, no new ticket until this time. */
+  quietUntil?: string | null;
 }): BotActivity {
   const now = input.nowMs ?? Date.now();
   const targets: ActivityItem[] = [];
   const limits: ActivityItem[] = [];
   const walls: ActivityItem[] = [];
   const seen = new Set<string>();
-  const add = (list: ActivityItem[], kind: ActivityKind, text: string) => {
+  const add = (list: ActivityItem[], kind: ActivityKind, text: string, resumeAt?: number) => {
     const key = `${kind}:${text}`;
     if (seen.has(key)) return;
     seen.add(key);
-    list.push({ kind, text });
+    const item: ActivityItem = { kind, text };
+    if (resumeAt != null && Number.isFinite(resumeAt) && resumeAt > now) item.resumeAt = resumeAt;
+    list.push(item);
   };
 
   if (input.killSwitch) add(limits, "limit", "Emergency stop is on, so no new trades are sent.");
   if (input.running && dayLossBreached(input.portfolio, input.config)) {
-    add(limits, "limit", `Today's loss hit the ${input.config.dailyLossLimitPct}% limit, so no new trades until tomorrow.`);
+    add(
+      limits,
+      "limit",
+      `Today's loss hit the ${input.config.dailyLossLimitPct}% limit, so no new trades until tomorrow.`,
+      nextSessionMs(now),
+    );
   }
   if (
     input.running &&
@@ -271,11 +360,15 @@ export function botActivity(input: {
       `Holding ${input.positions.length} coins, the most allowed at once, so no new coin until one sells.`,
     );
   }
-  if (
-    input.running &&
-    lossStreakPaused(input.trades, ruleOn(input.config, "lossStreak") ? input.config.lossStreakPause : 0, now)
-  ) {
-    add(limits, "limit", `Resting for an hour after ${input.config.lossStreakPause} losses in a row. No new trades until that hour ends.`);
+  const streakCap = ruleOn(input.config, "lossStreak") ? input.config.lossStreakPause : 0;
+  const streakResume = input.running ? lossStreakResumeAt(input.trades, streakCap, now) : null;
+  if (streakResume != null) {
+    add(
+      limits,
+      "limit",
+      `Resting for an hour after ${input.config.lossStreakPause} losses in a row. No new trades until that hour ends.`,
+      streakResume,
+    );
   }
 
   const feeWait = new Set(
@@ -295,7 +388,7 @@ export function botActivity(input: {
     const core = lineCore(line);
     if (LIMIT_LINE.test(line)) {
       if (/most allowed at once|daily loss|cooling for an hour|kill switch/i.test(line)) continue;
-      add(limits, "limit", core);
+      add(limits, "limit", core, limitResumeAt(line, input, now));
       continue;
     }
     if (WALL_LINE.test(line)) add(walls, "wall", line);

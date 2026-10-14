@@ -3,7 +3,7 @@
 import type { ChainId } from "@/lib/chain";
 import { appliedScanSeconds } from "@/lib/deskSettings";
 import type { CashLeg } from "@/lib/cashHoldings";
-import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
+import { alwaysOnNote, botActivity, exitWords, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
@@ -97,6 +97,7 @@ export function Home({
     visibleAt: viewState.visibleAt,
     hidden: viewState.hidden,
     runner,
+    quietUntil: desk.bot.bracketQuietUntil,
   });
   const statusNow = visibleActivity(activity);
   const results = homeResults(trades);
@@ -257,11 +258,17 @@ export function Home({
           {recent.length ? (
             <ul className="mt-3 divide-y divide-[var(--line)]">
               {recent.map((t) => (
-                <li key={t.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
-                    <span className="font-medium">{t.symbol}</span>
-                    <span className="ml-2 text-[var(--muted)]">{exitWords(t.reason)}</span>
+                <li key={t.id} className="flex items-start justify-between gap-3 py-2.5 text-sm">
+                  <span className="min-w-0">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
+                      <span className="font-medium">{t.symbol}</span>
+                      <span className="text-[var(--muted)]">{exitWords(t.reason)}</span>
+                    </span>
+                    <span className="mt-1 block text-[11px] leading-5 text-[var(--faint)]">
+                      <span className="block">Opened {formatWhen(openedAtFor(t, trades))}</span>
+                      <span className="block">Closed {formatWhen(t.at)}</span>
+                    </span>
                   </span>
                   <span className={`num shrink-0 ${toneClass(t.pnlUsd ?? 0)}`}>{usd(t.pnlUsd)}</span>
                 </li>
@@ -324,12 +331,30 @@ function ActivityList({
           return (
             <li key={item.text} className="flex items-start gap-2">
               {mark ? <TokenLogo symbol={mark} chain={chain} size="xs" className="mt-1" /> : null}
-              <span>{item.text}</span>
+              <span>
+                {item.text}
+                {item.resumeAt ? <ResumeCountdown resumeAt={item.resumeAt} /> : null}
+              </span>
             </li>
           );
         })}
       </ul>
     </div>
+  );
+}
+
+function ResumeCountdown({ resumeAt }: { resumeAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const left = resumeAt - now;
+  const label = left <= 0 ? "Begins again on the next check" : `Begins again in ${formatRemain(left)}`;
+  return (
+    <span className="num mt-1 block text-[var(--amber)]" data-countdown={resumeAt}>
+      {label}
+    </span>
   );
 }
 

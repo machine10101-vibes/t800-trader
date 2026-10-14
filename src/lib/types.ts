@@ -242,6 +242,8 @@ export interface Trade {
   pnlPct: number | null;
   reason: TradeReason;
   at: string;
+  /** When this close's position was opened. Older rows leave this empty and the desk pairs the open. */
+  openedAt?: string;
   note: string;
   /** Solana signature for a wallet swap. Missing means the row is simulated. */
   signature?: string;

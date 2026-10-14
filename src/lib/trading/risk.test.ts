@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, managePosition, marginCashUsd, MIN_TICKET_USD, presetBracket, profitClearsFees, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
+import { canOpen, cashConcentration, consecutiveLosses, dayLossBreached, exitReason, lossStreakPaused, lossStreakResumeAt, managePosition, marginCashUsd, MIN_TICKET_USD, nextSessionMs, presetBracket, profitClearsFees, rollSession, shouldScratch, sizePosition, solPerpPostableUsd, spendableUsd, ticketEntryUsd, unrealizedPnl, walletRiskBook, withUserBracket } from "./risk";
 import { SOL_MINT } from "../market/universe";
 import { DEFAULT_CONFIG } from "../store";
 import type { MarketRegime, Portfolio, Position, Signal } from "../types";
@@ -243,7 +243,11 @@ describe("risk", () => {
     const old = new Date(Date.now() - 61 * 60_000).toISOString();
     const losses = [-10, -8, -3].map((pnlUsd, i) => ({ action: "close", pnlUsd, mint: `m${i}`, at: old }) as never);
     assert.equal(lossStreakPaused(losses, 3), false);
-    assert.equal(lossStreakPaused(losses, 3, Date.parse(old) + 30 * 60_000), true);
+    assert.equal(lossStreakResumeAt(losses, 3), null);
+    const during = Date.parse(old) + 30 * 60_000;
+    assert.equal(lossStreakPaused(losses, 3, during), true);
+    assert.equal(lossStreakResumeAt(losses, 3, during), Date.parse(old) + 60 * 60_000);
+    assert.equal(nextSessionMs(Date.parse("2026-10-14T05:30:00.000Z")), Date.parse("2026-10-15T00:00:00.000Z"));
   });
 
   it("holds no more coins than the most-at-once setting", () => {
