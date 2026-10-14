@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { alwaysOnNote, botActivity, exitWords, homeResults, homeStatus, planRules, progressToGoal, visibleActivity } from "./home";
+import { alwaysOnNote, botActivity, exitWords, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, visibleActivity } from "./home";
+import { nextSessionMs } from "./trading/risk";
 import { solanaDefaults } from "./store";
 import type { Portfolio, Position, Trade } from "./types";
 
@@ -118,6 +119,24 @@ describe("home", () => {
     assert.deepEqual(r, { closed: 2, wins: 1, netUsd: 2, bestUsd: 3, worstUsd: -1 });
     assert.equal(exitWords("target"), "Hit the profit goal");
     assert.equal(exitWords("stop"), "Hit the safety stop");
+    const open = "2026-06-15T18:00:00.000Z";
+    const close = "2026-06-15T19:30:00.000Z";
+    const laterOpen = "2026-06-15T21:00:00.000Z";
+    const trades = [
+      { mint: "a", action: "close" as const, at: close },
+      { mint: "a", action: "open" as const, at: open },
+      { mint: "a", action: "open" as const, at: laterOpen },
+      { mint: "b", action: "open" as const, at: open },
+    ];
+    assert.equal(openedAtFor({ mint: "a", at: close }, trades), open);
+    assert.equal(openedAtFor({ mint: "a", at: close, openedAt: "stamped" }, trades), "stamped");
+    assert.equal(openedAtFor({ mint: "b", at: close }, trades), open);
+    assert.equal(openedAtFor({ mint: "a", at: "2026-06-15T17:00:00.000Z" }, trades), null);
+    assert.match(formatWhen(open), /2026/);
+    assert.equal(formatWhen(null), "—");
+    assert.equal(formatRemain(90_000), "1m 30s");
+    assert.equal(formatRemain(3_661_000), "1h 01m 01s");
+    assert.equal(formatRemain(0), "0m 00s");
   });
 
   it("separates a goal wait, a limit, and a wall", () => {
@@ -167,6 +186,12 @@ describe("home", () => {
     assert.ok(held.limits.some((item) => /most allowed at once/.test(item.text)));
     assert.ok(held.limits.some((item) => /6% limit/.test(item.text)));
     assert.ok(held.limits.some((item) => /Resting for an hour/.test(item.text)));
+    const streak = held.limits.find((item) => /Resting for an hour/.test(item.text));
+    assert.equal(streak?.resumeAt, Date.parse(losses[0]!.at) + 60 * 60_000);
+    const daily = held.limits.find((item) => /6% limit/.test(item.text));
+    assert.equal(daily?.resumeAt, nextSessionMs(now));
+    const full = held.limits.find((item) => /most allowed/.test(item.text));
+    assert.equal(full?.resumeAt, undefined);
     assert.equal(held.limits.filter((item) => /most allowed/.test(item.text)).length, 1);
     assert.equal(held.walls.length, 0);
     assert.match(held.summary, /profit goals/);
@@ -370,5 +395,47 @@ describe("home", () => {
       visibleActivity(limited).map((group) => group.kind),
       ["limit", "target"],
     );
+  });
+
+  it("counts down a cooldown and a preset-fill quiet from the stop time", () => {
+    const now = Date.parse("2026-10-14T12:00:00.000Z");
+    const stopped = new Date(now - 5 * 60_000).toISOString();
+    const config = { ...solanaDefaults(), cooldownMinutes: 20, lossStreakPause: 0 };
+    const cooling = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 2,
+      blocked: ["BONK long: Cooldown after a stop/time-out on this mint", "RAY: Protect remaining day budget"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [{ action: "close", reason: "stop", pnlUsd: -2, symbol: "BONK", mint: "b", at: stopped } as Trade],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      quietUntil: new Date(now + 3 * 60_000).toISOString(),
+    });
+    const cooldown = cooling.limits.find((item) => /Cooldown after/.test(item.text));
+    assert.equal(cooldown?.resumeAt, Date.parse(stopped) + 20 * 60_000);
+    const budget = cooling.limits.find((item) => /day budget/.test(item.text));
+    assert.equal(budget?.resumeAt, nextSessionMs(now));
+
+    const quiet = botActivity({
+      running: true,
+      killSwitch: false,
+      lastError: null,
+      lastTickAt: new Date(now).toISOString(),
+      ticks: 2,
+      blocked: ["SOL: stop and target were preset — no new trade after that fill"],
+      scanSeconds: 5,
+      positions: [],
+      trades: [],
+      portfolio: book(),
+      config,
+      nowMs: now,
+      quietUntil: new Date(now + 3 * 60_000).toISOString(),
+    });
+    assert.equal(quiet.limits[0]?.resumeAt, now + 3 * 60_000);
   });
 });

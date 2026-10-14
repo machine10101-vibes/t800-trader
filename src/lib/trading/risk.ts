@@ -83,10 +83,16 @@ export const LOSS_STREAK_PAUSE_MS = 60 * 60_000;
 
 /** True while the last losing close of a streak is recent enough to hold new tickets. */
 export function lossStreakPaused(trades: Trade[], cap: number, nowMs = Date.now()): boolean {
-  if (!(cap > 0) || consecutiveLosses(trades) < cap) return false;
+  return lossStreakResumeAt(trades, cap, nowMs) !== null;
+}
+
+/** When a losing-streak pause lets new tickets through again. Null when the bot is not paused. */
+export function lossStreakResumeAt(trades: Trade[], cap: number, nowMs = Date.now()): number | null {
+  if (!(cap > 0) || consecutiveLosses(trades) < cap) return null;
   const last = trades.find((t) => t.action === "close" && t.pnlUsd !== null);
   const at = last ? Date.parse(last.at) : NaN;
-  return Number.isFinite(at) && nowMs - at < LOSS_STREAK_PAUSE_MS;
+  if (!Number.isFinite(at) || nowMs - at >= LOSS_STREAK_PAUSE_MS) return null;
+  return at + LOSS_STREAK_PAUSE_MS;
 }
 
 export function consecutiveLosses(trades: Trade[]): number {
@@ -365,6 +371,12 @@ export function exitReason(
   }
   if (ageMin > timeCap) return "time";
   return null;
+}
+
+/** Midnight UTC, when `rollSession` starts the next day and lifts a daily stop. */
+export function nextSessionMs(nowMs: number): number {
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  return Date.parse(`${day}T00:00:00.000Z`) + 24 * 60 * 60_000;
 }
 
 export function rollSession(portfolio: Portfolio, now = new Date()): Portfolio {

@@ -185,12 +185,14 @@ describe("paper", () => {
     const pos = opened.positions[0]!;
     const marked = markBook(opened, new Map([[pos.mint, pos.entryPrice * 1.05]]));
     const scaled = scaleOut(marked, pos.id, 0.5);
+    assert.equal(scaled.trades[0]?.openedAt, pos.openedAt);
     assert.equal(scaled.portfolio.winCount, 1);
     assert.equal(scaled.positions.length, 1);
     const rest = scaled.positions[0]!;
     const mtm = scaled.portfolio.cashUsd + rest.qty * rest.markPrice;
     assert.ok(Math.abs(scaled.portfolio.equityUsd - mtm) < 1e-6);
     const closed = closePosition(scaled, rest.id, rest.markPrice, "manual");
+    assert.equal(closed.trades[0]?.openedAt, pos.openedAt);
     assert.equal(closed.positions.length, 0);
     assert.ok(Math.abs(closed.portfolio.equityUsd - closed.portfolio.cashUsd) < 1e-6);
     assert.equal(closed.portfolio.winCount, 2);
