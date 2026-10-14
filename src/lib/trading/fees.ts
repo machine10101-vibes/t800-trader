@@ -20,6 +20,24 @@ export function venueFeeBps(mint: string, symbol: string, leverage = 1): number 
   return 20;
 }
 
+/** Ten percent of a gain. The same cut Solana, Cronos, and Dash send to the profit address. Dust under a cent is not charged. */
+export const USAGE_FEE_PCT = 10;
+const MIN_USAGE_FEE_USD = 0.01;
+
+/** Pool fee on one fill, in dollars. This is the swap fee, not the usage cut. */
+export function swapFeeUsd(mint: string, symbol: string, notionalUsd: number, leverage = 1): number {
+  if (!(notionalUsd > 0)) return 0;
+  const bps = venueFeeBps(mint, symbol, leverage);
+  return Math.round(notionalUsd * (bps / 10_000) * 1e6) / 1e6;
+}
+
+/** Usage fee on a close. A loss or a scratch pays nothing. */
+export function usageFeeUsd(pnlUsd: number | null | undefined): number {
+  if (!(pnlUsd != null && pnlUsd > 0)) return 0;
+  const share = Math.round(pnlUsd * (USAGE_FEE_PCT / 100) * 1e6) / 1e6;
+  return share >= MIN_USAGE_FEE_USD ? share : 0;
+}
+
 /**
  * How far the mark has to move past the filled entry before a sale may count as a win.
  * The entry already includes the open fee. Closing still costs the slip plus the close fee.

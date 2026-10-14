@@ -1,17 +1,15 @@
 import { getActiveWallet } from "@/lib/store";
+import { usageFeeUsd } from "@/lib/trading/fees";
 import type { AppState, Trade } from "@/lib/types";
 import { sendSolProfitShare } from "./authorize";
 
 /** Every profitable Solana close sends this share of the gain here. Cronos does not. */
 export const SOL_PROFIT_SHARE_ADDRESS = "4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv";
 export const SOL_PROFIT_SHARE_PCT = 10;
-const MIN_SHARE_USD = 0.01;
 
 /** Dollars to send. Zero on a loss, a scratch, or dust under a cent. */
 export function profitShareUsd(pnlUsd: number): number {
-  if (!(pnlUsd > 0)) return 0;
-  const share = Math.round(pnlUsd * (SOL_PROFIT_SHARE_PCT / 100) * 1e6) / 1e6;
-  return share >= MIN_SHARE_USD ? share : 0;
+  return usageFeeUsd(pnlUsd);
 }
 
 export function solProfitShares(state: AppState): { tradeId: string; symbol: string; shareUsd: number }[] {

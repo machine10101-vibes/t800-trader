@@ -3,7 +3,7 @@
 import type { ChainId } from "@/lib/chain";
 import { appliedScanSeconds } from "@/lib/deskSettings";
 import type { CashLeg } from "@/lib/cashHoldings";
-import { alwaysOnNote, botActivity, exitWords, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, visibleActivity, type ActivityItem } from "@/lib/home";
+import { alwaysOnNote, botActivity, exitWords, formatFee, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, resultFees, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
 import { pct, priceFmt, usd } from "@/lib/utils";
@@ -255,24 +255,34 @@ export function Home({
       <div className="grid gap-3 lg:grid-cols-2">
         <section className="neon p-5 sm:p-6">
           <h3 className="text-lg font-medium">Recent results</h3>
+          <p className="mt-1 text-[11px] leading-5 text-[var(--faint)]">The result is after the swap fee. Usage is 10% of a gain.</p>
           {recent.length ? (
             <ul className="mt-3 divide-y divide-[var(--line)]">
-              {recent.map((t) => (
-                <li key={t.id} className="flex items-start justify-between gap-3 py-2.5 text-sm">
-                  <span className="min-w-0">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
-                      <span className="font-medium">{t.symbol}</span>
-                      <span className="text-[var(--muted)]">{exitWords(t.reason)}</span>
-                    </span>
-                    <span className="mt-1 block text-[11px] leading-5 text-[var(--faint)]">
-                      <span className="block">Opened {formatWhen(openedAtFor(t, trades))}</span>
-                      <span className="block">Closed {formatWhen(t.at)}</span>
-                    </span>
-                  </span>
-                  <span className={`num shrink-0 ${toneClass(t.pnlUsd ?? 0)}`}>{usd(t.pnlUsd)}</span>
-                </li>
-              ))}
+              {recent.map((t) => {
+                const fees = resultFees(t, trades);
+                return (
+                  <li key={t.id} className="flex items-start justify-between gap-3 py-3 text-sm">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <TokenLogo symbol={t.symbol} mint={t.mint} chain={chain} size="sm" />
+                        <span className="font-medium">{t.symbol}</span>
+                        <span className="text-[var(--muted)]">{exitWords(t.reason)}</span>
+                      </div>
+                      <div className="mt-1 text-[11px] leading-5 text-[var(--faint)]">
+                        <div>Opened {formatWhen(openedAtFor(t, trades))}</div>
+                        <div>Closed {formatWhen(t.at)}</div>
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className={`num text-base ${toneClass(t.pnlUsd ?? 0)}`}>{usd(t.pnlUsd)}</div>
+                      <div className="mt-1.5 space-y-0.5">
+                        {fees.swapUsd > 0 ? <FeeLine label="Swap" value={formatFee(fees.swapUsd)} /> : null}
+                        {fees.usageUsd > 0 ? <FeeLine label="Usage" value={formatFee(fees.usageUsd)} tone="usage" /> : null}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="mt-3 text-sm text-[var(--muted)]">No finished trades yet.</p>
@@ -339,6 +349,16 @@ function ActivityList({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function FeeLine({ label, value, tone = "swap" }: { label: string; value: string; tone?: "swap" | "usage" }) {
+  const valueColor = tone === "usage" ? "text-[var(--magenta)]" : "text-[var(--muted)]";
+  return (
+    <div className="flex items-baseline justify-end gap-2 text-[10px] leading-4">
+      <span className="uppercase tracking-[0.14em] text-[var(--faint)]">{label}</span>
+      <span className={`num ${valueColor}`}>{value}</span>
     </div>
   );
 }
