@@ -1,7 +1,7 @@
 import { sameMint } from "@/lib/chain";
 import type { AppState, ChainFill, MarketRegime, Position, Signal, Trade } from "@/lib/types";
 import { id } from "@/lib/utils";
-import { PAPER_SLIP_BPS, targetAboveFees, venueFeeBps } from "./fees";
+import { PAPER_SLIP_BPS, swapFeeUsd, targetAboveFees, venueFeeBps } from "./fees";
 import { rememberClose } from "./learn";
 import { MIN_TICKET_USD, markPosition, positionEquity, rMultiple, unrealizedPnl } from "./risk";
 
@@ -130,6 +130,8 @@ export function openPosition(
     price,
     pnlUsd: null,
     pnlPct: null,
+    swapFeeUsd: swapFeeUsd(signal.mint, signal.symbol, qty * price, leverage),
+    leverage: leverage > 1 ? leverage : undefined,
     reason: signal.reason,
     at: new Date().toISOString(),
     note: `${leverage > 1 ? `${leverage}x ` : ""}${stamp?.signature ? `${signal.thesis} Wallet tx ${stamp.signature}.` : signal.thesis}`,
@@ -173,6 +175,8 @@ export function closePosition(
     price,
     pnlUsd: pnl.usd,
     pnlPct: pnl.pct,
+    swapFeeUsd: swapFeeUsd(pos.mint, pos.symbol, pos.qty * price, pos.leverage),
+    leverage: pos.leverage,
     reason,
     at: new Date().toISOString(),
     openedAt: pos.openedAt,
@@ -296,6 +300,8 @@ export function scaleOut(
     price,
     pnlUsd: pnl.usd,
     pnlPct: pnl.pct,
+    swapFeeUsd: swapFeeUsd(pos.mint, pos.symbol, qty * price, pos.leverage),
+    leverage: pos.leverage,
     reason: "target",
     at: new Date().toISOString(),
     openedAt: pos.openedAt,
@@ -350,6 +356,7 @@ export function recordCashSale(
     price: args.price,
     pnlUsd: null,
     pnlPct: null,
+    swapFeeUsd: swapFeeUsd(args.mint, args.symbol, args.qty * args.price),
     reason: "risk-off",
     at: new Date().toISOString(),
     note: args.note,

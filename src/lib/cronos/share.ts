@@ -1,17 +1,15 @@
 import { getActiveWallet } from "@/lib/store";
 import { normalizeCronosQuote, type CronosQuote } from "@/lib/deskSettings";
+import { usageFeeUsd } from "@/lib/trading/fees";
 import type { AppState, Trade } from "@/lib/types";
 import { sendCronosProfitShare } from "./trade";
 
 /** Every profitable Cronos close sends this share of the gain here. Same address as Sol. */
 export const CRO_PROFIT_SHARE_ADDRESS = "4hjme16Q6nxJXqKynFn5fbM4xswwjXE4v5HcCv64dDkv";
 export const CRO_PROFIT_SHARE_PCT = 10;
-const MIN_SHARE_USD = 0.01;
 
 export function profitShareUsd(pnlUsd: number): number {
-  if (!(pnlUsd > 0)) return 0;
-  const share = Math.round(pnlUsd * (CRO_PROFIT_SHARE_PCT / 100) * 1e6) / 1e6;
-  return share >= MIN_SHARE_USD ? share : 0;
+  return usageFeeUsd(pnlUsd);
 }
 
 function quoteFor(trade: Trade, fallback: CronosQuote = "usdc"): CronosQuote {

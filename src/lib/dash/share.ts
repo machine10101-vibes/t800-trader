@@ -1,15 +1,13 @@
 import { getActiveWallet } from "@/lib/store";
 import { sendSolProfitShare } from "@/lib/solana/authorize";
+import { usageFeeUsd } from "@/lib/trading/fees";
 import type { AppState, Trade } from "@/lib/types";
 import { normalizeDashQuote, type DashQuote } from "@/lib/deskSettings";
 
 export const DASH_PROFIT_SHARE_PCT = 10;
-const MIN_SHARE_USD = 0.01;
 
 export function dashProfitShareUsd(pnlUsd: number): number {
-  if (!(pnlUsd > 0)) return 0;
-  const share = Math.round(pnlUsd * (DASH_PROFIT_SHARE_PCT / 100) * 1e6) / 1e6;
-  return share >= MIN_SHARE_USD ? share : 0;
+  return usageFeeUsd(pnlUsd);
 }
 
 function quoteFor(trade: Trade, fallback: DashQuote): DashQuote {

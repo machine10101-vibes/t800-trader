@@ -240,6 +240,10 @@ export interface Trade {
   price: number;
   pnlUsd: number | null;
   pnlPct: number | null;
+  /** Pool fee on this fill. A close row is the sell; the buy fee is on the open row. */
+  swapFeeUsd?: number;
+  /** Set on a 5x or 10x fill. Spot leaves this empty. */
+  leverage?: number;
   reason: TradeReason;
   at: string;
   /** When this close's position was opened. Older rows leave this empty and the desk pairs the open. */

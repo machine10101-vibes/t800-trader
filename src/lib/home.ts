@@ -1,6 +1,6 @@
 import type { ChainId } from "@/lib/chain";
 import { armedFundsUsd, logicFramesRule, ruleOn, ticketBuyUsd } from "@/lib/deskSettings";
-import { feeHurdlePct } from "@/lib/trading/fees";
+import { feeHurdlePct, swapFeeUsd, usageFeeUsd } from "@/lib/trading/fees";
 import { dayLossBreached, lossStreakResumeAt, nextSessionMs } from "@/lib/trading/risk";
 import type { BotConfig, BotState, Portfolio, Position, Trade, TradeReason } from "@/lib/types";
 import { priceFmt } from "@/lib/utils";
@@ -216,6 +216,56 @@ export function formatWhen(iso: string | null | undefined): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+export interface ResultFees {
+  /** Pool fee to open this slice plus the fee to close it. */
+  swapUsd: number;
+  /** Ten percent of a gain. Zero on a loss. */
+  usageUsd: number;
+}
+
+type FeeFill = Pick<Trade, "mint" | "symbol" | "action" | "qty" | "price" | "at" | "swapFeeUsd" | "leverage">;
+
+function openTradeFor(close: Pick<Trade, "mint" | "at">, trades: FeeFill[]): FeeFill | null {
+  const closeMs = Date.parse(close.at);
+  if (!Number.isFinite(closeMs)) return null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  let best: FeeFill | null = null;
+  for (const trade of trades) {
+    if (trade.action !== "open" || trade.mint !== close.mint) continue;
+    const ms = Date.parse(trade.at);
+    if (!Number.isFinite(ms) || ms > closeMs || ms < bestMs) continue;
+    bestMs = ms;
+    best = trade;
+  }
+  return best;
+}
+
+function stampedOrEstimated(trade: FeeFill): number {
+  if (trade.swapFeeUsd != null && Number.isFinite(trade.swapFeeUsd)) return trade.swapFeeUsd;
+  return swapFeeUsd(trade.mint, trade.symbol, trade.qty * trade.price, trade.leverage);
+}
+
+/** Swap fee for the round trip, and the usage fee when the close made money. */
+export function resultFees(close: FeeFill & Pick<Trade, "pnlUsd">, trades: FeeFill[]): ResultFees {
+  const closeFee = stampedOrEstimated(close);
+  const open = openTradeFor(close, trades);
+  let openFee = closeFee;
+  if (open) {
+    const full = stampedOrEstimated(open);
+    const fraction = open.qty > 0 ? Math.min(1, close.qty / open.qty) : 1;
+    openFee = full * fraction;
+  }
+  const swapUsd = Math.round((openFee + closeFee) * 1e6) / 1e6;
+  return { swapUsd, usageUsd: usageFeeUsd(close.pnlUsd) };
+}
+
+/** A fee small enough that two cents of rounding would hide it. */
+export function formatFee(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "$0.00";
+  if (n >= 0.01) return `$${n.toFixed(2)}`;
+  return `$${n.toFixed(4)}`;
 }
 
 /** Remaining time until a limit lifts, ticking down to the second. */
