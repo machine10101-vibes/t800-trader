@@ -59,6 +59,7 @@ async function main() {
   const paper = await import("../src/lib/trading/paper");
   const { solanaEntrySignals, snapshotTechnical } = await import("../src/lib/trading/signals");
   const { deskEntrySignals } = await import("../src/lib/trading/mtf");
+  const { tapeStance } = await import("../src/lib/market/regime");
   const { cashExit, solanaKeepEntry } = await import("../src/lib/market/tape");
   const { advise, studyTape } = await import("../src/lib/trading/learn");
   const lev = await import("../src/lib/trading/leverage");
@@ -79,6 +80,8 @@ async function main() {
   const load = (pair: string, tf: string) => JSON.parse(readFileSync(join(CACHE, `${pair}-${tf}.json`), "utf8")) as Kline[];
   const btc = load("BTCUSDT", "1m");
   const btcAt = new Map(btc.map((k, i) => [k[0], i]));
+  const eth = load("ETHUSDT", "1m");
+  const ethAt = new Map(eth.map((k, i) => [k[0], i]));
   const fng = (JSON.parse(readFileSync(join(CACHE, "fng.json"), "utf8")) as { data: { value: string; timestamp: string }[] }).data
     .map((row) => ({ t: Number(row.timestamp) * 1000, v: Number(row.value) }))
     .sort((a, b) => a.t - b.t);
@@ -198,8 +201,9 @@ async function main() {
   let fees = 0;
   let peak = EQUITY;
   let maxDd = 0;
-  const closes: { symbol: string; side: string; reason: string; exit: string; pnl: number; fee: number; lev: number }[] = [];
+  const closes: { symbol: string; side: string; reason: string; exit: string; pnl: number; fee: number; lev: number; market: string }[] = [];
   const entryReason = new Map<string, string>();
+  const entryMarket = new Map<string, string>();
   const daily = new Map<string, number>();
   const gates = new Map<string, number>();
   const signalCache = new Map<string, { bar: number; stance: string; signals: Signal[] }>();
@@ -212,11 +216,21 @@ async function main() {
     }).filter(Boolean) as { s: Series; j: number; c: TokenCandidate }[];
     const bi = btcAt.get(sol.m[i][0]);
     const btc24 = bi !== undefined && bi >= 1440 ? (btc[bi][4] / btc[bi - 1440][4] - 1) * 100 : 0;
+    const ei = ethAt.get(sol.m[i][0]);
+    const eth24 = ei !== undefined && ei >= 1440 ? (eth[ei][4] / eth[ei - 1440][4] - 1) * 100 : 0;
     const sol24 = rows[0].c.flows.h24.priceChangePct;
     const fear = fearAt(simNow);
-    const riskOn = btc24 > 0.4 && sol24 > 0 && (fear === null || fear >= 45);
-    const defensive = btc24 < -2 || (fear !== null && fear < 30) || sol24 < -5;
-    const stance: MarketRegime["stance"] = defensive ? "defensive" : riskOn ? "risk-on" : "mixed";
+    const market24 = btc24 * 0.75 + eth24 * 0.25;
+    const marketLabel =
+      btc24 < 0 && eth24 < 0 ? "majors-down" : btc24 > 0 && eth24 > 0 ? "majors-up" : "majors-split";
+    const fearLabel = fear === null ? "fear-na" : fear < 30 ? "fear" : fear < 45 ? "uneasy" : fear >= 75 ? "greed" : "calm";
+    const perfLabel = market24 <= -1.5 ? "perf-down" : market24 >= 0.4 ? "perf-up" : "perf-flat";
+    const stance: MarketRegime["stance"] = tapeStance({
+      btcChange24h: btc24,
+      ethChange24h: eth24,
+      l1Change24h: sol24,
+      fearGreed: fear,
+    });
     const regime = { stance } as MarketRegime;
     const prices = new Map(rows.map((r) => [r.c.mint, r.c.priceUsd]));
     const byMint = new Map(rows.map((r) => [r.c.mint, r.c]));
@@ -358,6 +372,7 @@ async function main() {
           opened += 1;
           levByMint.set(learned.mint, leverage);
           entryReason.set(learned.mint, `${learned.side} ${learned.reason} · ${entryTag(learned.thesis)}`);
+          entryMarket.set(learned.mint, `${stance}|${marketLabel}|${fearLabel}|${perfLabel}`);
         }
       }
     }
@@ -370,7 +385,7 @@ async function main() {
       const fee = trade.qty * trade.price * (paper.venueFeeBps(trade.mint, trade.symbol, l) / 10_000);
       fees += fee;
       if (trade.action === "close") {
-        closes.push({ symbol: trade.symbol, side: trade.side, reason: entryReason.get(trade.mint) ?? "?", exit: trade.reason, pnl: trade.pnlUsd ?? 0, fee, lev: l });
+        closes.push({ symbol: trade.symbol, side: trade.side, reason: entryReason.get(trade.mint) ?? "?", exit: trade.reason, pnl: trade.pnlUsd ?? 0, fee, lev: l, market: entryMarket.get(trade.mint) ?? "?" });
       }
     }
     state = paper.markBook(next, prices);
@@ -412,6 +427,7 @@ async function main() {
     bySide: group((c) => c.side),
     byExit: group((c) => c.exit),
     byEntry: group((c) => c.reason),
+    byMarket: group((c) => c.market),
     byLeverage: group((c) => `${c.lev}x`),
     blockedBy: Object.fromEntries([...gates.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)),
   };
