@@ -148,7 +148,7 @@ describe("indicators", () => {
     assert.equal(cro.some((signal) => signal.side === "long" && signal.reason === "reclaim"), true);
   });
 
-  it("lets a liquid watchlist name continue when the 5m range is held", () => {
+  it("does not buy a watchlist name just for holding its range", () => {
     const flow = { buys: 60, sells: 40, buyers: 30, sellers: 20, volumeUsd: 1, priceChangePct: 0.4 };
     const token = {
       symbol: "JUP",
@@ -173,9 +173,9 @@ describe("indicators", () => {
       barsAboveEma9: 3,
     } as TechnicalSnapshot;
     const found = buildSignals(token, tech, 62, true, { stance: "mixed", fearGreed: 55, solChange: -0.4 });
-    assert.equal(found.length, 1);
-    assert.equal(found[0]?.side, "long");
-    assert.ok(found[0]!.confidence >= 58);
+    assert.equal(found.length, 0);
+    const fifteen = candleSetups(token, tech, 62, true, { stance: "mixed", fearGreed: 55, solChange: -0.4 }, FIFTEEN_MIN_ATR);
+    assert.equal(fifteen.some((signal) => signal.thesis.includes("Continuation long")), true);
   });
 
   it("stays flat when a watchlist name is breaking down", () => {
@@ -520,7 +520,7 @@ describe("indicators", () => {
       ema21: 99,
       vwap: 100,
       atrPct: 1.2,
-      volumeZ: 0.2,
+      volumeZ: 0.4,
       lastClose: 100,
       extensionPct: 0.4,
       closeStrength: 0.6,
