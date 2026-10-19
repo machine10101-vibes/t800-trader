@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { paintRegime, type RegimeMark } from "./regime";
+import { majorsPerformancePct, paintRegime, quietRedMarket, tapeStance, type RegimeMark } from "./regime";
 
 const mark = (price: number, change24h = 1): RegimeMark => ({
   price,
@@ -48,5 +48,34 @@ describe("paintRegime", () => {
     assert.ok(board.crowded.some((line) => line.includes("Cronos DEX volume chase")));
     assert.ok(board.crowded.some((line) => line.includes("CRO beta")));
     assert.doesNotMatch(text, /SOL\b|Solana|Jito|JLP|Jupiter/);
+  });
+
+  it("stands down when Bitcoin and Ethereum are quietly red and sentiment is calm", () => {
+    const tape = { btcChange24h: -0.8, ethChange24h: -1.2, l1Change24h: 1, fearGreed: 55, priced: true };
+    assert.equal(majorsPerformancePct(-0.8, -1.2).toFixed(2), "-0.90");
+    assert.equal(quietRedMarket(tape), true);
+    assert.equal(tapeStance(tape), "defensive");
+    const board = paintRegime({
+      chain: "solana",
+      btc: mark(70_000, -0.8),
+      eth: mark(3_500, -1.2),
+      l1: mark(180, 1),
+      btcDom: 55,
+      fear: { value: 55, label: "Neutral" },
+      tvl: null,
+      dexVolume24h: null,
+      dexChange1d: null,
+    });
+    assert.equal(board.stance, "defensive");
+    assert.match(board.stanceWhy, /Bitcoin and Ethereum are both red/);
+    assert.match(board.overview, /Broad market -0\.90%/);
+  });
+
+  it("keeps trading a split tape, a greedy dip, and a real risk-on day", () => {
+    assert.equal(tapeStance({ btcChange24h: -0.8, ethChange24h: 0.4, l1Change24h: 1, fearGreed: 55 }), "mixed");
+    assert.equal(tapeStance({ btcChange24h: -0.8, ethChange24h: -1.2, l1Change24h: 1, fearGreed: 80 }), "mixed");
+    assert.equal(tapeStance({ btcChange24h: -1.8, ethChange24h: -1.8, l1Change24h: 0.2, fearGreed: 55 }), "mixed");
+    assert.equal(tapeStance({ btcChange24h: 1, ethChange24h: 0.5, l1Change24h: 2, fearGreed: 50 }), "risk-on");
+    assert.equal(tapeStance({ btcChange24h: -3, ethChange24h: 1, l1Change24h: 1, fearGreed: 55 }), "defensive");
   });
 });

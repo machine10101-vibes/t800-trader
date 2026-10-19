@@ -99,7 +99,8 @@ export function planRules(
   const fourOn = (config.logicFrames ?? ["15m", "1h", "4h"]).includes("4h");
   const fourHourMargin = chain === "solana" && config.marginOnFourHour && config.solTradeMode !== "spot" && fourOn;
   const charts = logicFramesRule(config.logicFrames ?? ["15m", "1h", "4h"]);
-  const rules = [
+    const rules = [
+    "When Bitcoin and Ethereum are both quietly red and Fear & Greed is calm, it stands down. A hard Bitcoin selloff, a hard chain selloff, or a fearful reading does the same.",
     fourHourMargin && config.solTradeMode === "margin"
       ? "Finds SOL margin trades on a solid 4-hour setup. Other names are skipped."
       : fourHourMargin

@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const BASE = "https://data-api.binance.vision/api/v3/klines";
-export const BOOK_SYMBOLS = ["SOLUSDT", "PUMPUSDT", "ZECUSDT", "RAYUSDT", "BTCUSDT"] as const;
+export const BOOK_SYMBOLS = ["SOLUSDT", "PUMPUSDT", "ZECUSDT", "RAYUSDT", "BTCUSDT", "ETHUSDT"] as const;
 export const CACHE_DIR = join(process.cwd(), ".cache", "candles");
 
 /** [openMs, open, high, low, close, volume, quoteVolume, trades, takerBuyBase] */
