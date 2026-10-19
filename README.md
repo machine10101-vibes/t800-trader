@@ -40,19 +40,19 @@ A Solana winner is not sold until the gain is larger than the fee to open the tr
 
 Both desks only buy and sell. They do not bet that a price will fall.
 
-`scripts/backtest.ts` replays the real bot functions one scan per minute. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
+`scripts/backtest.ts` replays the real bot functions one scan per minute. The default entry is the live one: a 15-minute setup, then the 1-hour and 4-hour charts have to agree. It uses Binance minute bars for SOL, PUMP, ZEC and RAY, BTC for the regime, and Fear & Greed. Fees are charged per side on top of the paper slip: 3 bps for SOL spot, 7 bps for SOL perps, and 20 bps for the other tokens. Fetch the data with `npx tsx scripts/fetch-candles.ts 120`, then run `npx tsx scripts/backtest.ts --days 89 --holdout 30`.
 
 | Setup, $200 book | 89-day tuning window | 30-day holdout |
 | --- | --- | --- |
 | Previous defaults (15m flow entries, fade exit, 5x/10x) | −98.5% | −84.6% |
-| Current Solana defaults, longs only | −0.9%, max drawdown 3.2% | −1.3%, max drawdown 3.2% |
-| Same defaults with mirrored shorts | −1.4%, max drawdown 5.0% | −2.4%, max drawdown 3.6% |
+| Live entry, including the range-hold continuation | −0.12%, max drawdown 2.75% | −2.07%, max drawdown 2.68% |
+| Live entry after dropping that continuation | +0.41%, max drawdown 2.89% | −0.87%, max drawdown 1.83% |
 
-No configuration tested was profitable after fees in both windows. Mirrored shorts use the same setups as the longs. On this replay they added a small loss. They did not produce a profit in either window. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
+The range-hold bought a watchlist name that was only holding its range. On this replay it was most of the trades and it lost after fees in both windows, so that setup is gone. Breakouts, RSI reclaims, VWAP pullbacks, and the separate 15-minute continuation stay. Holding a stale trade past the 4-hour exit made the tuning window better and the holdout worse, so the stale exit stays. The same cut on the 4-hour structure path alone went from −0.65% / −1.68% to +0.70% / −0.16%, on 16 and 9 closes. The holdout is still a loss. **There is no edge here that guarantees profit.** Treat LIVE as an experiment sized to money you can lose.
 
 ## Cronos
 
-The Cronos desk uses that same 4-hour decision path: the same stop, target, stale exit, time cap, and fee hurdle. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Both desks only buy and sell. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
+The Cronos desk uses the same stop, target, stale exit, time cap, and fee hurdle, and the same chart checks. The range-hold continuation is gone there too. The 15-minute continuation, used when a higher chart agrees, stays. The book is CRO, ULTCAT, CRIMECAT, MERY, PACK, and ULTI. A buy spends USDC. WolfSwap and cro.trade are both quoted, and the swap that returns more is sent. cro.trade's published 0.9% fee is taken off its quote before that comparison. Both desks only buy and sell. There is no Cronos candle replay, so the Solana loss figures above are not a Cronos result.
 
 The replay also found a deadlock. After three straight losses, new entries were blocked forever, because only a win resets the streak. The pause now lifts an hour after the last loss.
 

@@ -3,8 +3,11 @@
  * paper-book functions, one scan per minute, in the same order `tickBot` runs them.
  * Venue fees are charged on top of the paper slip so the result is closer to LIVE.
  *
- *   npx tsx scripts/fetch-candles.ts 45
- *   npx tsx scripts/backtest.ts [--equity 200] [--days 45] [--json]
+ *   npx tsx scripts/fetch-candles.ts 120
+ *   npx tsx scripts/backtest.ts [--equity 200] [--days 89] [--holdout 30] [--entry desk|4h] [--json]
+ *
+ * `--entry desk` (the default) uses the live path: 15-minute setup, then the higher charts that are on.
+ * `--entry 4h` scores the 4-hour structure function on its own.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -32,6 +35,21 @@ const DAYS = arg("days", 45);
 /** Stop this many days before the newest bar, so a later window can be held out. */
 const HOLDOUT = arg("holdout", 0);
 const AS_JSON = process.argv.includes("--json");
+/**
+ * `4h` replays the 4-hour structure function alone.
+ * `desk` replays the live entry: the shortest chart that is on (15-minute by default),
+ * then the higher charts that are on have to agree.
+ */
+const ENTRY = process.argv.includes("--entry") ? process.argv[process.argv.indexOf("--entry") + 1] : "desk";
+
+function entryTag(thesis: string): string {
+  if (thesis.includes("liquid watchlist")) return "watchlist continuation";
+  if (thesis.includes("Continuation long")) return "15m continuation";
+  if (thesis.includes("Structure breakout")) return "breakout";
+  if (thesis.includes("Mean-reversion")) return "rsi reclaim";
+  if (thesis.includes("Pullback long")) return "vwap pullback";
+  return thesis.replace(/\s+/g, " ").slice(0, 72);
+}
 const CACHE = join(process.cwd(), ".cache", "candles");
 
 async function main() {
@@ -40,6 +58,7 @@ async function main() {
   const risk = await import("../src/lib/trading/risk");
   const paper = await import("../src/lib/trading/paper");
   const { solanaEntrySignals, snapshotTechnical } = await import("../src/lib/trading/signals");
+  const { deskEntrySignals } = await import("../src/lib/trading/mtf");
   const { cashExit, solanaKeepEntry } = await import("../src/lib/market/tape");
   const { advise, studyTape } = await import("../src/lib/trading/learn");
   const lev = await import("../src/lib/trading/leverage");
@@ -144,6 +163,30 @@ async function main() {
     return rows;
   };
 
+  const roll = (bars: Kline[], span: number): Candle[] => {
+    const out: Candle[] = [];
+    for (const k of bars) {
+      const start = Math.floor(k[0] / span) * (span / 1000);
+      const last = out[out.length - 1];
+      if (last && last.time === start) {
+        last.high = Math.max(last.high, k[2]);
+        last.low = Math.min(last.low, k[3]);
+        last.close = k[4];
+        last.volume += k[5];
+        continue;
+      }
+      out.push({ time: start, open: k[1], high: k[2], low: k[3], close: k[4], volume: k[5] });
+    }
+    return out;
+  };
+  const deskSeries = ENTRY === "desk" ? series.map((s) => ({ ...s, m15: roll(s.m, 15 * 60_000), h1: roll(s.m, 3_600_000) })) : [];
+  const closedUntil = (bars: Candle[], seconds: number, nowSec: number): Candle[] => {
+    let end = bars.length;
+    while (end > 0 && bars[end - 1]!.time + seconds > nowSec) end -= 1;
+    const start = Math.max(0, end - 180);
+    return bars.slice(start, end);
+  };
+
   const sol = series[0];
   const end = sol.m.length - 1 - HOLDOUT * 1440;
   const start = Math.max(1440, end - DAYS * 1440);
@@ -159,6 +202,7 @@ async function main() {
   const entryReason = new Map<string, string>();
   const daily = new Map<string, number>();
   const gates = new Map<string, number>();
+  const signalCache = new Map<string, { bar: number; stance: string; signals: Signal[] }>();
 
   for (let i = start; i <= end; i++) {
     simNow = sol.m[i][0] + 60_000;
@@ -238,9 +282,37 @@ async function main() {
       const signals: Signal[] = [];
       for (const token of focus) {
         const r = rows.find((row) => row.c.mint === token.mint)!;
-        const bars = fourHour(r.s, r.j);
-        const tech = bars.length >= 30 ? snapshotTechnical(bars) : null;
-        signals.push(...solanaEntrySignals(token, tech, 60, next.config.allowShorts, ctx).filter((sig) => solanaKeepEntry(sig.side, token.flows.m15.priceChangePct)));
+        if (ENTRY === "desk") {
+          const packed = deskSeries.find((s) => s.mint === token.mint)!;
+          const nowSec = (packed.m[r.j][0] + 60_000) / 1000;
+          const m15 = closedUntil(packed.m15, 900, nowSec);
+          const bar = m15[m15.length - 1]?.time ?? 0;
+          const cacheKey = token.mint;
+          const hit = signalCache.get(cacheKey);
+          if (hit && hit.bar === bar && hit.stance === stance) {
+            signals.push(...hit.signals);
+          } else {
+            const decision = deskEntrySignals(
+              token,
+              {
+                m15,
+                h1: closedUntil(packed.h1, 3_600, nowSec),
+                h4: closedUntil(fourHour(r.s, r.j), 14_400, nowSec),
+              },
+              60,
+              next.config.allowShorts,
+              ctx,
+              { mode: next.config.solTradeMode, marginOnFourHour: next.config.marginOnFourHour, logicFrames: next.config.logicFrames },
+            );
+            const kept = decision.signals.filter((sig) => sig.side === "long" && (sig.setupFrame === "4h" || sig.setupFrame === "1h" || solanaKeepEntry(sig.side, token.flows.m15.priceChangePct)));
+            signalCache.set(cacheKey, { bar, stance, signals: kept });
+            signals.push(...kept);
+          }
+        } else {
+          const bars = fourHour(r.s, r.j);
+          const tech = bars.length >= 30 ? snapshotTechnical(bars) : null;
+          signals.push(...solanaEntrySignals(token, tech, 60, next.config.allowShorts, ctx).filter((sig) => solanaKeepEntry(sig.side, token.flows.m15.priceChangePct)));
+        }
       }
       signals.sort((a, b) => b.confidence - a.confidence);
       let opened = 0;
@@ -285,7 +357,7 @@ async function main() {
         if (next.positions.length > before) {
           opened += 1;
           levByMint.set(learned.mint, leverage);
-          entryReason.set(learned.mint, `${learned.side} ${learned.reason} · ${learned.thesis.replace(learned.symbol, '').trim().split(/\s+/).slice(0, 4).join(' ')}`);
+          entryReason.set(learned.mint, `${learned.side} ${learned.reason} · ${entryTag(learned.thesis)}`);
         }
       }
     }
@@ -324,6 +396,7 @@ async function main() {
   };
   const days = (end - start) / 1440;
   const summary = {
+    entry: ENTRY,
     days: Number(days.toFixed(1)),
     startEquity: EQUITY,
     finalEquity: Number(final.toFixed(2)),
