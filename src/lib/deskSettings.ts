@@ -79,14 +79,18 @@ export function confirmLogicFrames(frames: readonly Frame[]): Frame[] {
 export function logicFramesRule(frames: readonly Frame[]): string {
   const enabled = normalizeLogicFrames(frames);
   const entry = FRAME_LABEL[entryLogicFrame(enabled)];
-  const confirm = confirmLogicFrames(enabled).map((frame) => FRAME_LABEL[frame]);
+  const confirmFrames = confirmLogicFrames(enabled);
+  const confirm = confirmFrames.map((frame) => FRAME_LABEL[frame]);
+  const rangeWait = confirmFrames.includes("4h")
+    ? " A full 4-hour chart that is only ranging also waits. A short 4-hour tape can still follow the lower chart."
+    : "";
   if (!confirm.length) return `Finds its trades on the ${entry} chart.`;
   if (confirm.length === 1) {
-    return `Finds its trades on the ${entry} chart, then checks the ${confirm[0]} chart. If that higher chart points the other way, it skips the trade.`;
+    return `Finds its trades on the ${entry} chart, then checks the ${confirm[0]} chart. If that higher chart points the other way, it skips the trade.${rangeWait}`;
   }
   const last = confirm[confirm.length - 1];
   const head = confirm.slice(0, -1).join(", ");
-  return `Finds its trades on the ${entry} chart, then checks the ${head} and ${last} charts. If a higher chart that is on points the other way, it skips the trade.`;
+  return `Finds its trades on the ${entry} chart, then checks the ${head} and ${last} charts. If a higher chart that is on points the other way, it skips the trade.${rangeWait}`;
 }
 
 export const CRONOS_QUOTES = ["usdc", "cro"] as const;

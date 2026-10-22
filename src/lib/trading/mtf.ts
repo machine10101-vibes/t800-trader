@@ -170,6 +170,13 @@ export function logicEntrySignals(
       continue;
     }
     const four = confirmReads.find((row) => row.frame === "4h");
+    // A full 4-hour range is not a tailwind. Continuation longs taken while the 1-hour
+    // was up and the 4-hour was only ranging lost in both the 89-day window and the
+    // 30-day holdout. A short 4-hour tape still has no opinion and can follow the 1-hour.
+    if (signal.side === "long" && four && four.rows.length >= MIN_BARS && four.bias === "range") {
+      pass ??= `${token.symbol}: ${entryName} ${signal.side} ${signal.reason}, but the 4-hour chart is ranging, so it waits`;
+      continue;
+    }
     const wall = four && four.rows.length >= MIN_BARS ? levelBlock(signal.side, signal.price, four.rows, tech.atrPct ?? 0) : null;
     if (wall) {
       pass ??= `${token.symbol}: ${entryName} ${signal.side} ${signal.reason}, but ${wall}, so it waits`;
