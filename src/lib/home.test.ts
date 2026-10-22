@@ -73,6 +73,7 @@ describe("home", () => {
   it("writes the rules from the live settings", () => {
     const rules = planRules(solanaDefaults());
     assert.ok(rules.some((rule) => rule.includes("Bitcoin and Ethereum") && rule.includes("Fear & Greed")));
+    assert.ok(rules.some((rule) => rule.includes("4-hour chart that is only ranging")));
     assert.ok(rules.some((r) => r.includes("4% below") && r.includes("8% above")));
     assert.ok(rules.every((r) => !r.includes("bet a price will fall") && !r.includes("stop above and the goal below")));
     assert.ok(rules.some((r) => r.includes("never sold until it beats the fees")));

@@ -50,6 +50,11 @@ function entryTag(thesis: string): string {
   if (thesis.includes("Pullback long")) return "vwap pullback";
   return thesis.replace(/\s+/g, " ").slice(0, 72);
 }
+
+function confirmTag(thesis: string): string {
+  const passed = thesis.match(/Back-check passed: ([^.]+)/);
+  return passed ? passed[1]!.trim() : "no-check";
+}
 const CACHE = join(process.cwd(), ".cache", "candles");
 
 async function main() {
@@ -201,9 +206,10 @@ async function main() {
   let fees = 0;
   let peak = EQUITY;
   let maxDd = 0;
-  const closes: { symbol: string; side: string; reason: string; exit: string; pnl: number; fee: number; lev: number; market: string }[] = [];
+  const closes: { symbol: string; side: string; reason: string; exit: string; pnl: number; fee: number; lev: number; market: string; check: string }[] = [];
   const entryReason = new Map<string, string>();
   const entryMarket = new Map<string, string>();
+  const entryCheck = new Map<string, string>();
   const daily = new Map<string, number>();
   const gates = new Map<string, number>();
   const signalCache = new Map<string, { bar: number; stance: string; signals: Signal[] }>();
@@ -373,6 +379,7 @@ async function main() {
           levByMint.set(learned.mint, leverage);
           entryReason.set(learned.mint, `${learned.side} ${learned.reason} · ${entryTag(learned.thesis)}`);
           entryMarket.set(learned.mint, `${stance}|${marketLabel}|${fearLabel}|${perfLabel}`);
+          entryCheck.set(learned.mint, confirmTag(learned.thesis));
         }
       }
     }
@@ -385,7 +392,17 @@ async function main() {
       const fee = trade.qty * trade.price * (paper.venueFeeBps(trade.mint, trade.symbol, l) / 10_000);
       fees += fee;
       if (trade.action === "close") {
-        closes.push({ symbol: trade.symbol, side: trade.side, reason: entryReason.get(trade.mint) ?? "?", exit: trade.reason, pnl: trade.pnlUsd ?? 0, fee, lev: l, market: entryMarket.get(trade.mint) ?? "?" });
+        closes.push({
+          symbol: trade.symbol,
+          side: trade.side,
+          reason: entryReason.get(trade.mint) ?? "?",
+          exit: trade.reason,
+          pnl: trade.pnlUsd ?? 0,
+          fee,
+          lev: l,
+          market: entryMarket.get(trade.mint) ?? "?",
+          check: entryCheck.get(trade.mint) ?? "?",
+        });
       }
     }
     state = paper.markBook(next, prices);
@@ -428,6 +445,7 @@ async function main() {
     byExit: group((c) => c.exit),
     byEntry: group((c) => c.reason),
     byMarket: group((c) => c.market),
+    byCheck: group((c) => c.check),
     byLeverage: group((c) => `${c.lev}x`),
     blockedBy: Object.fromEntries([...gates.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)),
   };

@@ -120,6 +120,22 @@ describe("15-minute entry with a 1-hour and 4-hour back-check", () => {
     assert.match(decision.pass ?? "", /SOL: 15-minute chart is in, no setup yet \(/);
   });
 
+  it("waits when a full 4-hour chart is only ranging", () => {
+    const flat: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      flat.push({ time: 1_700_000_000 + i * 14_400, open: 100, high: 100.4, low: 99.6, close: 100, volume: 1000 });
+    }
+    const decision = frameEntrySignals(
+      token,
+      { m15: breakout15m, h1: trend(180, 0.002, 60, 3600), h4: flat },
+      70,
+      true,
+      ctx,
+    );
+    assert.equal(decision.signals.length, 0);
+    assert.match(decision.pass ?? "", /4-hour chart is ranging/);
+  });
+
   it("treats a short 4-hour tape as ranging so a new book name can still back-check the 1-hour", () => {
     const thinFour = trend(12, 0.002, 60, 14_400);
     const decision = frameEntrySignals(
@@ -184,8 +200,8 @@ describe("4-hour margin setups and spot vs margin mode", () => {
   });
 
   it("keeps a 15-minute fill as spot when both is on and the 4-hour has no setup", () => {
-    const quiet4h = trend(180, 0.00001, 100, 14_400);
-    const decision = deskEntrySignals(token, { m15: breakout15m, h1: up1h, h4: quiet4h }, 70, true, ctx, {
+    const rising4h = trend(180, 0.0008, 100, 14_400);
+    const decision = deskEntrySignals(token, { m15: breakout15m, h1: up1h, h4: rising4h }, 70, true, ctx, {
       mode: "both",
       marginOnFourHour: true,
     });

@@ -63,6 +63,8 @@ describe("logic frames", () => {
     assert.deepEqual(toggleLogicFrame(["15m", "4h"], "15m", false), ["4h"]);
     assert.deepEqual(toggleLogicFrame(["15m"], "5m", true), ["5m", "15m"]);
     assert.match(logicFramesRule(["15m", "1h", "4h"]), /15-minute chart/);
+    assert.match(logicFramesRule(["15m", "1h", "4h"]), /4-hour chart that is only ranging/);
+    assert.doesNotMatch(logicFramesRule(["15m", "1h"]), /only ranging/);
     assert.match(logicFramesRule(["4h"]), /4-hour chart/);
     assert.doesNotMatch(logicFramesRule(["4h"]), /then checks/);
   });
