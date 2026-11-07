@@ -51,6 +51,7 @@ import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { dashPayInstalled, parseNearAccount } from "@/lib/dash/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
+import { phantomReturnInUrl } from "@/lib/solana/phantomLink";
 import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage, type WalletSession } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
@@ -197,6 +198,7 @@ function ChainDesk({
   walletRef.current = wallet;
   const deskRef = useRef(desk);
   deskRef.current = desk;
+  const deskEpoch = useRef(0);
   const busyRef = useRef(false);
   const controlGen = useRef(0);
   const runnerHostRef = useRef(false);
@@ -269,7 +271,10 @@ function ChainDesk({
       setBooting(false);
       if (chain === "solana") {
         const adopted = await adoptReturnedAgentGrant(session.address).catch(() => null);
-        if (adopted) applyDesk(adopted);
+        if (adopted) {
+          deskEpoch.current += 1;
+          applyDesk(adopted);
+        }
       }
       try {
         const note = sessionStorage.getItem("t800-phantom-sign-note");
@@ -337,13 +342,14 @@ function ChainDesk({
     setSavedAddress(last);
     if (!last) return;
     let cancelled = false;
+    const epoch = deskEpoch.current;
     void resumeSavedBook(chain).then((book) => {
-      if (cancelled || !book) return;
+      if (cancelled || !book || deskEpoch.current !== epoch) return;
       applyDesk(shellDesk(book));
       void loadDesk(false, chain).then((next) => {
-        if (!cancelled) applyDesk(next);
+        if (!cancelled && deskEpoch.current === epoch) applyDesk(next);
       }).catch((error) => {
-        if (!cancelled) setError(error instanceof Error ? error.message : "Desk refresh failed");
+        if (!cancelled && deskEpoch.current === epoch) setError(error instanceof Error ? error.message : "Desk refresh failed");
       });
     });
     return () => {
@@ -353,8 +359,9 @@ function ChainDesk({
 
   useEffect(() => {
     const resume = () => {
-      if (walletRef.current) return;
       if (document.visibilityState === "hidden") return;
+      const returning = chain === "solana" && phantomReturnInUrl(window.location.href);
+      if (walletRef.current && !returning) return;
       void connect(true);
     };
     document.addEventListener("visibilitychange", resume);
@@ -363,7 +370,7 @@ function ChainDesk({
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("pageshow", resume);
     };
-  }, [connect]);
+  }, [chain, connect]);
 
   useEffect(() => {
     let cancelled = false;

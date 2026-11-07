@@ -200,6 +200,20 @@ describe("grok agent code", () => {
     assert.equal(keyReply.ok, false);
     if (keyReply.ok) return;
     assert.match(keyReply.error, /trading key/);
+    const unarmed = permit(issued.state);
+    unarmed.config = { ...unarmed.config, walletSwaps: true, executionMode: "live" };
+    unarmed.bot = { ...unarmed.bot, running: true, swapBot: null };
+    const unarmedReply = await applyAgentCommand(unarmed, {
+      code: issued.code,
+      action: "buy",
+      symbol: "SOL",
+      usd: 10,
+      price: 100,
+      account: unarmed.bot.agentSession?.owner,
+    });
+    assert.equal(unarmedReply.ok, false);
+    if (unarmedReply.ok) return;
+    assert.match(unarmedReply.error, /trading key/);
     assert.notEqual(delegate, mismatched.bot.swapBot);
     const armed = permit(issued.state);
     armed.config = { ...armed.config, walletSwaps: true, executionMode: "live", killSwitch: true };

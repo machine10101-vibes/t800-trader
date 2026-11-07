@@ -441,10 +441,17 @@ export async function cancelResting(session: DeskSession, chain: ChainId = "sola
 }
 
 export async function configureBot(config: Partial<BotConfig>, chain: ChainId = "solana"): Promise<DeskPayload> {
-  await mutateState((state) => ({
-    ...state,
-    config: normalizeConfig({ ...state.config, ...config }),
-  }), chain);
+  await mutateState((state) => {
+    const nextConfig = normalizeConfig({ ...state.config, ...config });
+    const dropBuy = nextConfig.killSwitch && state.bot.agentOrder?.action === "buy";
+    return {
+      ...state,
+      config: nextConfig,
+      ...(dropBuy
+        ? { bot: { ...state.bot, agentOrder: null, lastNote: "The emergency stop is on. That buy was not sent." } }
+        : {}),
+    };
+  }, chain);
   return buildDesk(false, chain);
 }
 
@@ -521,12 +528,21 @@ export async function enableSolAgent(session: WalletSession, minutes: number): P
 export async function adoptReturnedAgentGrant(owner: string): Promise<DeskPayload | null> {
   const found = takeReturnedAgentGrant(owner);
   if (!found) return null;
+  const after = found.live ? await readBalances(found.session.delegate).catch(() => null) : null;
   const state = await mutateState((current) => ({
     ...current,
     bot: {
       ...current.bot,
       agentSession: found.session,
-      ...(found.live ? { swapBot: found.session.delegate } : {}),
+      ...(found.live
+        ? {
+            swapBot: found.session.delegate,
+            swapAuthSignature: current.bot.swapAuthSignature ?? found.session.signature,
+            ...(current.bot.swapPrincipalUsd == null && after && after.equityUsd > 0
+              ? { swapPrincipalUsd: after.equityUsd }
+              : {}),
+          }
+        : {}),
       lastNote: `AI agent has full range for manual trading for ${found.session.minutes} minutes. The wallet approved that transaction.`,
     },
   }), "solana");

@@ -380,10 +380,13 @@ function GrokAgent({
   }, []);
   const expiresAt = session?.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
   const sameWallet = !walletAddress || session?.owner === walletAddress;
-  const sameKey = !live || !swapBot || session?.delegate === swapBot;
+  const sameKey = !live || session?.delegate === swapBot;
   const permissionOn = Boolean(
     session && sameWallet && sameKey && permissionSignatureMatches(session) && Number.isFinite(expiresAt) && expiresAt > now,
   );
+  useEffect(() => {
+    if (permissionOn) setError(null);
+  }, [permissionOn]);
   const active = grants.filter((grant) => !grant.revokedAt);
   const endpoint = runnerAgentUrl(localRunnerOrigin());
   const sample = code ?? "YOUR-CODE";

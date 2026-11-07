@@ -186,6 +186,12 @@ export function phantomQueryKeys(): string[] {
   return PHANTOM_PARAMS;
 }
 
+/** True when this page URL is Phantom coming back from a connect or a signature. */
+export function phantomReturnInUrl(pageUrl: string): boolean {
+  const params = phantomParams(pageUrl);
+  return PHANTOM_PARAMS.some((key) => params.has(key));
+}
+
 /** Reads Phantom's redirect, stores the session, and returns what the browser should do next. */
 export function takePhantomHandoff(pageUrl: string, store: PhantomLinkStore): PhantomHandoff {
   let params: URLSearchParams;

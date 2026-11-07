@@ -67,7 +67,7 @@ export function agentPermissionBlock(state: AppState, now = Date.now(), wallet?:
   if (wallet && session.owner !== wallet) {
     return "That trading window was signed by a different wallet.";
   }
-  if (state.config.walletSwaps && state.bot.swapBot && session.delegate !== state.bot.swapBot) {
+  if (state.config.walletSwaps && session.delegate !== state.bot.swapBot) {
     return "That trading window does not match the trading key.";
   }
   if (!permissionSignatureMatches(session)) {
