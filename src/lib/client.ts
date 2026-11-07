@@ -3,9 +3,11 @@ import { armButton, buildDesk, shellDesk, startNeedsLiveSignature } from "@/lib/
 import { armedFundsUsd, stampQuote } from "@/lib/deskSettings";
 import {
   authorizeTrading,
+  loadOrCreateTradingKey,
   reclaimTrading,
   sendTradingProfit,
   tradingBudgetAddress,
+  tradingFloatInstructions,
   tradingKeypair,
   tradingProfitUsd,
   tradingSnapshot as solanaTradingSnapshot,
@@ -31,7 +33,7 @@ import { tickSessionFor } from "@/lib/deskHost";
 import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
 import { issueAgentGrant, revokeAgentGrant, viewAgentGrants } from "@/lib/trading/agent";
 import { clampAgentMinutes } from "@/lib/trading/agentPermission";
-import { signAgentPermission } from "@/lib/solana/agentSign";
+import { signAgentPermission, takeReturnedAgentGrant } from "@/lib/solana/agentSign";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
@@ -439,10 +441,17 @@ export async function cancelResting(session: DeskSession, chain: ChainId = "sola
 }
 
 export async function configureBot(config: Partial<BotConfig>, chain: ChainId = "solana"): Promise<DeskPayload> {
-  await mutateState((state) => ({
-    ...state,
-    config: normalizeConfig({ ...state.config, ...config }),
-  }), chain);
+  await mutateState((state) => {
+    const nextConfig = normalizeConfig({ ...state.config, ...config });
+    const dropBuy = nextConfig.killSwitch && state.bot.agentOrder?.action === "buy";
+    return {
+      ...state,
+      config: nextConfig,
+      ...(dropBuy
+        ? { bot: { ...state.bot, agentOrder: null, lastNote: "The emergency stop is on. That buy was not sent." } }
+        : {}),
+    };
+  }, chain);
   return buildDesk(false, chain);
 }
 
@@ -474,17 +483,67 @@ export async function revokeSolAgentCode(grantId: string): Promise<AgentGrantVie
   return viewAgentGrants(state);
 }
 
-/** The wallet signs once. Agent trades until `expiresAt` use that permission and do not prompt again. */
+/**
+ * The wallet approves one transaction for the minutes the user picked.
+ * Until that window ends, manual buys and sells do not ask the wallet again.
+ * On real money, the same transaction loads the trading key when it is short.
+ */
 export async function enableSolAgent(session: WalletSession, minutes: number): Promise<DeskPayload> {
   const chosen = clampAgentMinutes(minutes);
   const expiresAt = new Date(Date.now() + chosen * 60_000).toISOString();
-  const signed = await signAgentPermission(session, expiresAt);
+  const book = await loadState("solana");
+  const trader = loadOrCreateTradingKey(session.address);
+  const live = Boolean(book.config.walletSwaps);
+  const funded = live ? await tradingFloatInstructions(session, trader.publicKey, armedFundsUsd(book.config)) : [];
+  const signed = await signAgentPermission(session, expiresAt, {
+    delegate: trader.publicKey.toBase58(),
+    extraInstructions: funded,
+    minutes: chosen,
+    live,
+  });
+  const after = live && funded.length ? await readBalances(trader.publicKey.toBase58()).catch(() => null) : null;
   const state = await mutateState((current) => ({
     ...current,
     bot: {
       ...current.bot,
       agentSession: { ...signed, minutes: chosen },
-      lastNote: `AI agent is on for ${chosen} minutes. Trades in this window do not ask the wallet again.`,
+      ...(live
+        ? {
+            swapBot: trader.publicKey.toBase58(),
+            ...(funded.length
+              ? {
+                  swapAuthSignature: signed.signature,
+                  swapPrincipalUsd: current.bot.swapPrincipalUsd ?? after?.equityUsd ?? current.bot.swapPrincipalUsd,
+                }
+              : {}),
+          }
+        : {}),
+      lastNote: `AI agent has full range for manual trading for ${chosen} minutes. The wallet approved that transaction.`,
+    },
+  }), "solana");
+  return shellDesk(state);
+}
+
+/** Phantom on a phone signs, leaves, and comes back. This stores that window once the bytes return. */
+export async function adoptReturnedAgentGrant(owner: string): Promise<DeskPayload | null> {
+  const found = takeReturnedAgentGrant(owner);
+  if (!found) return null;
+  const after = found.live ? await readBalances(found.session.delegate).catch(() => null) : null;
+  const state = await mutateState((current) => ({
+    ...current,
+    bot: {
+      ...current.bot,
+      agentSession: found.session,
+      ...(found.live
+        ? {
+            swapBot: found.session.delegate,
+            swapAuthSignature: current.bot.swapAuthSignature ?? found.session.signature,
+            ...(current.bot.swapPrincipalUsd == null && after && after.equityUsd > 0
+              ? { swapPrincipalUsd: after.equityUsd }
+              : {}),
+          }
+        : {}),
+      lastNote: `AI agent has full range for manual trading for ${found.session.minutes} minutes. The wallet approved that transaction.`,
     },
   }), "solana");
   return shellDesk(state);
@@ -497,7 +556,7 @@ export async function disableSolAgent(): Promise<DeskPayload> {
       ...current.bot,
       agentSession: null,
       agentOrder: null,
-      lastNote: "AI agent permission is off.",
+      lastNote: "AI agent manual trading is off.",
     },
   }), "solana");
   return shellDesk(state);

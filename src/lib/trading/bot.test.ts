@@ -83,10 +83,26 @@ describe("bot control", () => {
 
   it("kill switch flips the desk back to paper and stops the bot", () => {
     const started = applyControl(emptyState({ ...config, startingEquity: 1_000, executionMode: "live" }), "start");
-    const killed = applyControl(started, "kill");
+    const queuedBuy = {
+      ...started,
+      bot: {
+        ...started.bot,
+        agentOrder: { id: "buy-1", action: "buy" as const, symbol: "SOL", mint: "mint", at: "2026-11-07T00:00:00.000Z" },
+      },
+    };
+    const killed = applyControl(queuedBuy, "kill");
     assert.equal(killed.bot.running, false);
     assert.equal(killed.config.executionMode, "paper");
     assert.equal(killed.config.killSwitch, true);
+    assert.equal(killed.bot.agentOrder, null);
     assert.equal(killed.portfolio.cashUsd, 1_000);
+    const queuedSell = {
+      ...started,
+      bot: {
+        ...started.bot,
+        agentOrder: { id: "sell-1", action: "sell" as const, symbol: "SOL", mint: "mint", at: "2026-11-07T00:00:00.000Z" },
+      },
+    };
+    assert.equal(applyControl(queuedSell, "kill").bot.agentOrder?.action, "sell");
   });
 });

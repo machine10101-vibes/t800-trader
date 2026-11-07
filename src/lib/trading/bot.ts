@@ -162,8 +162,10 @@ export async function tickBot(
       const blocked: string[] = [];
 
       const grok = chain === "solana" ? next.bot.agentOrder : null;
-      const grokPermission = grok ? agentPermissionBlock(next) : null;
-      if (grok && grokPermission) {
+      const grokPermission = grok ? agentPermissionBlock(next, Date.now(), chain === "solana" ? getActiveWallet("solana") : null) : null;
+      if (grok && next.config.killSwitch && grok.action === "buy") {
+        next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: "The emergency stop is on. That buy was not sent." } };
+      } else if (grok && grokPermission) {
         next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: grokPermission } };
       } else if (grok && next.config.walletSwaps && executor && next.bot.running) {
         next = { ...next, bot: { ...next.bot, agentOrder: null } };
@@ -715,7 +717,13 @@ export function applyControl(
     return {
       ...state,
       config: { ...state.config, executionMode: "paper", walletSwaps: false, killSwitch: true },
-      bot: { ...state.bot, running: false, resting: undefined, lastNote: "Kill switch — desk is paper and disarmed" },
+      bot: {
+        ...state.bot,
+        running: false,
+        resting: undefined,
+        agentOrder: state.bot.agentOrder?.action === "buy" ? null : state.bot.agentOrder,
+        lastNote: "Kill switch — desk is paper and disarmed",
+      },
     };
   }
   if (action === "flatten") {

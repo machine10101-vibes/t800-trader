@@ -21,41 +21,57 @@ export function clampAgentMinutes(minutes: number): number {
   return Math.min(AGENT_PERMISSION_MAX, Math.max(AGENT_PERMISSION_MIN, Math.round(minutes)));
 }
 
-/** The exact text the wallet signs. Changing the expiry changes the message, so an edited clock fails the check. */
-export function agentPermissionMessage(owner: string, expiresAt: string): string {
+/**
+ * Memo inside the wallet transaction.
+ * Changing the expiry or the trading key changes the transaction, so an edited clock fails the check.
+ */
+export function agentPermissionMemo(owner: string, delegate: string, expiresAt: string): string {
   return [
     "T-800 Trader",
-    "Allow AI agent trades on this Solana book until the time below.",
+    "Allow all manual trades from the AI agent until the time below.",
     `Wallet: ${owner}`,
+    `Trader: ${delegate}`,
     `Until: ${expiresAt}`,
-    "This signature does not move funds and does not reveal a key.",
+    "This transaction lets that trader send every manual buy and sell in the window.",
   ].join("\n");
 }
 
 export function permissionSignatureMatches(session: AgentSession): boolean {
   try {
-    const message = new TextEncoder().encode(agentPermissionMessage(session.owner, session.expiresAt));
+    if (!session.message || !session.delegate || !session.signature || !session.owner || !session.expiresAt) return false;
+    const message = Buffer.from(session.message, "base64");
+    const memo = Buffer.from(agentPermissionMemo(session.owner, session.delegate, session.expiresAt), "utf8");
+    if (message.indexOf(memo) < 0) return false;
     const signature = bs58.decode(session.signature);
     const owner = new PublicKey(session.owner).toBytes();
-    if (signature.length !== 64 || owner.length !== 32) return false;
+    if (signature.length !== 64 || owner.length !== 32 || message.length < 64) return false;
     return nacl.sign.detached.verify(message, signature, owner);
   } catch {
     return false;
   }
 }
 
-/** Why an agent trade must wait. Null means this session may trade without another wallet prompt. */
-export function agentPermissionBlock(state: AppState, now = Date.now()): string | null {
+/**
+ * Why an agent trade must wait. Null means this window may trade without another wallet prompt.
+ * `wallet` is the connected address. A window signed by a different wallet does not apply.
+ */
+export function agentPermissionBlock(state: AppState, now = Date.now(), wallet?: string | null): string | null {
   const session = state.bot.agentSession;
-  if (!session?.signature || !session.expiresAt) {
-    return "Enable the AI agent on the Sol desk and sign once. Agent trades stay off until then.";
+  if (!session?.signature || !session.expiresAt || !session.message) {
+    return "Enable the AI agent and approve the wallet transaction. Manual trades stay off until then.";
   }
   const expires = Date.parse(session.expiresAt);
   if (!Number.isFinite(expires) || expires <= now) {
-    return "That agent permission ended. Enable it again and sign once.";
+    return "That trading window ended. Enable the agent again and approve a new transaction.";
+  }
+  if (wallet && session.owner !== wallet) {
+    return "That trading window was signed by a different wallet.";
+  }
+  if (state.config.walletSwaps && session.delegate !== state.bot.swapBot) {
+    return "That trading window does not match the trading key.";
   }
   if (!permissionSignatureMatches(session)) {
-    return "That agent permission does not match the wallet signature.";
+    return "That trading window does not match the wallet transaction.";
   }
   return null;
 }

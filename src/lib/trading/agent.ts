@@ -209,20 +209,22 @@ export async function applyAgentCommand(state: AppState, command: AgentCommand):
   if (action === "connect") {
     const live = Boolean(state.config.walletSwaps);
     const armed = Boolean(live && state.bot.swapBot);
-    const permission = agentPermissionBlock(state);
+    const permission = agentPermissionBlock(state, Date.now(), command.account);
     const note = permission
       ? permission
       : !live
-        ? "Connected. Buys and sells in this signed window fill now and do not ask the wallet again."
+        ? "Connected. Buys and sells in this window fill now and do not ask the wallet again."
         : armed && state.bot.running
-          ? "Connected. A buy or sell in this signed window is sent through the trading key without another wallet prompt."
-          : "Connected. Arm and start the Sol desk once. Agent trades in this signed window do not ask the wallet again.";
+          ? "Connected. A buy or sell in this window is sent without another wallet prompt."
+          : armed
+            ? "Connected. Start the Sol bot. Manual trades in this window send without another wallet prompt."
+            : "Connected. Approve the agent transaction on the Sol desk before a real swap can be sent.";
     return { ok: true, status: 200, book: bookOf(state, command.account, note) };
   }
 
   const token = solanaWatch(command.symbol ?? "");
   if (!token) return fail(400, "That symbol is not on the Solana watchlist.");
-  const permission = agentPermissionBlock(state);
+  const permission = agentPermissionBlock(state, Date.now(), command.account);
   if (permission) return fail(403, permission);
   const held = state.positions.find((pos) => pos.symbol.toUpperCase() === token.symbol);
 
@@ -276,8 +278,12 @@ function queueLive(
   usd?: number,
   price?: number,
 ): AgentReply {
+  if (action === "buy" && state.config.killSwitch) {
+    return fail(409, "The emergency stop is on. New real buys stay off.");
+  }
+  if (state.bot.agentOrder) return fail(409, "A manual trade is already waiting for the next scan.");
   if (!state.bot.running) return fail(409, "Start the Sol bot before a Grok agent can send a real swap.");
-  if (!state.bot.swapBot) return fail(409, "Arm the Sol desk before a Grok agent can send a real swap.");
+  if (!state.bot.swapBot) return fail(409, "Approve the agent transaction on the Sol desk before a real swap can be sent.");
   const order: AgentOrder = {
     id: id("agent-order"),
     action,
