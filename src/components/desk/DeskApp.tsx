@@ -32,6 +32,7 @@ import {
   revokeSolAgentCode,
   enableSolAgent,
   disableSolAgent,
+  adoptReturnedAgentGrant,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
@@ -266,6 +267,10 @@ function ChainDesk({
       setSavedAddress(session.address);
       setWallet(session);
       setBooting(false);
+      if (chain === "solana") {
+        const adopted = await adoptReturnedAgentGrant(session.address).catch(() => null);
+        if (adopted) applyDesk(adopted);
+      }
       try {
         const note = sessionStorage.getItem("t800-phantom-sign-note");
         if (note) {
@@ -1260,6 +1265,7 @@ function ChainDesk({
                       void loadState("solana").then((book) => publishDeskBook("solana", address, book));
                     }
                   }}
+                  walletAddress={wallet?.address}
                   onEnableAgent={async (minutes) => {
                     if (chain !== "solana" || !wallet || !("provider" in wallet)) {
                       return { ok: false as const, error: "Connect the Solana wallet before enabling the agent." };

@@ -2,6 +2,7 @@ import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { liveSolPrice } from "@/lib/market/marks";
 import { SOL_MINT, USDC_MINT } from "@/lib/market/universe";
 import { sleep } from "@/lib/utils";
+import { clearPendingAgentGrant, holdPhantomSignedTransaction } from "@/lib/solana/agentGrantStore";
 import {
   beginPhantomConnect,
   browserPhantomStore,
@@ -785,8 +786,12 @@ export async function connectWallet(onlyIfTrusted = false): Promise<WalletSessio
     const store = env.phantomStore ?? browserPhantomStore();
     const handoff = takePhantomHandoff(env.pageUrl, store);
     stripPhantomQuery();
-    if (handoff.kind === "error") throw new Error(handoff.message);
+    if (handoff.kind === "error") {
+      clearPendingAgentGrant();
+      throw new Error(handoff.message);
+    }
     if (handoff.kind === "sign") {
+      holdPhantomSignedTransaction(handoff.signed);
       try {
         await broadcastTransaction(handoff.signed);
       } catch (error) {

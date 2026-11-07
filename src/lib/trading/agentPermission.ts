@@ -51,8 +51,11 @@ export function permissionSignatureMatches(session: AgentSession): boolean {
   }
 }
 
-/** Why an agent trade must wait. Null means this window may trade without another wallet prompt. */
-export function agentPermissionBlock(state: AppState, now = Date.now()): string | null {
+/**
+ * Why an agent trade must wait. Null means this window may trade without another wallet prompt.
+ * `wallet` is the connected address. A window signed by a different wallet does not apply.
+ */
+export function agentPermissionBlock(state: AppState, now = Date.now(), wallet?: string | null): string | null {
   const session = state.bot.agentSession;
   if (!session?.signature || !session.expiresAt || !session.message) {
     return "Enable the AI agent and approve the wallet transaction. Manual trades stay off until then.";
@@ -60,6 +63,12 @@ export function agentPermissionBlock(state: AppState, now = Date.now()): string 
   const expires = Date.parse(session.expiresAt);
   if (!Number.isFinite(expires) || expires <= now) {
     return "That trading window ended. Enable the agent again and approve a new transaction.";
+  }
+  if (wallet && session.owner !== wallet) {
+    return "That trading window was signed by a different wallet.";
+  }
+  if (state.config.walletSwaps && state.bot.swapBot && session.delegate !== state.bot.swapBot) {
+    return "That trading window does not match the trading key.";
   }
   if (!permissionSignatureMatches(session)) {
     return "That trading window does not match the wallet transaction.";

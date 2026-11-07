@@ -162,7 +162,7 @@ export async function tickBot(
       const blocked: string[] = [];
 
       const grok = chain === "solana" ? next.bot.agentOrder : null;
-      const grokPermission = grok ? agentPermissionBlock(next) : null;
+      const grokPermission = grok ? agentPermissionBlock(next, Date.now(), chain === "solana" ? getActiveWallet("solana") : null) : null;
       if (grok && grokPermission) {
         next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: grokPermission } };
       } else if (grok && next.config.walletSwaps && executor && next.bot.running) {

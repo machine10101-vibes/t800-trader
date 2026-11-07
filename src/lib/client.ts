@@ -33,7 +33,7 @@ import { tickSessionFor } from "@/lib/deskHost";
 import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
 import { issueAgentGrant, revokeAgentGrant, viewAgentGrants } from "@/lib/trading/agent";
 import { clampAgentMinutes } from "@/lib/trading/agentPermission";
-import { signAgentPermission } from "@/lib/solana/agentSign";
+import { signAgentPermission, takeReturnedAgentGrant } from "@/lib/solana/agentSign";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
@@ -491,6 +491,8 @@ export async function enableSolAgent(session: WalletSession, minutes: number): P
   const signed = await signAgentPermission(session, expiresAt, {
     delegate: trader.publicKey.toBase58(),
     extraInstructions: funded,
+    minutes: chosen,
+    live,
   });
   const after = live && funded.length ? await readBalances(trader.publicKey.toBase58()).catch(() => null) : null;
   const state = await mutateState((current) => ({
@@ -510,6 +512,22 @@ export async function enableSolAgent(session: WalletSession, minutes: number): P
           }
         : {}),
       lastNote: `AI agent has full range for manual trading for ${chosen} minutes. The wallet approved that transaction.`,
+    },
+  }), "solana");
+  return shellDesk(state);
+}
+
+/** Phantom on a phone signs, leaves, and comes back. This stores that window once the bytes return. */
+export async function adoptReturnedAgentGrant(owner: string): Promise<DeskPayload | null> {
+  const found = takeReturnedAgentGrant(owner);
+  if (!found) return null;
+  const state = await mutateState((current) => ({
+    ...current,
+    bot: {
+      ...current.bot,
+      agentSession: found.session,
+      ...(found.live ? { swapBot: found.session.delegate } : {}),
+      lastNote: `AI agent has full range for manual trading for ${found.session.minutes} minutes. The wallet approved that transaction.`,
     },
   }), "solana");
   return shellDesk(state);

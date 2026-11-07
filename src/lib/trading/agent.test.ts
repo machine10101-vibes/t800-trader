@@ -7,7 +7,7 @@ import { emptyState } from "@/lib/store";
 import type { AppState } from "@/lib/types";
 import { applyAgentCommand, hashAgentCode, issueAgentGrant, mintAgentCode, normalizeAgentCode, revokeAgentGrant } from "./agent";
 import { agentPermissionMemo, clampAgentMinutes, permissionSignatureMatches } from "./agentPermission";
-import { agentSessionFromTransaction, buildAgentPermissionTransaction, signAgentPermission } from "@/lib/solana/agentSign";
+import { agentGrantFromSignedBytes, agentSessionFromTransaction, buildAgentPermissionTransaction, signAgentPermission } from "@/lib/solana/agentSign";
 import type { WalletSession } from "@/lib/solana/wallet";
 
 function permit(state: AppState, minutes = 60, now = Date.now()): AppState {
@@ -114,10 +114,12 @@ describe("grok agent code", () => {
     assert.equal(issued.ok, true);
     if (!issued.ok) return;
     const permitted = permit(issued.state);
+    const owner = permitted.bot.agentSession?.owner ?? "";
+    const delegate = permitted.bot.agentSession?.delegate ?? "";
     const live: AppState = {
       ...permitted,
       config: { ...permitted.config, walletSwaps: true, executionMode: "live" },
-      bot: { ...permitted.bot, running: true, swapBot: "TradingKeyMustStayHidden" },
+      bot: { ...permitted.bot, running: true, swapBot: delegate },
     };
     const reply = await applyAgentCommand(live, {
       code: issued.code,
@@ -125,7 +127,7 @@ describe("grok agent code", () => {
       symbol: "SOL",
       usd: 25,
       price: 100,
-      account: "OwnerWalletPublic",
+      account: owner,
     });
     assert.equal(reply.ok, true);
     if (!reply.ok) return;
@@ -133,10 +135,10 @@ describe("grok agent code", () => {
     assert.equal(reply.state?.positions.length, 0);
     assert.equal(reply.state?.bot.agentOrder?.symbol, "SOL");
     const body = JSON.stringify({ book: reply.book, fill: reply.fill });
-    assert.equal(body.includes("TradingKeyMustStayHidden"), false);
+    assert.equal(body.includes(delegate), false);
     assert.equal(body.includes("codeHash"), false);
     assert.equal(body.includes(issued.code), false);
-    assert.equal(reply.book.account, "OwnerWalletPublic");
+    assert.equal(reply.book.account, owner);
     assert.equal(reply.book.mode, "live");
     assert.equal(reply.book.permission, "on");
     assert.equal(body.includes(live.bot.agentSession?.signature ?? "missing-signature"), false);
@@ -170,6 +172,74 @@ describe("grok agent code", () => {
     if (movedReply.ok) return;
     assert.match(movedReply.error, /does not match/);
     assert.equal(edited.positions.length, 0);
+    const otherWallet = permit(issued.state);
+    const foreign = await applyAgentCommand(otherWallet, {
+      code: issued.code,
+      action: "buy",
+      symbol: "SOL",
+      usd: 10,
+      price: 100,
+      account: Keypair.generate().publicKey.toBase58(),
+    });
+    assert.equal(foreign.ok, false);
+    if (foreign.ok) return;
+    assert.match(foreign.error, /different wallet/);
+    const wrongKey = permit(issued.state);
+    const delegate = wrongKey.bot.agentSession?.delegate ?? "";
+    const mismatched: AppState = {
+      ...wrongKey,
+      config: { ...wrongKey.config, walletSwaps: true, executionMode: "live" },
+      bot: { ...wrongKey.bot, running: true, swapBot: Keypair.generate().publicKey.toBase58() },
+    };
+    const keyReply = await applyAgentCommand(mismatched, {
+      code: issued.code,
+      action: "sell",
+      symbol: "SOL",
+      account: wrongKey.bot.agentSession?.owner,
+    });
+    assert.equal(keyReply.ok, false);
+    if (keyReply.ok) return;
+    assert.match(keyReply.error, /trading key/);
+    assert.notEqual(delegate, mismatched.bot.swapBot);
+    const armed = permit(issued.state);
+    armed.config = { ...armed.config, walletSwaps: true, executionMode: "live", killSwitch: true };
+    armed.bot = { ...armed.bot, running: true, swapBot: armed.bot.agentSession?.delegate ?? null };
+    const killed = await applyAgentCommand(armed, {
+      code: issued.code,
+      action: "buy",
+      symbol: "SOL",
+      usd: 10,
+      price: 100,
+      account: armed.bot.agentSession?.owner,
+    });
+    assert.equal(killed.ok, false);
+    if (killed.ok) return;
+    assert.match(killed.error, /emergency stop/);
+    const waiting = permit(issued.state);
+    waiting.config = { ...waiting.config, walletSwaps: true, executionMode: "live" };
+    waiting.bot = { ...waiting.bot, running: true, swapBot: waiting.bot.agentSession?.delegate ?? null };
+    const first = await applyAgentCommand(waiting, {
+      code: issued.code,
+      action: "buy",
+      symbol: "SOL",
+      usd: 10,
+      price: 100,
+      account: waiting.bot.agentSession?.owner,
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok || !first.state) return;
+    const second = await applyAgentCommand(first.state, {
+      code: issued.code,
+      action: "buy",
+      symbol: "SOL",
+      usd: 10,
+      price: 100,
+      account: waiting.bot.agentSession?.owner,
+    });
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.match(second.error, /already waiting/);
+    assert.equal(first.state.bot.agentOrder?.symbol, "SOL");
   });
 
   it("asks the wallet to sign one transaction for the window the user picked", async () => {
@@ -223,6 +293,33 @@ describe("grok agent code", () => {
     amount.writeBigUInt64LE(BigInt(lamports));
     assert.ok(message.includes(amount));
     assert.equal(signed.signature.includes(bs58.encode(owner.secretKey)), false);
+    const restoredTx = buildAgentPermissionTransaction({
+      owner: owner.publicKey,
+      delegate: delegate.publicKey.toBase58(),
+      expiresAt,
+      blockhash,
+    });
+    restoredTx.sign(owner);
+    const restored = agentGrantFromSignedBytes(restoredTx.serialize(), {
+      owner: owner.publicKey.toBase58(),
+      delegate: delegate.publicKey.toBase58(),
+      expiresAt,
+      minutes: 15,
+      live: false,
+    });
+    assert.equal(restored?.owner, owner.publicKey.toBase58());
+    assert.equal(restored?.minutes, 15);
+    assert.equal(restored ? permissionSignatureMatches(restored) : false, true);
+    assert.equal(
+      agentGrantFromSignedBytes(restoredTx.serialize(), {
+        owner: owner.publicKey.toBase58(),
+        delegate: delegate.publicKey.toBase58(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        minutes: 15,
+        live: false,
+      }),
+      null,
+    );
     const messageOnly = {
       ...session,
       provider: {

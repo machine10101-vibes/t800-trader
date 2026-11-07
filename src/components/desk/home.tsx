@@ -45,6 +45,7 @@ export function Home({
   onRevokeAgentCode,
   onEnableAgent,
   onDisableAgent,
+  walletAddress,
   runner = false,
 }: {
   desk: DeskPayload;
@@ -65,6 +66,7 @@ export function Home({
   onRevokeAgentCode?: (id: string) => Promise<void>;
   onEnableAgent?: (minutes: number) => Promise<{ ok: true } | { ok: false; error: string }>;
   onDisableAgent?: () => Promise<void>;
+  walletAddress?: string | null;
   runner?: boolean;
 }) {
   const [viewState, setViewState] = useState(() => ({
@@ -309,6 +311,8 @@ export function Home({
             onEnable={onEnableAgent}
             onDisable={onDisableAgent}
             live={desk.config.walletSwaps}
+            walletAddress={walletAddress}
+            swapBot={desk.bot.swapBot}
           />
         ) : null}
 
@@ -348,6 +352,8 @@ function GrokAgent({
   onEnable,
   onDisable,
   live = false,
+  walletAddress,
+  swapBot,
 }: {
   grants: Array<{ id: string; label: string; createdAt: string; revokedAt?: string | null }>;
   session?: AgentSession | null;
@@ -357,6 +363,8 @@ function GrokAgent({
   onEnable: (minutes: number) => Promise<{ ok: true } | { ok: false; error: string }>;
   onDisable: () => Promise<void>;
   live?: boolean;
+  walletAddress?: string | null;
+  swapBot?: string | null;
 }) {
   const [code, setCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -371,7 +379,11 @@ function GrokAgent({
     return () => window.clearInterval(id);
   }, []);
   const expiresAt = session?.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
-  const permissionOn = Boolean(session && permissionSignatureMatches(session) && Number.isFinite(expiresAt) && expiresAt > now);
+  const sameWallet = !walletAddress || session?.owner === walletAddress;
+  const sameKey = !live || !swapBot || session?.delegate === swapBot;
+  const permissionOn = Boolean(
+    session && sameWallet && sameKey && permissionSignatureMatches(session) && Number.isFinite(expiresAt) && expiresAt > now,
+  );
   const active = grants.filter((grant) => !grant.revokedAt);
   const endpoint = runnerAgentUrl(localRunnerOrigin());
   const sample = code ?? "YOUR-CODE";
