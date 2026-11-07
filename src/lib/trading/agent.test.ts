@@ -1,27 +1,34 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import nacl from "tweetnacl";
+import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { SOL_MINT } from "@/lib/market/universe";
 import { emptyState } from "@/lib/store";
 import type { AppState } from "@/lib/types";
 import { applyAgentCommand, hashAgentCode, issueAgentGrant, mintAgentCode, normalizeAgentCode, revokeAgentGrant } from "./agent";
-import { agentPermissionMessage, clampAgentMinutes, permissionSignatureMatches } from "./agentPermission";
-import { signAgentPermission } from "@/lib/solana/agentSign";
+import { agentPermissionMemo, clampAgentMinutes, permissionSignatureMatches } from "./agentPermission";
+import { agentSessionFromTransaction, buildAgentPermissionTransaction, signAgentPermission } from "@/lib/solana/agentSign";
 import type { WalletSession } from "@/lib/solana/wallet";
 
 function permit(state: AppState, minutes = 60, now = Date.now()): AppState {
-  const pair = nacl.sign.keyPair();
-  const owner = bs58.encode(pair.publicKey);
+  const owner = Keypair.generate();
+  const delegate = Keypair.generate();
   const expiresAt = new Date(now + minutes * 60_000).toISOString();
-  const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(agentPermissionMessage(owner, expiresAt)), pair.secretKey));
-  return {
-    ...state,
-    bot: {
-      ...state.bot,
-      agentSession: { owner, signedAt: new Date(now).toISOString(), expiresAt, minutes, signature },
-    },
-  };
+  const tx = buildAgentPermissionTransaction({
+    owner: owner.publicKey,
+    delegate: delegate.publicKey.toBase58(),
+    expiresAt,
+    blockhash: Keypair.generate().publicKey.toBase58(),
+  });
+  tx.sign(owner);
+  const agentSession = agentSessionFromTransaction(tx, {
+    owner: owner.publicKey.toBase58(),
+    delegate: delegate.publicKey.toBase58(),
+    expiresAt,
+    minutes,
+  });
+  agentSession.signedAt = new Date(now).toISOString();
+  return { ...state, bot: { ...state.bot, agentSession } };
 }
 
 function book(): AppState {
@@ -156,28 +163,76 @@ describe("grok agent code", () => {
     assert.equal(tampered.ok, false);
     if (tampered.ok) return;
     assert.match(tampered.error, /does not match/);
+    const moved = permit(issued.state);
+    moved.bot.agentSession = { ...moved.bot.agentSession!, delegate: Keypair.generate().publicKey.toBase58() };
+    const movedReply = await applyAgentCommand(moved, { code: issued.code, action: "buy", symbol: "SOL", usd: 10, price: 100 });
+    assert.equal(movedReply.ok, false);
+    if (movedReply.ok) return;
+    assert.match(movedReply.error, /does not match/);
     assert.equal(edited.positions.length, 0);
   });
 
-  it("keeps one wallet signature for the window the user picked", async () => {
-    const pair = nacl.sign.keyPair();
-    const owner = bs58.encode(pair.publicKey);
+  it("asks the wallet to sign one transaction for the window the user picked", async () => {
+    const owner = Keypair.generate();
+    const delegate = Keypair.generate();
     const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    const blockhash = Keypair.generate().publicKey.toBase58();
+    let prompts = 0;
     const session = {
-      address: owner,
+      address: owner.publicKey.toBase58(),
       sol: 0,
       usdc: 0,
       solPriceUsd: null,
       equityUsd: 0,
       provider: {
-        connect: async () => ({ publicKey: { toBase58: () => owner } }),
-        signMessage: async (message: Uint8Array) => ({ signature: nacl.sign.detached(message, pair.secretKey) }),
+        connect: async () => ({ publicKey: { toBase58: () => owner.publicKey.toBase58() } }),
+        signMessage: async () => {
+          throw new Error("A message signature must not authorize the agent.");
+        },
+        signTransaction: async (tx: Transaction) => {
+          prompts += 1;
+          const copy = Transaction.from(
+            (tx as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false }),
+          );
+          copy.sign(owner);
+          return copy;
+        },
       },
     } as WalletSession;
-    const signed = await signAgentPermission(session, expiresAt);
-    assert.equal(signed.owner, owner);
+    const lamports = 50_000_000;
+    const signed = await signAgentPermission(session, expiresAt, {
+      delegate: delegate.publicKey.toBase58(),
+      blockhash,
+      broadcast: false,
+      extraInstructions: [
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: delegate.publicKey,
+          lamports,
+        }),
+      ],
+    });
+    assert.equal(prompts, 1);
+    assert.equal(signed.owner, owner.publicKey.toBase58());
+    assert.equal(signed.delegate, delegate.publicKey.toBase58());
     assert.equal(signed.expiresAt, expiresAt);
     assert.equal(permissionSignatureMatches({ ...signed, minutes: 15 }), true);
-    assert.equal(signed.signature.includes(bs58.encode(pair.secretKey)), false);
+    const message = Buffer.from(signed.message, "base64");
+    assert.ok(message.includes(Buffer.from(agentPermissionMemo(signed.owner, signed.delegate, signed.expiresAt), "utf8")));
+    const amount = Buffer.alloc(8);
+    amount.writeBigUInt64LE(BigInt(lamports));
+    assert.ok(message.includes(amount));
+    assert.equal(signed.signature.includes(bs58.encode(owner.secretKey)), false);
+    const messageOnly = {
+      ...session,
+      provider: {
+        connect: session.provider.connect,
+        signMessage: async () => ({ signature: new Uint8Array(64) }),
+      },
+    } as WalletSession;
+    await assert.rejects(
+      () => signAgentPermission(messageOnly, expiresAt, { delegate: delegate.publicKey.toBase58(), blockhash, broadcast: false }),
+      /transaction/,
+    );
   });
 });

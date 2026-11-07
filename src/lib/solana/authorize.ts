@@ -374,6 +374,57 @@ async function authorizeTradingOnce(session: WalletSession, armFundsUsd: number)
   return { signature, botAddress, reused: false, equityUsd, depositedUsd };
 }
 
+/**
+ * Transfers that let the trading key send swaps, included in the agent transaction.
+ * Empty when that key already holds the arm size, so a later approval does not move more.
+ */
+export async function tradingFloatInstructions(
+  session: WalletSession,
+  bot: PublicKey,
+  armFundsUsd: number,
+): Promise<TransactionInstruction[]> {
+  const held = await readBalances(bot.toBase58()).catch(() => null);
+  noteSolanaBudget(bot.toBase58(), held);
+  if (tradingKeyCoversArm(held, armFundsUsd)) return [];
+  const owner = new PublicKey(session.address);
+  const userChain = await chainHoldings(owner);
+  const sol = Number(userChain.lamports) / 1_000_000_000;
+  const usdc = Number(userChain.usdc) / 1_000_000;
+  const plan = planAuthorization(sol, usdc, {
+    armFundsUsd,
+    alreadyUsdc: held?.usdc ?? 0,
+    alreadyNative: held?.sol ?? 0,
+  });
+  const usdcMint = new PublicKey(USDC_MINT);
+  const solLamports = BigInt(Math.round(plan.solToBot * 1_000_000_000));
+  const wantedUsdc = BigInt(Math.round(plan.usdcToBot * 1_000_000));
+  const usdcUnits = wantedUsdc > 0n ? (wantedUsdc < userChain.usdc ? wantedUsdc : userChain.usdc) : 0n;
+  if (solLamports > 0n) {
+    let overhead = FEE_BUFFER_LAMPORTS;
+    if (usdcUnits > 0n && !(await accountExists(associatedToken(bot, usdcMint)))) {
+      overhead += ATA_RENT_LAMPORTS;
+    }
+    const userKeep = BigInt(Math.round(USER_KEEP_SOL * 1_000_000_000));
+    if (userChain.lamports < solLamports + overhead + userKeep) throw new Error(ARM_SOL_SHORT);
+  }
+  const instructions: TransactionInstruction[] = [];
+  if (solLamports > 0n) {
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: owner,
+        toPubkey: bot,
+        lamports: Number(solLamports),
+      }),
+    );
+  }
+  if (usdcUnits > 0n) {
+    const source = associatedToken(owner, usdcMint);
+    instructions.push(createAtaIdempotent(owner, bot, usdcMint));
+    instructions.push(transferChecked(source, usdcMint, associatedToken(bot, usdcMint), owner, usdcUnits, 6));
+  }
+  return instructions;
+}
+
 /** Send leftover USDC and SOL from the trading key back to the connected wallet. */
 export async function reclaimTrading(ownerAddress: string, keepSol = 0): Promise<string | null> {
   const bot = tradingKeypair(ownerAddress);

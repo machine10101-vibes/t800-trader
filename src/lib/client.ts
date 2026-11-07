@@ -3,9 +3,11 @@ import { armButton, buildDesk, shellDesk, startNeedsLiveSignature } from "@/lib/
 import { armedFundsUsd, stampQuote } from "@/lib/deskSettings";
 import {
   authorizeTrading,
+  loadOrCreateTradingKey,
   reclaimTrading,
   sendTradingProfit,
   tradingBudgetAddress,
+  tradingFloatInstructions,
   tradingKeypair,
   tradingProfitUsd,
   tradingSnapshot as solanaTradingSnapshot,
@@ -474,17 +476,40 @@ export async function revokeSolAgentCode(grantId: string): Promise<AgentGrantVie
   return viewAgentGrants(state);
 }
 
-/** The wallet signs once. Agent trades until `expiresAt` use that permission and do not prompt again. */
+/**
+ * The wallet approves one transaction for the minutes the user picked.
+ * Until that window ends, manual buys and sells do not ask the wallet again.
+ * On real money, the same transaction loads the trading key when it is short.
+ */
 export async function enableSolAgent(session: WalletSession, minutes: number): Promise<DeskPayload> {
   const chosen = clampAgentMinutes(minutes);
   const expiresAt = new Date(Date.now() + chosen * 60_000).toISOString();
-  const signed = await signAgentPermission(session, expiresAt);
+  const book = await loadState("solana");
+  const trader = loadOrCreateTradingKey(session.address);
+  const live = Boolean(book.config.walletSwaps);
+  const funded = live ? await tradingFloatInstructions(session, trader.publicKey, armedFundsUsd(book.config)) : [];
+  const signed = await signAgentPermission(session, expiresAt, {
+    delegate: trader.publicKey.toBase58(),
+    extraInstructions: funded,
+  });
+  const after = live && funded.length ? await readBalances(trader.publicKey.toBase58()).catch(() => null) : null;
   const state = await mutateState((current) => ({
     ...current,
     bot: {
       ...current.bot,
       agentSession: { ...signed, minutes: chosen },
-      lastNote: `AI agent is on for ${chosen} minutes. Trades in this window do not ask the wallet again.`,
+      ...(live
+        ? {
+            swapBot: trader.publicKey.toBase58(),
+            ...(funded.length
+              ? {
+                  swapAuthSignature: signed.signature,
+                  swapPrincipalUsd: current.bot.swapPrincipalUsd ?? after?.equityUsd ?? current.bot.swapPrincipalUsd,
+                }
+              : {}),
+          }
+        : {}),
+      lastNote: `AI agent has full range for manual trading for ${chosen} minutes. The wallet approved that transaction.`,
     },
   }), "solana");
   return shellDesk(state);
@@ -497,7 +522,7 @@ export async function disableSolAgent(): Promise<DeskPayload> {
       ...current.bot,
       agentSession: null,
       agentOrder: null,
-      lastNote: "AI agent permission is off.",
+      lastNote: "AI agent manual trading is off.",
     },
   }), "solana");
   return shellDesk(state);

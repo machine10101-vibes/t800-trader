@@ -5,8 +5,8 @@ import { appliedScanSeconds } from "@/lib/deskSettings";
 import type { CashLeg } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, formatFee, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, resultFees, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
-import type { DeskPayload, Position } from "@/lib/types";
-import { AGENT_PERMISSION_PRESETS, clampAgentMinutes } from "@/lib/trading/agentPermission";
+import type { AgentSession, DeskPayload, Position } from "@/lib/types";
+import { AGENT_PERMISSION_PRESETS, clampAgentMinutes, permissionSignatureMatches } from "@/lib/trading/agentPermission";
 import { localRunnerOrigin, runnerAgentUrl } from "@/lib/trading/runtime";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -308,6 +308,7 @@ export function Home({
             onRevoke={onRevokeAgentCode}
             onEnable={onEnableAgent}
             onDisable={onDisableAgent}
+            live={desk.config.walletSwaps}
           />
         ) : null}
 
@@ -346,14 +347,16 @@ function GrokAgent({
   onRevoke,
   onEnable,
   onDisable,
+  live = false,
 }: {
   grants: Array<{ id: string; label: string; createdAt: string; revokedAt?: string | null }>;
-  session?: { expiresAt: string; minutes: number; signature: string } | null;
+  session?: AgentSession | null;
   busy: boolean;
   onCreate: () => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
   onRevoke: (id: string) => Promise<void>;
   onEnable: (minutes: number) => Promise<{ ok: true } | { ok: false; error: string }>;
   onDisable: () => Promise<void>;
+  live?: boolean;
 }) {
   const [code, setCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -368,7 +371,7 @@ function GrokAgent({
     return () => window.clearInterval(id);
   }, []);
   const expiresAt = session?.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
-  const permissionOn = Number.isFinite(expiresAt) && expiresAt > now;
+  const permissionOn = Boolean(session && permissionSignatureMatches(session) && Number.isFinite(expiresAt) && expiresAt > now);
   const active = grants.filter((grant) => !grant.revokedAt);
   const endpoint = runnerAgentUrl(localRunnerOrigin());
   const sample = code ?? "YOUR-CODE";
@@ -379,8 +382,8 @@ function GrokAgent({
       <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
         Create a code so an AI agent can read this Sol book and place manual buys and sells. The code is shown once.
         This book stores only a hash. It does not reveal the seed or the trading key, and it cannot change settings, the
-        profit address, or withdraw. Enable the agent and the wallet signs once for the window you pick. Trades in that
-        window do not ask the wallet again.
+        profit address, or withdraw. Enable the agent and the wallet approves one transaction for the time you pick.
+        Until that ends, every manual buy and sell goes through without another prompt.
       </p>
       <p className="mt-3 text-xs leading-5 text-[var(--faint)]">
         The agent calls {endpoint} on this computer. Open this desk from {localRunnerOrigin()}/t800-trader/desk/ while
@@ -428,13 +431,17 @@ function GrokAgent({
         Create an agent code
       </button>
       <div className="mt-5 border-t border-[var(--line)] pt-4">
-        <div className="text-sm text-[var(--text)]">Session permission</div>
+        <div className="text-sm text-[var(--text)]">Full range for manual trading</div>
         <p className="mt-1 text-xs leading-5 text-[var(--faint)]">
-          Pick how long this session may trade. The wallet signs that window once. Turning it off ends the permission early.
+          Pick how long the agent may place every manual buy and sell. Enable asks the wallet to approve one transaction
+          for that time. Turning it off ends the window early.
+          {live
+            ? " On real money, that transaction also loads the trading key when it is short, so those swaps can be sent."
+            : " Practice fills stay in this browser. The transaction approves the window and does not move the trading balance."}
         </p>
         {permissionOn ? (
           <div className="mt-3">
-            <div className="text-sm text-[var(--mint)]">On until {formatWhen(session?.expiresAt)}</div>
+            <div className="text-sm text-[var(--mint)]">Full range until {formatWhen(session?.expiresAt)}</div>
             <div className="num mt-1 text-sm text-[var(--amber)]">Ends in {formatRemain(expiresAt - now)}</div>
             <button
               type="button"
@@ -466,7 +473,7 @@ function GrokAgent({
               ))}
             </div>
             <label className="mt-3 block text-xs text-[var(--faint)]">
-              Minutes this session lasts
+              Minutes of full-range manual trading
               <input
                 type="number"
                 min={5}

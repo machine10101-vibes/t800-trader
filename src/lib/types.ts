@@ -424,15 +424,20 @@ export interface AgentGrant {
 }
 
 /**
- * One wallet signature that lets an AI agent trade until `expiresAt`.
- * The signature proves the message. It is not a seed and not the trading key.
+ * One wallet transaction that lets the AI agent place every manual trade until `expiresAt`.
+ * `message` is the signed transaction. It is not a seed and not the trading key.
  */
 export interface AgentSession {
   owner: string;
+  /** Trading key that may send the manual trades in this window. */
+  delegate: string;
   signedAt: string;
   expiresAt: string;
   minutes: number;
+  /** Ed25519 signature over `message`, base58. */
   signature: string;
+  /** Base64 transaction message. The memo inside binds the wallet, the trading key, and the expiry. */
+  message: string;
 }
 
 /** A manual live order waiting for the armed trading key. Practice fills do not use this. */
