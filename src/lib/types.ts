@@ -413,6 +413,27 @@ export interface RestingQuote {
   placedAt: string;
 }
 
+/** A Grok code for manual Solana trades. The code itself is shown once and is not stored. */
+export interface AgentGrant {
+  id: string;
+  /** SHA-256 of the code. */
+  codeHash: string;
+  label: string;
+  createdAt: string;
+  revokedAt?: string | null;
+}
+
+/** A manual live order waiting for the armed trading key. Practice fills do not use this. */
+export interface AgentOrder {
+  id: string;
+  action: "buy" | "sell";
+  symbol: string;
+  mint: string;
+  usd?: number;
+  price?: number;
+  at: string;
+}
+
 export interface BotState {
   running: boolean;
   lastTickAt: string | null;
@@ -437,6 +458,8 @@ export interface BotState {
   swapBot?: string | null;
   /** USD marked on the trading key when it was funded. Cash above this is profit. */
   swapPrincipalUsd?: number | null;
+  /** One manual live order from a Grok agent. The next armed scan sends it. */
+  agentOrder?: AgentOrder | null;
 }
 
 export interface Portfolio {
@@ -515,6 +538,8 @@ export interface AppState {
   equityCurve: EquityPoint[];
   lastSignals: Signal[];
   memory: PlayMemory;
+  /** Solana only. Hashed Grok codes that may place manual trades. */
+  agentGrants?: AgentGrant[];
 }
 
 export interface TapeDot {
@@ -565,4 +590,6 @@ export interface DeskPayload {
   generatedAt: string;
   /** True after LIVE is typed, or after a saved LIVE book is reopened. */
   liveSessionArmed: boolean;
+  /** Solana Grok codes on this book. Hashes stay on the saved book and are not copied here. */
+  agentGrants?: Array<Pick<AgentGrant, "id" | "label" | "createdAt" | "revokedAt">>;
 }

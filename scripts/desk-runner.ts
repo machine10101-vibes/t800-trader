@@ -27,6 +27,7 @@ import {
   resumeSavedBook,
   useDeskStore,
 } from "../src/lib/store";
+import { applyAgentCommand, type AgentCommand } from "../src/lib/trading/agent";
 import { DESK_RUNNER_HOST, DESK_RUNNER_PORT, isDeskApiPath, nextTickWaitMs } from "../src/lib/trading/runtime";
 import type { AppState } from "../src/lib/types";
 
@@ -92,6 +93,45 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, pa
       armed[chain] = Boolean(state?.bot.running);
     }
     send(res, 200, { ok: true, runner: true, port: PORT, armed });
+    return;
+  }
+  if (pathname === "/api/desk/solana/agent") {
+    if (req.method !== "POST") {
+      send(res, 405, { ok: false, error: "POST the Grok code to this address." });
+      return;
+    }
+    let body: AgentCommand = {};
+    try {
+      body = JSON.parse((await readBody(req)) || "{}") as AgentCommand;
+    } catch {
+      send(res, 400, { ok: false, error: "Send JSON with the Grok code." });
+      return;
+    }
+    const asNumber = (value: unknown): number | undefined => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+      return undefined;
+    };
+    const wallet = getActiveWallet("solana");
+    if (!wallet) {
+      send(res, 409, { ok: false, error: "Open the Sol desk on this computer first so there is a book to connect." });
+      return;
+    }
+    const state = await loadState("solana");
+    const reply = await applyAgentCommand(state, {
+      code: typeof body.code === "string" ? body.code : "",
+      action: typeof body.action === "string" ? body.action : "connect",
+      symbol: typeof body.symbol === "string" ? body.symbol : undefined,
+      usd: asNumber(body.usd),
+      price: asNumber(body.price),
+      account: wallet,
+    });
+    if (reply.ok && reply.state) await adoptPostedBook("solana", wallet, reply.state);
+    if (!reply.ok) {
+      send(res, reply.status, { ok: false, error: reply.error });
+      return;
+    }
+    send(res, reply.status, { ok: true, book: reply.book, ...(reply.fill ? { fill: reply.fill } : {}) });
     return;
   }
   if (pathname === "/api/desk/keys" && req.method === "POST") {

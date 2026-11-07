@@ -37,6 +37,15 @@ export function runnerBookUrl(chain: string, origin = ""): string {
   return `${origin}/api/desk/${chain}`;
 }
 
+export function runnerAgentUrl(origin = ""): string {
+  return `${origin}/api/desk/solana/agent`;
+}
+
 export function isDeskApiPath(pathname: string): boolean {
-  return pathname === "/api/desk/status" || pathname === "/api/desk/keys" || /^\/api\/desk\/(solana|cronos)$/.test(pathname);
+  return (
+    pathname === "/api/desk/status" ||
+    pathname === "/api/desk/keys" ||
+    pathname === "/api/desk/solana/agent" ||
+    /^\/api\/desk\/(solana|cronos)$/.test(pathname)
+  );
 }

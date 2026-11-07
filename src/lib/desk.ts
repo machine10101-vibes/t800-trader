@@ -6,6 +6,7 @@ import { loadState, mutateState } from "@/lib/store";
 import { learningReport, studyTape } from "@/lib/trading/learn";
 import { bookStats } from "@/lib/trading/stats";
 import type { AppState, DeskPayload, MarketRegime, TapeCard, TokenCandidate } from "@/lib/types";
+import { viewAgentGrants } from "@/lib/trading/agent";
 import { isLiveSessionArmed } from "@/lib/solana/live-session";
 
 function loadingRegime(): MarketRegime {
@@ -94,6 +95,7 @@ export function shellDesk(
     learning: learningReport(state.memory),
     generatedAt: new Date().toISOString(),
     liveSessionArmed: isLiveSessionArmed(),
+    agentGrants: viewAgentGrants(state),
   };
 }
 
@@ -132,5 +134,6 @@ export async function buildDesk(force = false, chain: ChainId = "solana"): Promi
     learning: learningReport(studied.memory),
     generatedAt: new Date().toISOString(),
     liveSessionArmed: isLiveSessionArmed(),
+    agentGrants: viewAgentGrants(studied),
   };
 }

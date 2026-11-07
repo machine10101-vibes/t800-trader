@@ -26,9 +26,10 @@ import { applyHandClose, isAlreadyFlat } from "@/lib/trading/close";
 import { closePosition, pushEquity } from "@/lib/trading/paper";
 import { takeCronosProfitShare } from "@/lib/cronos/share";
 import { takeSolProfitShare } from "@/lib/solana/share";
-import type { AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
+import type { AgentGrant, AppState, BotConfig, ChainExecutor, DeskPayload } from "@/lib/types";
 import { tickSessionFor } from "@/lib/deskHost";
 import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
+import { issueAgentGrant, revokeAgentGrant, viewAgentGrants } from "@/lib/trading/agent";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
@@ -445,4 +446,28 @@ export async function configureBot(config: Partial<BotConfig>, chain: ChainId = 
 
 export async function loadDesk(force = false, chain: ChainId = "solana"): Promise<DeskPayload> {
   return buildDesk(force, chain);
+}
+
+export type AgentGrantView = Pick<AgentGrant, "id" | "label" | "createdAt" | "revokedAt">;
+
+/** Create a Solana Grok code. The plaintext is returned once and is not written to the book. */
+export async function issueSolAgentCode(): Promise<{ ok: true; code: string; grants: AgentGrantView[] } | { ok: false; error: string }> {
+  let code = "";
+  let error = "";
+  const state = await mutateState(async (current) => {
+    const issued = await issueAgentGrant(current);
+    if (!issued.ok) {
+      error = issued.error;
+      return current;
+    }
+    code = issued.code;
+    return issued.state;
+  }, "solana");
+  if (!code) return { ok: false, error: error || "Could not create a Grok code." };
+  return { ok: true, code, grants: viewAgentGrants(state) };
+}
+
+export async function revokeSolAgentCode(grantId: string): Promise<AgentGrantView[]> {
+  const state = await mutateState((current) => revokeAgentGrant(current, grantId), "solana");
+  return viewAgentGrants(state);
 }

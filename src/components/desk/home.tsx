@@ -6,6 +6,7 @@ import type { CashLeg } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, formatFee, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, resultFees, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
+import { localRunnerOrigin, runnerAgentUrl } from "@/lib/trading/runtime";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import { Pill } from "./bits";
@@ -39,6 +40,8 @@ export function Home({
   onClose,
   onOpenPosition,
   onMore,
+  onCreateAgentCode,
+  onRevokeAgentCode,
   runner = false,
 }: {
   desk: DeskPayload;
@@ -55,6 +58,8 @@ export function Home({
   onClose: (id: string) => void;
   onOpenPosition: (id: string) => void;
   onMore: () => void;
+  onCreateAgentCode?: () => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
+  onRevokeAgentCode?: (id: string) => Promise<void>;
   runner?: boolean;
 }) {
   const [viewState, setViewState] = useState(() => ({
@@ -289,6 +294,15 @@ export function Home({
           )}
         </section>
 
+        {chain === "solana" && onCreateAgentCode && onRevokeAgentCode ? (
+          <GrokAgent
+            grants={desk.agentGrants ?? []}
+            busy={busy}
+            onCreate={onCreateAgentCode}
+            onRevoke={onRevokeAgentCode}
+          />
+        ) : null}
+
         <section className="neon p-5 sm:p-6">
           <h3 className="text-lg font-medium">How the bot trades</h3>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
@@ -313,6 +327,115 @@ export function Home({
         </section>
       </div>
     </div>
+  );
+}
+
+function GrokAgent({
+  grants,
+  busy,
+  onCreate,
+  onRevoke,
+}: {
+  grants: Array<{ id: string; label: string; createdAt: string; revokedAt?: string | null }>;
+  busy: boolean;
+  onCreate: () => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
+  onRevoke: (id: string) => Promise<void>;
+}) {
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const active = grants.filter((grant) => !grant.revokedAt);
+  const endpoint = runnerAgentUrl(localRunnerOrigin());
+  const sample = code ?? "YOUR-CODE";
+
+  return (
+    <section className="neon min-w-0 overflow-hidden p-5 sm:p-6">
+      <h3 className="text-lg font-medium">Grok agent</h3>
+      <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+        Create a code so a Grok agent can read this Sol book and place manual buys and sells. The code is shown once.
+        This book stores only a hash. It does not reveal the seed or the trading key, and it cannot change settings, the
+        profit address, or withdraw. Practice fills now. A real swap waits until this desk is armed, then the next scan
+        sends it through the trading key.
+      </p>
+      <p className="mt-3 text-xs leading-5 text-[var(--faint)]">
+        The agent calls {endpoint} on this computer. Open this desk from {localRunnerOrigin()}/t800-trader/desk/ while
+        the desk runner is up. The published site cannot take the call.
+      </p>
+      {code ? (
+        <div className="mt-4 rounded-[16px] border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">Code, shown once</div>
+          <div className="mt-1 font-mono text-2xl tracking-[0.18em] text-[var(--text)]">{code}</div>
+          <button
+            type="button"
+            className="mt-2 text-sm text-[var(--magenta)] underline-offset-4 hover:underline"
+            onClick={() => {
+              void navigator.clipboard?.writeText(code).then(
+                () => setCopied(true),
+                () => setCopied(false),
+              );
+            }}
+          >
+            {copied ? "Copied" : "Copy code"}
+          </button>
+        </div>
+      ) : null}
+      {error ? <p className="mt-3 text-sm text-[var(--crimson)]">{error}</p> : null}
+      <button
+        type="button"
+        disabled={busy || creating}
+        className="btn btn-ink mt-4"
+        onClick={() => {
+          if (creating) return;
+          setCreating(true);
+          setError(null);
+          setCopied(false);
+          void onCreate()
+            .then((issued) => {
+              if (!issued.ok) {
+                setError(issued.error);
+                return;
+              }
+              setCode(issued.code);
+            })
+            .finally(() => setCreating(false));
+        }}
+      >
+        Create a Grok code
+      </button>
+      {active.length ? (
+        <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
+          {active.map((grant) => (
+            <li key={grant.id} className="flex items-center justify-between gap-3">
+              <span>
+                {grant.label} · created {formatWhen(grant.createdAt)}
+              </span>
+              <button
+                type="button"
+                className="text-[var(--magenta)] underline-offset-4 hover:underline"
+                onClick={() => {
+                  setCode(null);
+                  void onRevoke(grant.id);
+                }}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm text-[var(--muted)]">No Grok code is active.</p>
+      )}
+      <div className="mt-4 overflow-x-auto">
+        <pre className="w-max rounded-[16px] border border-[var(--line)] bg-[var(--panel)] p-3 text-[11px] leading-5 text-[var(--faint)]">
+          {`POST ${endpoint}
+{"code":"${sample}","action":"connect"}
+{"code":"${sample}","action":"buy",
+ "symbol":"SOL","usd":10,"price":180}
+{"code":"${sample}","action":"sell","symbol":"SOL"}`}
+        </pre>
+      </div>
+    </section>
   );
 }
 

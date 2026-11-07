@@ -77,6 +77,14 @@ npm run desk
 
 Open [http://127.0.0.1:8787/t800-trader/](http://127.0.0.1:8787/t800-trader/), connect, and arm from that address. The runner serves `out/` and ticks from `~/.t800-trader` (or `$T800_DATA`). Trading keys stay on that computer. They are not uploaded. Stop the process to stop the bot.
 
+On the Sol desk, **Create a Grok code** shows a one-time code. The book stores only its hash. A Grok agent posts to `http://127.0.0.1:8787/api/desk/solana/agent` on this computer. Practice buys and sells fill immediately. A real swap waits until the desk is armed, then the next scan sends it through the trading key. The code cannot change settings, move the profit address, or withdraw.
+
+```bash
+npx tsx scripts/grok-agent.ts connect K7NP-4QHM
+npx tsx scripts/grok-agent.ts buy K7NP-4QHM SOL 10 180
+npx tsx scripts/grok-agent.ts sell K7NP-4QHM SOL
+```
+
 ```bash
 npm test
 npm run build
