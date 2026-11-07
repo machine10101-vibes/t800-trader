@@ -37,6 +37,7 @@ import {
   type WalletBudget,
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
+import { grokManualSignal, grokOpenOrder } from "./agent";
 import { deskEntrySignals } from "./mtf";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, orderForPosition, signedOnChain, tradeLeverage } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
@@ -158,6 +159,57 @@ export async function tickBot(
       let closed = 0;
       let presetFilled = false;
       const blocked: string[] = [];
+
+      const grok = chain === "solana" ? next.bot.agentOrder : null;
+      if (grok && next.config.walletSwaps && executor && next.bot.running) {
+        next = { ...next, bot: { ...next.bot, agentOrder: null } };
+        if (grok.action === "sell") {
+          const pos = next.positions.find((row) => row.symbol.toUpperCase() === grok.symbol.toUpperCase());
+          if (!pos) {
+            next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: `Grok agent found no ${grok.symbol} to sell` } };
+          } else {
+            const before = next.positions.length;
+            next = await walletExit(next, pos, "manual", executor, blocked, chain);
+            const sold = next.positions.length < before;
+            next = {
+              ...next,
+              bot: {
+                ...next.bot,
+                agentOrder: null,
+                lastNote: sold ? `Grok agent sold ${pos.symbol}` : `Grok agent could not sell ${pos.symbol}`,
+              },
+            };
+            if (sold) closed += 1;
+          }
+        } else {
+          const signal = grokManualSignal(grok, next.config);
+          const quote = grokOpenOrder(grok, next.config);
+          if (!signal || !quote) {
+            next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: `Grok agent buy of ${grok.symbol} was missing a price` } };
+          } else {
+            try {
+              const stamp = await executor(stampQuote(quote, next.config));
+              if (!stamp?.signature) {
+                next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: `Grok agent buy of ${grok.symbol} was not broadcast` } };
+              } else {
+                const opened = openPosition(next, signal, stamp.qty, market.regime.stance, stamp);
+                const filled = opened.positions.length > next.positions.length;
+                next = {
+                  ...opened,
+                  bot: {
+                    ...opened.bot,
+                    agentOrder: null,
+                    lastNote: filled ? `Grok agent bought ${grok.symbol}` : `Grok agent buy of ${grok.symbol} did not fill`,
+                  },
+                };
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Grok agent buy failed";
+              next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: message } };
+            }
+          }
+        }
+      }
 
       if (next.bot.running && market.regime.stance === "defensive") {
         for (const pos of [...next.positions]) {

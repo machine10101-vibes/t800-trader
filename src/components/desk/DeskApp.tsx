@@ -28,6 +28,8 @@ import {
   tradingProfitUsd,
   tradingSnapshot,
   withdrawTradingProfit,
+  issueSolAgentCode,
+  revokeSolAgentCode,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
@@ -1238,6 +1240,24 @@ function ChainDesk({
                   onClose={(id) => void closePos(id)}
                   onOpenPosition={setDetailId}
                   onMore={() => setTab("risk")}
+                  onCreateAgentCode={async () => {
+                    const issued = await issueSolAgentCode();
+                    if (!issued.ok) return issued;
+                    setDesk((cur) => (cur && chain === "solana" ? { ...cur, agentGrants: issued.grants } : cur));
+                    const address = getActiveWallet("solana");
+                    if (address) {
+                      void loadState("solana").then((book) => publishDeskBook("solana", address, book));
+                    }
+                    return { ok: true as const, code: issued.code };
+                  }}
+                  onRevokeAgentCode={async (grantId) => {
+                    const grants = await revokeSolAgentCode(grantId);
+                    setDesk((cur) => (cur && chain === "solana" ? { ...cur, agentGrants: grants } : cur));
+                    const address = getActiveWallet("solana");
+                    if (address) {
+                      void loadState("solana").then((book) => publishDeskBook("solana", address, book));
+                    }
+                  }}
                   runner={runnerHost}
                 />
               ) : null}

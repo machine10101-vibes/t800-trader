@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isDeskApiPath, nextTickWaitMs, runnerBookUrl, runnerStatusUrl, shouldBrowserTick } from "./runtime";
+import { isDeskApiPath, nextTickWaitMs, runnerAgentUrl, runnerBookUrl, runnerStatusUrl, shouldBrowserTick } from "./runtime";
 
 describe("desk runtime", () => {
   it("waits the scan interval and checks live tickets sooner", () => {
@@ -37,5 +37,8 @@ describe("desk runtime", () => {
     assert.equal(isDeskApiPath("/api/desk/solana"), true);
     assert.equal(isDeskApiPath("/api/desk/keys"), true);
     assert.equal(isDeskApiPath("/api/desk/ethereum"), false);
+    assert.equal(runnerAgentUrl("http://127.0.0.1:8787"), "http://127.0.0.1:8787/api/desk/solana/agent");
+    assert.equal(isDeskApiPath("/api/desk/solana/agent"), true);
+    assert.equal(isDeskApiPath("/api/desk/cronos/agent"), false);
   });
 });
