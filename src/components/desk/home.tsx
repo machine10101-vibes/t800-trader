@@ -6,6 +6,7 @@ import type { CashLeg } from "@/lib/cashHoldings";
 import { alwaysOnNote, botActivity, exitWords, formatFee, formatRemain, formatWhen, homeResults, homeStatus, openedAtFor, planRules, progressToGoal, resultFees, visibleActivity, type ActivityItem } from "@/lib/home";
 import { leadingTokenSymbol } from "@/lib/market/logos";
 import type { DeskPayload, Position } from "@/lib/types";
+import { AGENT_PERMISSION_PRESETS, clampAgentMinutes } from "@/lib/trading/agentPermission";
 import { localRunnerOrigin, runnerAgentUrl } from "@/lib/trading/runtime";
 import { pct, priceFmt, usd } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -42,6 +43,8 @@ export function Home({
   onMore,
   onCreateAgentCode,
   onRevokeAgentCode,
+  onEnableAgent,
+  onDisableAgent,
   runner = false,
 }: {
   desk: DeskPayload;
@@ -60,6 +63,8 @@ export function Home({
   onMore: () => void;
   onCreateAgentCode?: () => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
   onRevokeAgentCode?: (id: string) => Promise<void>;
+  onEnableAgent?: (minutes: number) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onDisableAgent?: () => Promise<void>;
   runner?: boolean;
 }) {
   const [viewState, setViewState] = useState(() => ({
@@ -294,12 +299,15 @@ export function Home({
           )}
         </section>
 
-        {chain === "solana" && onCreateAgentCode && onRevokeAgentCode ? (
+        {chain === "solana" && onCreateAgentCode && onRevokeAgentCode && onEnableAgent && onDisableAgent ? (
           <GrokAgent
             grants={desk.agentGrants ?? []}
+            session={desk.bot.agentSession}
             busy={busy}
             onCreate={onCreateAgentCode}
             onRevoke={onRevokeAgentCode}
+            onEnable={onEnableAgent}
+            onDisable={onDisableAgent}
           />
         ) : null}
 
@@ -332,31 +340,47 @@ export function Home({
 
 function GrokAgent({
   grants,
+  session,
   busy,
   onCreate,
   onRevoke,
+  onEnable,
+  onDisable,
 }: {
   grants: Array<{ id: string; label: string; createdAt: string; revokedAt?: string | null }>;
+  session?: { expiresAt: string; minutes: number; signature: string } | null;
   busy: boolean;
   onCreate: () => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
   onRevoke: (id: string) => Promise<void>;
+  onEnable: (minutes: number) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onDisable: () => Promise<void>;
 }) {
   const [code, setCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [enabling, setEnabling] = useState(false);
+  const [minutesText, setMinutesText] = useState("60");
+  const minutes = clampAgentMinutes(Number(minutesText));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const expiresAt = session?.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
+  const permissionOn = Number.isFinite(expiresAt) && expiresAt > now;
   const active = grants.filter((grant) => !grant.revokedAt);
   const endpoint = runnerAgentUrl(localRunnerOrigin());
   const sample = code ?? "YOUR-CODE";
 
   return (
     <section className="neon min-w-0 overflow-hidden p-5 sm:p-6">
-      <h3 className="text-lg font-medium">Grok agent</h3>
+      <h3 className="text-lg font-medium">AI agent</h3>
       <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-        Create a code so a Grok agent can read this Sol book and place manual buys and sells. The code is shown once.
+        Create a code so an AI agent can read this Sol book and place manual buys and sells. The code is shown once.
         This book stores only a hash. It does not reveal the seed or the trading key, and it cannot change settings, the
-        profit address, or withdraw. Practice fills now. A real swap waits until this desk is armed, then the next scan
-        sends it through the trading key.
+        profit address, or withdraw. Enable the agent and the wallet signs once for the window you pick. Trades in that
+        window do not ask the wallet again.
       </p>
       <p className="mt-3 text-xs leading-5 text-[var(--faint)]">
         The agent calls {endpoint} on this computer. Open this desk from {localRunnerOrigin()}/t800-trader/desk/ while
@@ -401,8 +425,77 @@ function GrokAgent({
             .finally(() => setCreating(false));
         }}
       >
-        Create a Grok code
+        Create an agent code
       </button>
+      <div className="mt-5 border-t border-[var(--line)] pt-4">
+        <div className="text-sm text-[var(--text)]">Session permission</div>
+        <p className="mt-1 text-xs leading-5 text-[var(--faint)]">
+          Pick how long this session may trade. The wallet signs that window once. Turning it off ends the permission early.
+        </p>
+        {permissionOn ? (
+          <div className="mt-3">
+            <div className="text-sm text-[var(--mint)]">On until {formatWhen(session?.expiresAt)}</div>
+            <div className="num mt-1 text-sm text-[var(--amber)]">Ends in {formatRemain(expiresAt - now)}</div>
+            <button
+              type="button"
+              className="btn btn-ink mt-3"
+              disabled={busy}
+              onClick={() => {
+                void onDisable();
+              }}
+            >
+              Turn off
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3">
+            <div className="flex flex-wrap gap-2">
+              {AGENT_PERMISSION_PRESETS.map((preset) => (
+                <button
+                  key={preset.minutes}
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    minutes === preset.minutes
+                      ? "border-[var(--magenta)] text-[var(--text)]"
+                      : "border-[var(--line)] text-[var(--muted)]"
+                  }`}
+                  onClick={() => setMinutesText(String(preset.minutes))}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <label className="mt-3 block text-xs text-[var(--faint)]">
+              Minutes this session lasts
+              <input
+                type="number"
+                min={5}
+                max={72 * 60}
+                value={minutesText}
+                onChange={(event) => setMinutesText(event.target.value)}
+                className="num mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-sm text-[var(--text)] outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-ink mt-3"
+              disabled={busy || enabling}
+              onClick={() => {
+                if (enabling) return;
+                setEnabling(true);
+                setError(null);
+                void onEnable(clampAgentMinutes(minutes))
+                  .then((result) => {
+                    if (!result.ok) setError(result.error);
+                  })
+                  .finally(() => setEnabling(false));
+              }}
+            >
+              {enabling ? "Waiting for the wallet…" : "Enable AI agent"}
+            </button>
+          </div>
+        )}
+      </div>
       {active.length ? (
         <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
           {active.map((grant) => (
@@ -424,7 +517,7 @@ function GrokAgent({
           ))}
         </ul>
       ) : (
-        <p className="mt-4 text-sm text-[var(--muted)]">No Grok code is active.</p>
+        <p className="mt-4 text-sm text-[var(--muted)]">No agent code is active.</p>
       )}
       <div className="mt-4 overflow-x-auto">
         <pre className="w-max rounded-[16px] border border-[var(--line)] bg-[var(--panel)] p-3 text-[11px] leading-5 text-[var(--faint)]">

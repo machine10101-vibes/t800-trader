@@ -423,6 +423,18 @@ export interface AgentGrant {
   revokedAt?: string | null;
 }
 
+/**
+ * One wallet signature that lets an AI agent trade until `expiresAt`.
+ * The signature proves the message. It is not a seed and not the trading key.
+ */
+export interface AgentSession {
+  owner: string;
+  signedAt: string;
+  expiresAt: string;
+  minutes: number;
+  signature: string;
+}
+
 /** A manual live order waiting for the armed trading key. Practice fills do not use this. */
 export interface AgentOrder {
   id: string;
@@ -458,8 +470,10 @@ export interface BotState {
   swapBot?: string | null;
   /** USD marked on the trading key when it was funded. Cash above this is profit. */
   swapPrincipalUsd?: number | null;
-  /** One manual live order from a Grok agent. The next armed scan sends it. */
+  /** One manual live order from an AI agent. The next armed scan sends it. */
   agentOrder?: AgentOrder | null;
+  /** Wallet permission for agent trades. Missing means the agent cannot trade. */
+  agentSession?: AgentSession | null;
 }
 
 export interface Portfolio {

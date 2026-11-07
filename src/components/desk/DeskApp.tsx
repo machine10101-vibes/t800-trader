@@ -30,6 +30,8 @@ import {
   withdrawTradingProfit,
   issueSolAgentCode,
   revokeSolAgentCode,
+  enableSolAgent,
+  disableSolAgent,
 } from "@/lib/client";
 import { isDeskShortcutTarget } from "@/lib/deskKeys";
 import { detectDeskRunner, publishDeskBook, pullDeskBook } from "@/lib/deskHost";
@@ -48,7 +50,7 @@ import { croHoldings, formatCro } from "@/lib/cronos/balance";
 import { cronosWalletInstalled } from "@/lib/cronos/wallet";
 import { dashPayInstalled, parseNearAccount } from "@/lib/dash/wallet";
 import { connectDesk, detectedDeskWallet, disconnectDesk, listenDesk, refreshDesk, type DeskSession } from "@/lib/chains/session";
-import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage } from "@/lib/solana/wallet";
+import { forgetPhantomApproval, injectedSolanaAddress, isOpenPhantomApp, resumeStage, type WalletSession } from "@/lib/solana/wallet";
 import type { BotConfig, Candle, DeskPayload, Position, ResearchThesis } from "@/lib/types";
 import { pct, priceFmt, shortAddress, usd } from "@/lib/utils";
 import Link from "next/link";
@@ -1257,6 +1259,26 @@ function ChainDesk({
                     if (address) {
                       void loadState("solana").then((book) => publishDeskBook("solana", address, book));
                     }
+                  }}
+                  onEnableAgent={async (minutes) => {
+                    if (chain !== "solana" || !wallet || !("provider" in wallet)) {
+                      return { ok: false as const, error: "Connect the Solana wallet before enabling the agent." };
+                    }
+                    try {
+                      const next = await enableSolAgent(wallet as WalletSession, minutes);
+                      setDesk(next);
+                      const address = getActiveWallet("solana");
+                      if (address) void loadState("solana").then((book) => publishDeskBook("solana", address, book));
+                      return { ok: true as const };
+                    } catch (error) {
+                      return { ok: false as const, error: error instanceof Error ? error.message : "Could not enable the agent." };
+                    }
+                  }}
+                  onDisableAgent={async () => {
+                    const next = await disableSolAgent();
+                    setDesk(next);
+                    const address = getActiveWallet("solana");
+                    if (address) void loadState("solana").then((book) => publishDeskBook("solana", address, book));
                   }}
                   runner={runnerHost}
                 />
