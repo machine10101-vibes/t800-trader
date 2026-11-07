@@ -38,6 +38,7 @@ import {
 } from "./risk";
 import { closePosition, findQuote, flattenBook, markBook, marksForOpen, openPosition, pushEquity, scaleOut, updateStop } from "./paper";
 import { grokManualSignal, grokOpenOrder } from "./agent";
+import { agentPermissionBlock } from "./agentPermission";
 import { deskEntrySignals } from "./mtf";
 import { PERP_MIN_COLLATERAL_USD, leveragedTicket, orderForPosition, signedOnChain, tradeLeverage } from "./leverage";
 import { bracketQuiet, bracketQuietUntil, isAlreadyFlat, reentryBlocked, reentryHold, reentryNote } from "./close";
@@ -161,7 +162,10 @@ export async function tickBot(
       const blocked: string[] = [];
 
       const grok = chain === "solana" ? next.bot.agentOrder : null;
-      if (grok && next.config.walletSwaps && executor && next.bot.running) {
+      const grokPermission = grok ? agentPermissionBlock(next) : null;
+      if (grok && grokPermission) {
+        next = { ...next, bot: { ...next.bot, agentOrder: null, lastNote: grokPermission } };
+      } else if (grok && next.config.walletSwaps && executor && next.bot.running) {
         next = { ...next, bot: { ...next.bot, agentOrder: null } };
         if (grok.action === "sell") {
           const pos = next.positions.find((row) => row.symbol.toUpperCase() === grok.symbol.toUpperCase());

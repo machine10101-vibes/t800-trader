@@ -1,6 +1,7 @@
 import { WATCHLIST, type WatchToken } from "@/lib/market/universe";
 import type { AgentGrant, AgentOrder, AppState, BotConfig, ChainOrder, Signal } from "@/lib/types";
 import { id } from "@/lib/utils";
+import { agentPermissionBlock } from "./agentPermission";
 import { closePosition, openPosition } from "./paper";
 import { MIN_TICKET_USD } from "./risk";
 
@@ -24,6 +25,9 @@ export interface AgentBook {
     entryPrice: number;
     markPrice: number;
   }>;
+  /** On while the wallet's signed window has not ended. */
+  permission: "on" | "off";
+  permissionUntil?: string;
   note: string;
 }
 
@@ -148,6 +152,7 @@ export function revokeAgentGrant(state: AppState, grantId: string, now = new Dat
 function bookOf(state: AppState, account: string | undefined, note: string): AgentBook {
   const live = Boolean(state.config.walletSwaps);
   const armed = Boolean(live && state.bot.swapBot);
+  const permissionOn = agentPermissionBlock(state) === null;
   return {
     chain: "solana",
     mode: live ? "live" : "paper",
@@ -164,6 +169,8 @@ function bookOf(state: AppState, account: string | undefined, note: string): Age
       entryPrice: pos.entryPrice,
       markPrice: pos.markPrice,
     })),
+    permission: permissionOn ? "on" : "off",
+    ...(state.bot.agentSession?.expiresAt ? { permissionUntil: state.bot.agentSession.expiresAt } : {}),
     note,
   };
 }
@@ -202,16 +209,21 @@ export async function applyAgentCommand(state: AppState, command: AgentCommand):
   if (action === "connect") {
     const live = Boolean(state.config.walletSwaps);
     const armed = Boolean(live && state.bot.swapBot);
-    const note = !live
-      ? "Connected. Buys and sells on this practice book fill now."
-      : armed && state.bot.running
-        ? "Connected. A buy or sell is sent through the armed trading key on the next scan."
-        : "Connected. Arm and start the Sol desk before a real swap can be sent.";
+    const permission = agentPermissionBlock(state);
+    const note = permission
+      ? permission
+      : !live
+        ? "Connected. Buys and sells in this signed window fill now and do not ask the wallet again."
+        : armed && state.bot.running
+          ? "Connected. A buy or sell in this signed window is sent through the trading key without another wallet prompt."
+          : "Connected. Arm and start the Sol desk once. Agent trades in this signed window do not ask the wallet again.";
     return { ok: true, status: 200, book: bookOf(state, command.account, note) };
   }
 
   const token = solanaWatch(command.symbol ?? "");
   if (!token) return fail(400, "That symbol is not on the Solana watchlist.");
+  const permission = agentPermissionBlock(state);
+  if (permission) return fail(403, permission);
   const held = state.positions.find((pos) => pos.symbol.toUpperCase() === token.symbol);
 
   if (action === "sell") {

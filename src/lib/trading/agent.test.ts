@@ -1,9 +1,28 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
 import { SOL_MINT } from "@/lib/market/universe";
 import { emptyState } from "@/lib/store";
 import type { AppState } from "@/lib/types";
 import { applyAgentCommand, hashAgentCode, issueAgentGrant, mintAgentCode, normalizeAgentCode, revokeAgentGrant } from "./agent";
+import { agentPermissionMessage, clampAgentMinutes, permissionSignatureMatches } from "./agentPermission";
+import { signAgentPermission } from "@/lib/solana/agentSign";
+import type { WalletSession } from "@/lib/solana/wallet";
+
+function permit(state: AppState, minutes = 60, now = Date.now()): AppState {
+  const pair = nacl.sign.keyPair();
+  const owner = bs58.encode(pair.publicKey);
+  const expiresAt = new Date(now + minutes * 60_000).toISOString();
+  const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(agentPermissionMessage(owner, expiresAt)), pair.secretKey));
+  return {
+    ...state,
+    bot: {
+      ...state.bot,
+      agentSession: { owner, signedAt: new Date(now).toISOString(), expiresAt, minutes, signature },
+    },
+  };
+}
 
 function book(): AppState {
   const state = emptyState();
@@ -44,7 +63,7 @@ describe("grok agent code", () => {
     const issued = await issueAgentGrant(book());
     assert.equal(issued.ok, true);
     if (!issued.ok) return;
-    const bought = await applyAgentCommand(issued.state, {
+    const bought = await applyAgentCommand(permit(issued.state), {
       code: issued.code,
       action: "buy",
       symbol: "sol",
@@ -87,10 +106,11 @@ describe("grok agent code", () => {
     const issued = await issueAgentGrant(book());
     assert.equal(issued.ok, true);
     if (!issued.ok) return;
+    const permitted = permit(issued.state);
     const live: AppState = {
-      ...issued.state,
-      config: { ...issued.state.config, walletSwaps: true, executionMode: "live" },
-      bot: { ...issued.state.bot, running: true, swapBot: "TradingKeyMustStayHidden" },
+      ...permitted,
+      config: { ...permitted.config, walletSwaps: true, executionMode: "live" },
+      bot: { ...permitted.bot, running: true, swapBot: "TradingKeyMustStayHidden" },
     };
     const reply = await applyAgentCommand(live, {
       code: issued.code,
@@ -111,5 +131,53 @@ describe("grok agent code", () => {
     assert.equal(body.includes(issued.code), false);
     assert.equal(reply.book.account, "OwnerWalletPublic");
     assert.equal(reply.book.mode, "live");
+    assert.equal(reply.book.permission, "on");
+    assert.equal(body.includes(live.bot.agentSession?.signature ?? "missing-signature"), false);
+  });
+
+  it("refuses a trade when the signed window is missing, expired, or edited", async () => {
+    assert.equal(clampAgentMinutes(1), 5);
+    assert.equal(clampAgentMinutes(10_000), 72 * 60);
+    const issued = await issueAgentGrant(book());
+    assert.equal(issued.ok, true);
+    if (!issued.ok) return;
+    const closed = await applyAgentCommand(issued.state, { code: issued.code, action: "buy", symbol: "SOL", usd: 10, price: 100 });
+    assert.equal(closed.ok, false);
+    if (closed.ok) return;
+    assert.equal(closed.status, 403);
+    const stale = permit(issued.state, 60, Date.now() - 2 * 60 * 60_000);
+    const expired = await applyAgentCommand(stale, { code: issued.code, action: "sell", symbol: "SOL" });
+    assert.equal(expired.ok, false);
+    if (expired.ok) return;
+    assert.match(expired.error, /ended/);
+    const edited = permit(issued.state);
+    edited.bot.agentSession = { ...edited.bot.agentSession!, expiresAt: new Date(Date.now() + 86_400_000).toISOString() };
+    const tampered = await applyAgentCommand(edited, { code: issued.code, action: "buy", symbol: "SOL", usd: 10, price: 100 });
+    assert.equal(tampered.ok, false);
+    if (tampered.ok) return;
+    assert.match(tampered.error, /does not match/);
+    assert.equal(edited.positions.length, 0);
+  });
+
+  it("keeps one wallet signature for the window the user picked", async () => {
+    const pair = nacl.sign.keyPair();
+    const owner = bs58.encode(pair.publicKey);
+    const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    const session = {
+      address: owner,
+      sol: 0,
+      usdc: 0,
+      solPriceUsd: null,
+      equityUsd: 0,
+      provider: {
+        connect: async () => ({ publicKey: { toBase58: () => owner } }),
+        signMessage: async (message: Uint8Array) => ({ signature: nacl.sign.detached(message, pair.secretKey) }),
+      },
+    } as WalletSession;
+    const signed = await signAgentPermission(session, expiresAt);
+    assert.equal(signed.owner, owner);
+    assert.equal(signed.expiresAt, expiresAt);
+    assert.equal(permissionSignatureMatches({ ...signed, minutes: 15 }), true);
+    assert.equal(signed.signature.includes(bs58.encode(pair.secretKey)), false);
   });
 });

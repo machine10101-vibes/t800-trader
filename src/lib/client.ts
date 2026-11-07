@@ -30,6 +30,8 @@ import type { AgentGrant, AppState, BotConfig, ChainExecutor, DeskPayload } from
 import { tickSessionFor } from "@/lib/deskHost";
 import { armLiveSession, disarmLiveSession, resumeLiveSession } from "@/lib/solana/live-session";
 import { issueAgentGrant, revokeAgentGrant, viewAgentGrants } from "@/lib/trading/agent";
+import { clampAgentMinutes } from "@/lib/trading/agentPermission";
+import { signAgentPermission } from "@/lib/solana/agentSign";
 
 export { adoptLiveEquity, attachWallet, detachWallet, getActiveWallet, armButton, shellDesk, startNeedsLiveSignature, tradingProfitUsd };
 
@@ -470,4 +472,33 @@ export async function issueSolAgentCode(): Promise<{ ok: true; code: string; gra
 export async function revokeSolAgentCode(grantId: string): Promise<AgentGrantView[]> {
   const state = await mutateState((current) => revokeAgentGrant(current, grantId), "solana");
   return viewAgentGrants(state);
+}
+
+/** The wallet signs once. Agent trades until `expiresAt` use that permission and do not prompt again. */
+export async function enableSolAgent(session: WalletSession, minutes: number): Promise<DeskPayload> {
+  const chosen = clampAgentMinutes(minutes);
+  const expiresAt = new Date(Date.now() + chosen * 60_000).toISOString();
+  const signed = await signAgentPermission(session, expiresAt);
+  const state = await mutateState((current) => ({
+    ...current,
+    bot: {
+      ...current.bot,
+      agentSession: { ...signed, minutes: chosen },
+      lastNote: `AI agent is on for ${chosen} minutes. Trades in this window do not ask the wallet again.`,
+    },
+  }), "solana");
+  return shellDesk(state);
+}
+
+export async function disableSolAgent(): Promise<DeskPayload> {
+  const state = await mutateState((current) => ({
+    ...current,
+    bot: {
+      ...current.bot,
+      agentSession: null,
+      agentOrder: null,
+      lastNote: "AI agent permission is off.",
+    },
+  }), "solana");
+  return shellDesk(state);
 }
